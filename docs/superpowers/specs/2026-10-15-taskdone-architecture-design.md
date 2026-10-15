@@ -3,10 +3,10 @@
 | 项 | 值 |
 |---|---|
 | 产品名 | OffEarly（中文：早下班） |
-| 文档版本 | v1.2 |
+| 文档版本 | v1.3 |
 | 日期 | 2026-10-15 |
-| 状态 | 待评审 |
-| 交付边界 | 仅架构设计文档（不含实现） |
+| 状态 | 设计已确认，按 `task.md` 分期实现中 |
+| 交付边界 | 架构设计文档 + 分期实现（任务拆分与状态同步见 `task.md`） |
 | 效果图 | `docs/design/01-board-layout.png` … `04-card-closeup-recommended.png` |
 
 ---
@@ -189,7 +189,23 @@ interface WorkCalendar {
   holidays: string[]       // 额外休息日
   extraWorkdays: string[]  // 补班日
 }
+
+type Status = 'todo' | 'doing' | 'review' | 'done'
+type Kind = 'feature' | 'bug' | 'chore' | 'research' | 'doc'
+type Priority = 'P0' | 'P1' | 'P2' | 'P3'
+
+// T03 落实：原以注释描述的 Settings 显式化为类型
+interface Settings {
+  boardColumns: Status[]            // 看板列定义：固定四状态的可见顺序，不允许新增状态
+  calendar: WorkCalendar            // 工作日历
+  ganttScale: 'day' | 'week'        // 甘特图默认刻度
+  theme: 'light'                    // 主题：当前仅浅色（深色不在本期）
+  locale: 'zh' | 'en' | 'auto'      // 语言，auto 读 navigator.language
+  lastFilter: Filter | null         // 上次筛选，结构见 6.2
+}
 ```
+
+`settings` 及其每个字段在 Schema 层都带默认值：用户手改 `vault.json` 时最常漏掉的就是设置项，缺失即补默认，不报错；其余字段一律必填，缺失或枚举越界直接拒绝加载。日期字段区分两类：`start/due/holidays` 必须是真实存在的 `YYYY-MM-DD`，`createdAt/updatedAt` 必须是 ISO8601 时间戳。
 
 ### 4.3 四个刻意的决定
 

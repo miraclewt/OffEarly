@@ -82,7 +82,7 @@ tests/**                         与 src 镜像
 
 ### Phase 1 · 工程基座
 - [x] **T02** Vite + TS + singlefile(iife) 构建管线与空壳产物 → done (2026-10-15, qoder:sess-1015a, commit: "T02: build pipeline")
-- [ ] **T03** 领域类型 + Zod Schema + 迁移管线 → pending
+- [x] **T03** 领域类型 + Zod Schema + 迁移管线 → done (2026-10-15, qoder:sess-1015a, commit: "T03: domain types + zod schema + migration pipeline")
 - [ ] **T04** i18n 基座（zh/en 消息表 + t() + locale 切换） → pending
 - [ ] **T05** IconSprite 线性图标集 + 禁 emoji lint → pending
 
@@ -180,11 +180,17 @@ tests/**                         与 src 镜像
 **产出：** `src/domain/types.ts` `src/domain/schema.ts` `tests/domain/schema.test.ts`
 
 **验收标准：**
-- [ ] types.ts 定义 Vault/Topic/Task/Dependency/Milestone/Asset/Settings/WorkCalendar/Filter，字段与 spec 4.2 完全一致（status 仅四值；Task.archived 独立于 status）
-- [ ] schema.ts 用 Zod 镜像全部类型；`VaultSchema.parse` 对合法样本通过、对缺字段/错枚举抛错
-- [ ] 迁移管线 `migrate(raw): Vault` 支持 `schemaVersion` 链式升级；迁移前返回需备份标记
-- [ ] 单测覆盖：合法往返、缺字段报错、错枚举报错、v1→v2 迁移函数被调用（以假迁移注册验证）
-- [ ] 单测全绿并提交
+- [x] types.ts 定义 Vault/Topic/Task/Dependency/Milestone/Asset/Settings/WorkCalendar/Filter，字段与 spec 4.2 完全一致（status 仅四值；Task.archived 独立于 status）
+- [x] schema.ts 用 Zod 镜像全部类型；`VaultSchema.parse` 对合法样本通过、对缺字段/错枚举抛错
+- [x] 迁移管线 `migrate(raw): Vault` 支持 `schemaVersion` 链式升级；迁移前返回需备份标记（`needsMigration(raw)`）
+- [x] 单测覆盖：合法往返、缺字段报错、错枚举报错、v1→v2 迁移函数被调用（以假迁移注册验证）
+- [x] 单测全绿并提交（19 passed / `tsc --noEmit` 无错 / `npm run build` 仍产出单文件）
+
+**实测证据：** `npx vitest run` → `Test Files 1 passed (1) / Tests 19 passed (19)`；`npx tsc --noEmit` 零输出；`npm run build` → `dist/OffEarly.html` 220.54 kB。
+
+**变更提议（越界清单，已实施并记录）**：为使单测被类型检查覆盖并一条命令可跑，改动了 T02 的两个文件 —— `tsconfig.json` 的 `include` 增加 `"tests"`，`package.json` 增加 `"test": "vitest run"`；`schema.ts` 内的 `SchemaAlignment` 编译期断言依赖前者才会在 `npm run build` 中生效。
+
+**实施注记（T03 发现）**：spec 4.2 只用注释描述 `settings`，落地时必须显式化，已把 `Settings` 与 `Status/Kind/Priority` 别名写进 spec 4.2（文档版本升到 v1.3）。校验语义取「settings 子树带默认值、其余一律必填」：用户手改 `vault.json` 最常漏设置项，缺失补默认；结构缺失或枚举越界直接拒绝加载，不静默修补。日期分两类，`z.iso.date()` 会拒 `2026-02-30` 这类伪日期，时间戳用 `z.iso.datetime({ offset: true })` 以容忍带时区的历史文件。迁移链以 `MigrationChain = Record<number, MigrationStep>` 注入 `applyMigrations`，因此测试可用假迁移验证链式升级，而不必真的把 `CURRENT_SCHEMA_VERSION` 顶高；`migrate` 迁移后仍跑 `VaultSchema.parse`，坏产物不会放行。`schema.ts` 内 `SchemaAlignment` 用条件类型恒等式逐实体断言 `Equal<types 声明, z.infer<schema>>`，字段漂移在编译期失败。实际版本 zod 4.6.7 / vitest 5.0.4（沿用 T02「取注册表当前稳定版」的结论）。
 
 **预估：** 1d
 
@@ -748,3 +754,5 @@ tests/**                         与 src 镜像
 - [2026-10-15] T01 | agent: qoder:sess-1015a | commit: 进行中 | 验收: 自动化项 R2/R3/R5 全部 PASS，环境探测确认 `file://` 下 `isSecureContext=true` 且 `showDirectoryPicker`/`showOpenFilePicker`/`createWritable` 均存在 | 遗留: R1/R4/R6 需用户手势，须在真实企业 Edge 中打开 `spike.html` 点击运行；内置浏览器（Electron 43 / Chrome 150）与企业 Edge 的 `file://` 策略可能存在差异，故 R1 未复验前不启动 T06 | 备注: 实测数据已回填 spec 第 11.1 节
 
 - [2026-10-15] T02 | agent: qoder:sess-1015a | commit: "T02: build pipeline" | 验收: 全部通过 | 备注: 产物 `dist/OffEarly.html` 216KB 单文件，`file://` 下实测渲染成功且控制台零消息；发现并修复 singlefile 保留 `type="module"` 的坑（新增 `finalizeSingleFile()` 插件）；实际版本 Vite 8.3.4 / React 19.3.1 / TS 7.0.2，spec 同步至 v1.2 | 遗留: 无
+
+- [2026-10-15] T03 | agent: qoder:sess-1015a | commit: "T03: domain types + zod schema + migration pipeline" | 验收: 全部通过 | 备注: `npx vitest run` 19/19 绿，`npx tsc --noEmit` 零错，`npm run build` 仍产出单文件 `dist/OffEarly.html`（type=module 0 / 外链 0 / http 引用 0，T02 不变式复测通过）；spec 4.2 补写 `Settings` 显式类型与 `Status/Kind/Priority` 别名，文档版本 v1.3；依赖新增 zod 4.6.7（runtime）、vitest 5.0.4（dev） | 越界改动: `tsconfig.json` include 增 `"tests"`、`package.json` 增 `test` 脚本（见 T03 变更提议） | 遗留: `src/domain/*` 尚未被应用代码引用，产物体积不变，接线在 T07/T10；`progress` 与 `status=done` 的联动约束属领域规则，留给 T10 CommandBus 强制，schema 只校验 0-100 区间
