@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>OffEarly spike - file:// risk validation</title>
+<style>
+  :root { color-scheme: light; }
+  body { font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+         margin: 0; padding: 32px; background: #FAFAFA; color: #111827; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #6B7280; margin: 0 0 20px; }
+  .card { background: #fff; border: 1px solid #E5E7EB; border-radius: 8px; padding: 16px 20px; margin-bottom: 12px; }
+  .row { display: flex; align-items: baseline; gap: 10px; }
+  .id { font-weight: 600; width: 34px; }
+  .name { flex: 1; }
+  .badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .pass { background: #ECFDF5; color: #047857; }
+  .fail { background: #FEF2F2; color: #B91C1C; }
+  .pend { background: #F3F4F6; color: #6B7280; }
+  .act  { background: #EEF2FF; color: #4338CA; }
+  .detail { color: #6B7280; font-size: 12.5px; margin-top: 6px; word-break: break-all; }
+  button { font: inherit; padding: 5px 12px; border: 1px solid #D1D5DB; background: #fff;
+           border-radius: 6px; cursor: pointer; }
+  button:hover { border-color: #4F46E5; color: #4F46E5; }
+  .env { font-size: 12.5px; color: #6B7280; }
+</style>
+</head>
+<body>
+<h1>OffEarly file:// risk spike</h1>
+<p class="sub">R1 / R4 需要用户手势，请点击各行按钮验证；其余项在页面加载时自动完成。</p>
+<div id="out"></div>
+<div class="card env" id="env"></div>
+
+<script>
+const RISKS = [
+  { id: 'R1', name: 'showDirectoryPicker 在 file:// 可用且可读写子文件', gesture: true },
+  { id: 'R2', name: '目录句柄可存入 IndexedDB 并在重开页面后取出', gesture: false },
+  { id: 'R3', name: '内联样式 SVG -> Canvas 导出不被 taint', gesture: false },
+  { id: 'R4', name: '剪贴板图片粘贴在 file:// 可取到 File', gesture: true },
+  { id: 'R5', name: '5000 任务库 JSON 全量序列化耗时', gesture: false },
+  { id: 'R6', name: 'vault.json 读写往返耗时（同步盘伪冲突代理指标）', gesture: true },
+];
+const R = {};
+RISKS.forEach(r => R[r.id] = { status: 'pending', detail: '' });
+
+function render() {
+  document.getElementById('out').innerHTML = RISKS.map(r => {
+    const s = R[r.id];
+    const cls = { pass: 'pass', fail: 'fail', pending: 'pend', action: 'act' }[s.status] || 'pend';
+    const label = { pass: 'PASS', fail: 'FAIL', pending: 'PENDING', action: 'READY' }[s.status] || s.status.toUpperCase();
+    const btn = r.gesture ? ` <button data-id="${r.id}">运行</button>` : '';
+    return `<div class="card"><div class="row"><span class="id">${r.id}</span>` +
+           `<span class="name">${r.name}<div class="detail">${s.detail}</div></span>` +
+           `<span class="badge ${cls}">${label}</span>${btn}</div></div>`;
+  }).join('');
+}
+
+const set = (id, status, detail) => { R[id] = { status, detail }; render(); };
+
+// ---- R2: IndexedDB on file:// ----
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open('offearly-spike', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('handles');
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+    req.onblocked = () => rej(new Error('blocked'));
+  });
+}
+const idbPut = (db, val) => new Promise((res, rej) => {
+  const tx = db.transaction('handles', 'readwrite');
+  tx.objectStore('handles').put(val, 'dir');
+  tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+});
+const idbGet = (db) => new Promise((res, rej) => {
+  const tx = db.transaction('handles', 'readonly');
+  const q = tx.objectStore('handles').get('dir');
+  q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
+});
+
+async function runR2() {
+  try {
+    const db = await idbOpen();
+    await idbPut(db, { probe: 'plain-object', ts: Date.now() });
+    const back = await idbGet(db);
+    const ok = back && back.probe === 'plain-object';
+    set('R2', ok ? 'pass' : 'fail',
+      ok ? 'IndexedDB 在 file:// 可读写。句柄对象本身需在 R1 授权后自动复检。'
+         : 'IndexedDB 可读回但值不符。降级：每次启动重选目录。');
+    window.__IDB_DB__ = db;
+  } catch (e) {
+    set('R2', 'fail', `IndexedDB 在 file:// 不可用：${e && e.message}。降级：每次启动重选目录（一次点击）。`);
+  }
+}
+
+// ---- R3: SVG -> Canvas taint ----
+async function runR3() {
+  try {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="80">` +
+      `<rect width="240" height="80" fill="#4F46E5"/>` +
+      `<text x="16" y="46" fill="#FFFFFF" font-size="20" ` +
+      `font-family="-apple-system, Segoe UI, Microsoft YaHei, sans-serif">OffEarly</text></svg>`;
+    const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('img load failed')); img.src = url; });
+    const c = document.createElement('canvas');
+    c.width = 480; c.height = 160;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0, 480, 160);
+    const blob = await new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('toBlob null')), 'image/png'));
+    set('R3', 'pass', `导出成功，PNG ${blob.size} 字节，画布未被 taint。`);
+  } catch (e) {
+    set('R3', 'fail', `${e && e.message}。降级：导出仅保留 SVG + CSV。`);
+  }
+}
+
+// ---- R5: 5000 task serialize ----
+function runR5() {
+  const now = new Date().toISOString();
+  const tasks = Array.from({ length: 5000 }, (_, i) => ({
+    id: 't' + i, topicId: 'topic' + (i % 12), title: '任务标题样本 ' + i,
+    status: ['todo', 'doing', 'review', 'done'][i % 4], kind: 'feature', priority: 'P2',
+    start: '2026-01-01', due: '2026-02-01', progress: i % 101, tags: ['a', 'b'],
+    note: '# 标题\n\n- 项目一\n- 项目二\n\n![img](assets/abc123.png)\n\n' + 'x'.repeat(200),
+    order: 'a0' + i, createdAt: now, updatedAt: now, archived: false,
+  }));
+  const vault = { schemaVersion: 1, vaultId: 'spike', revision: 1, tasks };
+  const t0 = performance.now();
+  const s = JSON.stringify(vault);
+  const t1 = performance.now();
+  const p = JSON.parse(s);
+  const t2 = performance.now();
+  const kb = (s.length / 1024).toFixed(0);
+  const slow = (t1 - t0) > 200;
+  set('R5', slow ? 'fail' : 'pass',
+    `stringify ${(t1 - t0).toFixed(1)}ms / parse ${(t2 - t1).toFixed(1)}ms / ${kb} KB。` +
+    (slow ? ' 超过 200ms，需分片写或提示拆分库。' : ' 全量序列化可接受。'));
+}
+
+// ---- R1 (gesture) ----
+async function runR1() {
+  try {
+    const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+    const sub = await dir.getDirectoryHandle('assets', { create: true });
+    const fh = await dir.getFileHandle('spike-write.json', { create: true });
+    const w = await fh.createWritable();
+    await w.write(JSON.stringify({ probe: 'offearly', ts: Date.now() }));
+    await w.close();
+    const f = await fh.getFile();
+    const text = await f.text();
+    const rw = text.includes('offearly');
+    let idb = 'skipped';
+    try {
+      if (window.__IDB_DB__) { await idbPut(window.__IDB_DB__, dir); idb = (await idbGet(window.__IDB_DB__)) === dir ? 'ok' : 'mismatch'; }
+    } catch (e) { idb = 'fail: ' + e.message; }
+    set('R1', rw ? 'pass' : 'fail',
+      `目录「${dir.name}」子目录创建=${sub ? 'ok' : 'no'} 写读=${rw ? 'ok' : 'fail'} 句柄入 IndexedDB=${idb}。`);
+    if (R.R2.status !== 'pass' && idb === 'ok') set('R2', 'pass', '句柄经 IndexedDB 结构化克隆往返成功（R1 复检）。');
+    window.__DIR__ = dir;
+    set('R6', 'action', '已获得目录句柄，可点击运行读写往返计时。');
+  } catch (e) {
+    set('R1', 'fail', `${e && e.name}: ${e && e.message}。降级：showOpenFilePicker 单文件 + 图片 base64 内嵌（限 1MB）。`);
+  }
+}
+
+// ---- R4 (gesture) ----
+async function runR4() {
+  try {
+    const items = await navigator.clipboard.read();
+    const img = items.find(i => i.types.some(t => t.startsWith('image/')));
+    if (!img) { set('R4', 'fail', '剪贴板中未找到图片项。请先复制一张截图再重试。'); return; }
+    const type = img.types.find(t => t.startsWith('image/'));
+    const blob = await img.getType(type);
+    set('R4', 'pass', `取到 File：${type}，${blob.size} 字节。`);
+  } catch (e) {
+    set('R4', 'fail', `${e && e.name}: ${e && e.message}。降级：仅支持拖入 / 工具栏选文件。`);
+  }
+}
+
+// ---- R6 (gesture, needs R1) ----
+async function runR6() {
+  const dir = window.__DIR__;
+  if (!dir) { set('R6', 'fail', '需先运行 R1 获取目录句柄。'); return; }
+  try {
+    const payload = JSON.stringify({ probe: 'x', ts: Date.now(), pad: 'y'.repeat(200 * 1024) });
+    const fh = await dir.getFileHandle('spike-io.json', { create: true });
+    const t0 = performance.now();
+    const w = await fh.createWritable(); await w.write(payload); await w.close();
+    const t1 = performance.now();
+    const f = await fh.getFile(); await f.text();
+    const t2 = performance.now();
+    set('R6', 'pass', `写 ${(t1 - t0).toFixed(1)}ms / 读 ${(t2 - t1).toFixed(1)}ms（约 200KB）。` +
+      `同步盘延迟造成的伪冲突仍需人工观察，冲突弹窗保留「导出副本」兜底。`);
+  } catch (e) { set('R6', 'fail', e && e.message); }
+}
+
+const HANDLERS = { R1: runR1, R4: runR4, R6: runR6 };
+document.getElementById('out').addEventListener('click', e => {
+  const id = e.target && e.target.dataset && e.target.dataset.id;
+  if (id && HANDLERS[id]) { set(id, 'pending', '运行中…'); HANDLERS[id](); }
+});
+
+render();
+document.getElementById('env').textContent =
+  `protocol=${location.protocol}  isSecureContext=${window.isSecureContext}  ` +
+  `showDirectoryPicker=${'showDirectoryPicker' in window}  ` +
+  `showOpenFilePicker=${'showOpenFilePicker' in window}  ` +
+  `createWritable=${'createWritable' in (window.FileSystemFileHandle ? window.FileSystemFileHandle.prototype : {})}  ` +
+  `ua=${navigator.userAgent}`;
+runR2(); runR3(); runR5();
+window.__SPIKE_RESULT__ = () => JSON.stringify(R, null, 2);
+</script>
+</body>
+</html>

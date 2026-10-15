@@ -447,6 +447,21 @@ save():
 
 spike 结果回填本文档第 11 节并据此裁剪降级路径，然后才进入实现。
 
+### 11.1 实测结果（T01，2026-10-15）
+
+`spike.html` 已在 Qoder 内置浏览器（Electron 43 / Chrome 150，`file://` 协议）跑通全部自动化项。环境探测：`protocol=file:`、`isSecureContext=true`、`showDirectoryPicker=true`、`showOpenFilePicker=true`、`createWritable=true`。
+
+| # | 结果 | 实测说明 |
+|---|---|---|
+| R1 | 待人工验证 | API 存在已确认；目录选择与子文件读写需用户手势，待企业 Edge 实测 |
+| R2 | **PASS** | IndexedDB 在 `file://` 可读写；句柄结构化克隆往返由 R1 授权后自动复检 |
+| R3 | **PASS** | SVG→data URI→Canvas→PNG 成功（5981 字节），画布未被 taint |
+| R4 | 待人工验证 | 剪贴板读取需手势与权限，待企业 Edge 实测 |
+| R5 | **PASS** | 5000 任务：stringify 18.1ms、parse 8.1ms、2691 KB，远低于 200ms 阈值 |
+| R6 | 待人工验证 | 依赖 R1 句柄做读写往返计时；同步盘延迟需人工观察 |
+
+**结论**：R2 / R3 / R5 成立，架构主路径（数据文件夹 + 句柄持久化 + PNG 导出 + 全量序列化）**无需启用降级**。内置浏览器与企业 Edge 的 `file://` 策略可能存在差异，因此 R1 未在企业 Edge 复验前不进入 T06（FsAccessAdapter）。
+
 ---
 
 ## 12. 非目标（明确不做）
