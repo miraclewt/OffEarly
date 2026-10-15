@@ -1,0 +1,101 @@
+/*
+ * T30 · 视觉规范的唯一事实源（spec 第 7 节「简洁、克制」）
+ *
+ * 为什么要有一个中央 token 文件：此前每个视图各自写死 hex，同一个「边框灰」在
+ * 6 个文件里出现，改一次要动 6 处，且没人能回答「项目一共用了几种颜色」。
+ * 现在所有内联样式一律引用这里的变量，色值只在此处定义。
+ *
+ * 三条硬约束（越界即视为规范破坏）：
+ *   1. 圆角只有 6px（控件）与 8px（卡片/浮层）两档；
+ *   2. 阴影只有 hover 柔影一档，2–4px 偏移、低透明度，不允许用于静态元素；
+ *   3. 语义色仅三处——逾期红 / 阻塞琥珀 / 完成绿；其余彩色一律是话题分类色
+ *      （TOPIC_PALETTE 12 色，属于用户数据，不在此文件管理）。
+ *
+ * 注意：SVG 呈现属性（fill= / stroke= 这类 attribute，不是 style）**不解析 var()**，
+ * 所以 GanttCanvas 的 GANTT_*_FILL / GANTT_TODAY_COLOR 与 TOPIC_PALETTE 必须保持
+ * 字面量 hex——它们被测试直接断言，也是写进 vault.json 的用户数据。
+ */
+
+:root {
+  /* ── 表面 ───────────────────────────────────────────── */
+  /* 应用底色：比卡片暗一档，让白卡片自然浮起 */
+  --oe-bg: #fafafa;
+  --oe-surface: #ffffff;
+  --oe-border: #e5e7eb;
+  /* 周末 / 节假日列底色（spec 5.4 写死值） */
+  --oe-off-column: #f5f5f5;
+  /* 次级填充：分组头、工具条、空态块 */
+  --oe-fill: #f3f4f6;
+  --oe-fill-subtle: #f9fafb;
+  /* 甘特表泳道底（比 bg 略偏冷，用于区分行） */
+  --oe-lane-fill: #f8fafc;
+  /* 侧栏选中行底色。灰度层级上需要比 fill 重一档，取值与边框同色
+     （CSS 变量按语义命名，不按色值——同值不代表同一用途） */
+  --oe-row-selected: #e5e7eb;
+
+  /* ── 文字（同色阶，四级足够） ────────────────────────── */
+  --oe-text: #111827;
+  --oe-text-secondary: #374151;
+  --oe-text-muted: #6b7280;
+  --oe-text-faint: #9ca3af;
+
+  /* ── 强调 ───────────────────────────────────────────── */
+  --oe-accent: #4f46e5;
+  /* 强调底上的文字（按钮选中态、色块内文字） */
+  --oe-on-accent: #ffffff;
+
+  /* ── 语义色：仅此三处 ───────────────────────────────── */
+  /* 逾期（红）：日期已过仍未完成 */
+  --oe-overdue: #dc2626;
+  /* 被阻塞（琥珀）：前置未完成。三件套一起用 */
+  --oe-blocked: #b45309;
+  --oe-blocked-border: #f59e0b;
+  --oe-blocked-bg: #fffbeb;
+  /* 完成（绿）：仅用于「已完成」的确认态，不用于话题分类 */
+  --oe-done: #059669;
+
+  /* ── 圆角：只有两档 ─────────────────────────────────── */
+  --oe-radius-control: 6px;
+  --oe-radius-card: 8px;
+
+  /* ── 阴影：只有 hover 一档 ──────────────────────────── */
+  --oe-shadow-hover: 0 2px 4px rgba(17, 24, 39, 0.1);
+
+  /* 模态遮罩：对话框背后压暗，不是装饰色，属于可访问性所需的层次 */
+  --oe-scrim: rgba(17, 24, 39, 0.28);
+
+  /* ── 排版 ───────────────────────────────────────────── */
+  --oe-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* 应用级基线：与 App.tsx 里 root 容器同源，避免两处各写一份 */
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--oe-bg);
+  color: var(--oe-text);
+  font-family: var(--oe-font);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 焦点可见性：键盘可达性不做妥协，但只用强调色描边，不加装饰性动效 */
+:focus-visible {
+  outline: 2px solid var(--oe-accent);
+  outline-offset: 1px;
+}
+
+/* 按钮与输入框继承字体，避免浏览器默认字体割裂 */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+}

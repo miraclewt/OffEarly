@@ -14,6 +14,15 @@ import type { GanttColumnWindow, GanttRowWindow } from '../controllers/ganttView
 import type { DependencyArrow, GanttModel, GanttRow } from '../domain/ganttModel'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 
+/**
+ * 注意（T30）：本文件里这一组色值**必须保持字面量 hex，不能换成 CSS 变量**。
+ * 它们最终绑到 SVG 的呈现属性（`fill=` / `stroke=`），而呈现属性不解析 `var()`
+ * ——写成 `fill="var(--oe-x)"` 在浏览器里会直接渲染成黑色。下面的 `GRID_COLOR` /
+ * `TEXT` / `TEXT_MUTED` 走的是内联 `style`，所以用变量。
+ * 另外 GANTT_TODAY_COLOR / GANTT_BASELINE_FILL / GANTT_OFF_COLUMN_FILL 被测试
+ * 直接断言，改动等于改契约。
+ */
+
 /** 周末 / 节假日列浅灰底（spec 5.4 写死的 #F5F5F5）。 */
 export const GANTT_OFF_COLUMN_FILL = '#F5F5F5'
 /** 基线细灰条。 */
@@ -25,12 +34,12 @@ export const GANTT_BAR_OPACITY = 0.18
 /** 进度内条：topic 色压暗的比例（深色）。 */
 export const GANTT_PROGRESS_MIX = 0.35
 
-const GRID_COLOR = '#E5E7EB'
+const GRID_COLOR = 'var(--oe-border)'
 const TOPIC_ROW_FILL = '#FAFAFA'
 const LANE_FILL = '#F8FAFC'
 const ARROW_COLOR = '#9CA3AF'
-const TEXT_MUTED = '#6B7280'
-const TEXT = '#374151'
+const TEXT_MUTED = 'var(--oe-text-muted)'
+const TEXT = 'var(--oe-text-secondary)'
 const DEFAULT_TOPIC_COLOR = '#4F46E5'
 const MILESTONE_SIZE = 12
 const ARROW_MARKER_ID = 'oe-gantt-arrow-head'
@@ -196,7 +205,7 @@ export function GanttCanvas(props: GanttCanvasProps) {
   return (
     <div
       data-testid="gantt-canvas"
-      style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#FFFFFF' }}
+      style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--oe-surface)' }}
     >
       <div
         data-testid="gantt-header"
@@ -275,9 +284,9 @@ export function GanttCanvas(props: GanttCanvasProps) {
                 height: 18,
                 lineHeight: '18px',
                 fontSize: 10,
-                color: '#FFFFFF',
+                color: 'var(--oe-on-accent)',
                 background: GANTT_TODAY_COLOR,
-                borderRadius: 3,
+                borderRadius: 'var(--oe-radius-control)',
                 whiteSpace: 'nowrap',
               }}
             >

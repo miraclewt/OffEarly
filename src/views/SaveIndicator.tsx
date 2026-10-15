@@ -15,9 +15,9 @@ export interface SaveIndicatorSource {
   retry(): Promise<void>
 }
 
-const MUTED = '#6B7280'
-const INDIGO = '#4F46E5'
-const DANGER = '#DC2626'
+const MUTED = 'var(--oe-text-muted)'
+const INDIGO = 'var(--oe-accent)'
+const DANGER = 'var(--oe-overdue)'
 
 /** 语义色只借用了逾期红这一处既有约定（spec 8.2 明写失败态为红色）。 */
 const COLOR: Record<SaveState, string> = {
@@ -61,9 +61,9 @@ export function SaveIndicator(props: {
             fontSize: 12,
             lineHeight: '18px',
             color: DANGER,
-            background: '#FFFFFF',
+            background: 'var(--oe-surface)',
             border: `1px solid ${DANGER}`,
-            borderRadius: 6,
+            borderRadius: 'var(--oe-radius-control)',
             cursor: 'pointer',
           }}
         >

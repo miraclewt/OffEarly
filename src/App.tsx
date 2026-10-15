@@ -43,10 +43,10 @@ import type { SafeModeLabels } from './views/SafeModeBanner'
 import { SaveIndicator } from './views/SaveIndicator'
 import { TopicSidebar } from './views/TopicSidebar'
 
-const INDIGO = '#4F46E5'
-const BORDER = '#E5E7EB'
-const TEXT = '#111827'
-const MUTED = '#6B7280'
+const INDIGO = 'var(--oe-accent)'
+const BORDER = 'var(--oe-border)'
+const TEXT = 'var(--oe-text)'
+const MUTED = 'var(--oe-text-muted)'
 
 function LogoMark() {
   return (
@@ -256,9 +256,9 @@ const CARD: CSSProperties = {
   maxWidth: 420,
   margin: '0 auto',
   padding: '28px 32px',
-  background: '#FFFFFF',
+  background: 'var(--oe-surface)',
   border: `1px solid ${BORDER}`,
-  borderRadius: 12,
+  borderRadius: 'var(--oe-radius-card)',
   textAlign: 'center',
 }
 
@@ -277,7 +277,7 @@ function StartupScreen(props: {
         <div style={{ fontSize: 15, fontWeight: 600, color: TEXT, marginTop: 12 }}>{props.title}</div>
         <div style={{ fontSize: 12, color: MUTED, marginTop: 8, lineHeight: 1.7 }}>{props.hint}</div>
         {props.reason === undefined ? null : (
-          <div style={{ fontSize: 12, color: '#B45309', marginTop: 8 }}>{props.reason}</div>
+          <div style={{ fontSize: 12, color: 'var(--oe-blocked)', marginTop: 8 }}>{props.reason}</div>
         )}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 16 }}>
           <button
@@ -286,10 +286,10 @@ function StartupScreen(props: {
             style={{
               padding: '6px 16px',
               fontSize: 13,
-              color: '#FFFFFF',
+              color: 'var(--oe-on-accent)',
               background: INDIGO,
               border: 'none',
-              borderRadius: 6,
+              borderRadius: 'var(--oe-radius-control)',
               cursor: 'pointer',
             }}
           >
@@ -303,9 +303,9 @@ function StartupScreen(props: {
                 padding: '6px 16px',
                 fontSize: 13,
                 color: TEXT,
-                background: '#FFFFFF',
+                background: 'var(--oe-surface)',
                 border: `1px solid ${BORDER}`,
-                borderRadius: 6,
+                borderRadius: 'var(--oe-radius-control)',
                 cursor: 'pointer',
               }}
             >
@@ -345,9 +345,9 @@ function EmptyBoard(props: { store: VaultStore; filter: Filter; t: (key: MsgKey)
             flex: 1,
             display: 'flex',
             flexDirection: 'column',
-            background: '#FFFFFF',
+            background: 'var(--oe-surface)',
             border: `1px solid ${BORDER}`,
-            borderRadius: 10,
+            borderRadius: 'var(--oe-radius-card)',
             padding: 12,
             gap: 8,
           }}
@@ -747,9 +747,9 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
         flexDirection: 'column',
         height: '100vh',
         margin: 0,
-        background: '#FAFAFA',
+        background: 'var(--oe-bg)',
         color: TEXT,
-        fontFamily: '-apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif',
+        fontFamily: 'var(--oe-font)',
         fontSize: 14,
       }}
     >
@@ -760,7 +760,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           style={{
             width: 220,
             flex: '0 0 220px',
-            background: '#F3F4F6',
+            background: 'var(--oe-fill)',
             borderRight: `1px solid ${BORDER}`,
             display: 'flex',
             flexDirection: 'column',
@@ -798,7 +798,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
               height: 40,
               flex: '0 0 40px',
               padding: '0 16px',
-              background: '#FFFFFF',
+              background: 'var(--oe-surface)',
               borderBottom: `1px solid ${BORDER}`,
             }}
           >
@@ -817,10 +817,10 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
                     style={{
                       padding: '3px 10px',
                       fontSize: 12,
-                      color: view === mode ? '#FFFFFF' : TEXT,
+                      color: view === mode ? 'var(--oe-on-accent)' : TEXT,
                       background: view === mode ? INDIGO : 'transparent',
                       border: `1px solid ${view === mode ? INDIGO : BORDER}`,
-                      borderRadius: 6,
+                      borderRadius: 'var(--oe-radius-control)',
                       cursor: 'pointer',
                     }}
                   >
@@ -830,7 +830,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
               </div>
             )}
             {notice === null ? null : (
-              <span data-testid="shell-notice" style={{ fontSize: 12, color: '#B45309' }}>
+              <span data-testid="shell-notice" style={{ fontSize: 12, color: 'var(--oe-blocked)' }}>
                 {'text' in notice ? notice.text : t(notice.key, notice.params)}
               </span>
             )}

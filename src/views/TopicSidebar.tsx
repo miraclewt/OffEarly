@@ -25,12 +25,12 @@ import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
 import type { IconName } from './IconSprite'
 
-const BORDER = '#E5E7EB'
-const TEXT = '#111827'
-const MUTED = '#6B7280'
-const INDIGO = '#4F46E5'
-const ROW_HOVER = '#E5E7EB'
-const ARCHIVED_TEXT = '#9CA3AF'
+const BORDER = 'var(--oe-border)'
+const TEXT = 'var(--oe-text)'
+const MUTED = 'var(--oe-text-muted)'
+const INDIGO = 'var(--oe-accent)'
+const ROW_HOVER = 'var(--oe-row-selected)'
+const ARCHIVED_TEXT = 'var(--oe-text-faint)'
 
 /** 默认展开的层数：0 表示「根层展开」——可见根与它的直接子话题，共两层（spec 4.2「UI 默认展示两层」）。 */
 const DEFAULT_EXPANDED_DEPTH = 0
@@ -152,9 +152,9 @@ export function TopicSidebar(props: TopicSidebarProps) {
           padding: '3px 6px',
           fontSize: 12,
           color: TEXT,
-          background: '#FFFFFF',
+          background: 'var(--oe-surface)',
           border: `1px solid ${INDIGO}`,
-          borderRadius: 6,
+          borderRadius: 'var(--oe-radius-control)',
           outline: 'none',
           width: 'calc(100% - 24px)',
           boxSizing: 'border-box',
@@ -195,7 +195,7 @@ export function TopicSidebar(props: TopicSidebarProps) {
               padding: 0,
               background: color,
               border: color === topic.color ? `1px solid ${TEXT}` : '1px solid transparent',
-              borderRadius: 4,
+              borderRadius: 'var(--oe-radius-control)',
               cursor: 'pointer',
             }}
           />
@@ -245,10 +245,10 @@ export function TopicSidebar(props: TopicSidebarProps) {
             paddingLeft: 4 + depth * INDENT,
             paddingRight: 4,
             // 左色条 / 整行底色都在禁用之列（spec 9.3 C 方案），选中态只用文字色与底色提示
-            background: selected ? ROW_HOVER : hovered ? '#F9FAFB' : 'transparent',
-            borderRadius: 6,
+            background: selected ? ROW_HOVER : hovered ? 'var(--oe-fill-subtle)' : 'transparent',
+            borderRadius: 'var(--oe-radius-control)',
             cursor: 'pointer',
-            color: topic.archived ? ARCHIVED_TEXT : selected ? TEXT : '#374151',
+            color: topic.archived ? ARCHIVED_TEXT : selected ? TEXT : 'var(--oe-text-secondary)',
             fontSize: 13,
             fontWeight: selected ? 600 : 400,
           }}
@@ -289,7 +289,7 @@ export function TopicSidebar(props: TopicSidebarProps) {
               width: 10,
               height: 10,
               flex: '0 0 10px',
-              borderRadius: 3,
+              borderRadius: 'var(--oe-radius-control)',
               background: topic.color,
               opacity: topic.archived ? 0.4 : 1,
             }}
@@ -382,10 +382,10 @@ export function TopicSidebar(props: TopicSidebarProps) {
             top: menuFor.y === 0 ? 16 : menuFor.y,
             minWidth: 132,
             padding: 4,
-            background: '#FFFFFF',
+            background: 'var(--oe-surface)',
             border: `1px solid ${BORDER}`,
-            borderRadius: 8,
-            boxShadow: '0 2px 8px rgba(17, 24, 39, 0.08)',
+            borderRadius: 'var(--oe-radius-card)',
+            boxShadow: 'var(--oe-shadow-hover)',
             zIndex: 11,
           }}
         >
@@ -463,10 +463,10 @@ export function TopicSidebar(props: TopicSidebarProps) {
         flex: '0 0 220px',
         height: '100%',
         minHeight: 0,
-        background: '#F3F4F6',
+        background: 'var(--oe-fill)',
         borderRight: `1px solid ${BORDER}`,
         boxSizing: 'border-box',
-        fontFamily: '-apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif',
+        fontFamily: 'var(--oe-font)',
         ...props.style,
       }}
     >
@@ -553,10 +553,10 @@ export function TopicSidebar(props: TopicSidebarProps) {
               gap: 8,
               padding: '6px 8px',
               fontSize: 12,
-              color: '#374151',
+              color: 'var(--oe-text-secondary)',
               background: 'transparent',
               border: 'none',
-              borderRadius: 6,
+              borderRadius: 'var(--oe-radius-control)',
               cursor: 'pointer',
               textAlign: 'left',
             }}

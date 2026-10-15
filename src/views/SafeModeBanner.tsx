@@ -12,12 +12,12 @@ import type { CSSProperties } from 'react'
 
 import type { SafeModeSnapshotRef } from '../persistence/vaultRepository'
 
-const AMBER_BG = '#FFFBEB'
-const AMBER_BORDER = '#F59E0B'
-const AMBER_TEXT = '#B45309'
-const BORDER = '#E5E7EB'
-const TEXT = '#111827'
-const MUTED = '#6B7280'
+const AMBER_BG = 'var(--oe-blocked-bg)'
+const AMBER_BORDER = 'var(--oe-blocked-border)'
+const AMBER_TEXT = 'var(--oe-blocked)'
+const BORDER = 'var(--oe-border)'
+const TEXT = 'var(--oe-text)'
+const MUTED = 'var(--oe-text-muted)'
 
 export interface SafeModeLabels {
   title: string
@@ -65,9 +65,9 @@ function errorText(e: unknown): string {
 const BUTTON: CSSProperties = {
   padding: '4px 12px',
   fontSize: 12,
-  background: '#FFFFFF',
+  background: 'var(--oe-surface)',
   border: `1px solid ${BORDER}`,
-  borderRadius: 6,
+  borderRadius: 'var(--oe-radius-control)',
   cursor: 'pointer',
 }
 
@@ -196,7 +196,7 @@ export function SafeModeBanner(props: SafeModeBannerProps) {
         </div>
       ) : null}
       {error === null ? null : (
-        <div data-testid="safe-mode-error" style={{ color: '#DC2626' }}>
+        <div data-testid="safe-mode-error" style={{ color: 'var(--oe-overdue)' }}>
           {text.failed}：{errorText(error)}
         </div>
       )}

@@ -31,13 +31,13 @@ import { GanttCanvas } from './GanttCanvas'
 import { GanttTable } from './GanttTable'
 import { Icon } from './IconSprite'
 
-const BORDER = '#E5E7EB'
-const TEXT = '#111827'
-const TEXT_MUTED = '#6B7280'
-const INDIGO = '#4F46E5'
+const BORDER = 'var(--oe-border)'
+const TEXT = 'var(--oe-text)'
+const TEXT_MUTED = 'var(--oe-text-muted)'
+const INDIGO = 'var(--oe-accent)'
 const TOOLBAR_HEIGHT = 36
 
-const BODY_FONT = '-apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif'
+const BODY_FONT = 'var(--oe-font)'
 
 /**
  * 兜底文案表：宿主通常会传 i18n.t，但在组件测试或未接线的场景下也要能独立挂载，
@@ -168,10 +168,10 @@ export function GanttView(props: GanttViewProps) {
           padding: '2px 10px',
           fontSize: 12,
           lineHeight: '20px',
-          color: active ? '#FFFFFF' : TEXT,
-          background: active ? INDIGO : '#FFFFFF',
+          color: active ? 'var(--oe-on-accent)' : TEXT,
+          background: active ? INDIGO : 'var(--oe-surface)',
           border: `1px solid ${active ? INDIGO : BORDER}`,
-          borderRadius: 6,
+          borderRadius: 'var(--oe-radius-control)',
           cursor: 'pointer',
         }}
       >
@@ -193,7 +193,7 @@ export function GanttView(props: GanttViewProps) {
         flexDirection: 'column',
         minWidth: 0,
         height: canvasHeight + TOOLBAR_HEIGHT,
-        background: '#FFFFFF',
+        background: 'var(--oe-surface)',
         color: TEXT,
         fontFamily: BODY_FONT,
         outline: 'none',
@@ -302,9 +302,9 @@ const iconButtonStyle: CSSProperties = {
   padding: 0,
   fontSize: 12,
   color: TEXT,
-  background: '#FFFFFF',
+  background: 'var(--oe-surface)',
   border: `1px solid ${BORDER}`,
-  borderRadius: 6,
+  borderRadius: 'var(--oe-radius-control)',
   cursor: 'pointer',
 }
 

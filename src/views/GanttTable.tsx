@@ -8,10 +8,10 @@ import type { GanttRowWindow } from '../controllers/ganttViewport'
 import type { GanttRow } from '../domain/ganttModel'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 
-const BORDER = '#E5E7EB'
-const TEXT = '#111827'
-const TEXT_MUTED = '#6B7280'
-const LANE_FILL = '#F8FAFC'
+const BORDER = 'var(--oe-border)'
+const TEXT = 'var(--oe-text)'
+const TEXT_MUTED = 'var(--oe-text-muted)'
+const LANE_FILL = 'var(--oe-lane-fill)'
 const DEFAULT_TOPIC_COLOR = '#4F46E5'
 
 const DATE_WIDTH = 58
@@ -41,7 +41,7 @@ function Swatch(props: { color: string | null }) {
         width: 8,
         height: 8,
         flex: '0 0 8px',
-        borderRadius: 2,
+        borderRadius: 'var(--oe-radius-control)',
         background: props.color ?? DEFAULT_TOPIC_COLOR,
       }}
     />
@@ -139,7 +139,7 @@ export function GanttTable(props: GanttTableProps) {
         height: props.height,
         display: 'flex',
         flexDirection: 'column',
-        background: '#FFFFFF',
+        background: 'var(--oe-surface)',
         borderRight: `1px solid ${BORDER}`,
         boxSizing: 'border-box',
       }}

@@ -12,11 +12,11 @@ import type { CSSProperties } from 'react'
 
 import type { ConflictReport } from '../persistence/vaultRepository'
 
-const BORDER = '#E5E7EB'
-const TEXT = '#111827'
-const MUTED = '#6B7280'
-const INDIGO = '#4F46E5'
-const AMBER = '#B45309'
+const BORDER = 'var(--oe-border)'
+const TEXT = 'var(--oe-text)'
+const MUTED = 'var(--oe-text-muted)'
+const INDIGO = 'var(--oe-accent)'
+const AMBER = 'var(--oe-blocked)'
 
 export interface ConflictLabels {
   title: string
@@ -61,17 +61,17 @@ function errorText(e: unknown): string {
 const PANEL: CSSProperties = {
   width: 420,
   padding: '20px 24px',
-  background: '#FFFFFF',
+  background: 'var(--oe-surface)',
   border: `1px solid ${BORDER}`,
-  borderRadius: 12,
+  borderRadius: 'var(--oe-radius-card)',
 }
 
 const BUTTON: CSSProperties = {
   padding: '6px 14px',
   fontSize: 13,
-  background: '#FFFFFF',
+  background: 'var(--oe-surface)',
   border: `1px solid ${BORDER}`,
-  borderRadius: 6,
+  borderRadius: 'var(--oe-radius-control)',
   cursor: 'pointer',
 }
 
@@ -121,7 +121,7 @@ export function ConflictDialog(props: ConflictDialogProps) {
         inset: 0,
         display: 'grid',
         placeItems: 'center',
-        background: 'rgba(17, 24, 39, 0.28)',
+        background: 'var(--oe-scrim)',
       }}
     >
       <div style={PANEL}>
@@ -177,7 +177,7 @@ export function ConflictDialog(props: ConflictDialogProps) {
           </div>
         ) : null}
         {error === null ? null : (
-          <div data-testid="conflict-error" style={{ fontSize: 12, color: '#DC2626', marginTop: 12 }}>
+          <div data-testid="conflict-error" style={{ fontSize: 12, color: 'var(--oe-overdue)', marginTop: 12 }}>
             {text.failed}：{errorText(error)}
           </div>
         )}
