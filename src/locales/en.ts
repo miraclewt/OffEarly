@@ -54,4 +54,19 @@ export const en: Record<MsgKey, string> = {
   'sidebar.settings': 'Settings',
   'sidebar.untitled': 'Untitled topic',
   'sidebar.newTopicPlaceholder': 'Topic name',
+
+  // T20 尾部追加：甘特图渲染层文案（键集合必须与 zh.ts 完全一致）
+  'gantt.title': 'Gantt',
+  'gantt.scale.day': 'Day',
+  'gantt.scale.week': 'Week',
+  'gantt.task': 'Task',
+  'gantt.start': 'Start',
+  'gantt.end': 'End',
+  'gantt.progress': 'Progress',
+  'gantt.today': 'Today',
+  'gantt.zoomIn': 'Zoom in',
+  'gantt.zoomOut': 'Zoom out',
+  'gantt.resetZoom': 'Reset zoom',
+  'gantt.crossTopicMilestone': 'Cross-topic milestones',
+  'gantt.empty': 'No scheduled tasks',
 }
