@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "lint:emoji": "node scripts/no-emoji.mjs",
-    "build": "npm run lint:emoji && tsc --noEmit && vite build",
+    "verify": "node scripts/verify-bundle.mjs",
+    "build": "npm run lint:emoji && tsc --noEmit && vite build && npm run verify",
     "test": "vitest run",
     "preview": "vite preview"
   },

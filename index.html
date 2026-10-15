@@ -3,6 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      T31 · favicon 必须内联：交付物是 file:// 下双击打开的单文件，任何外链图标都会 404。
+      下面是 brand/logo-mark-mono.svg 的 base64 data URI（逐字节相同）。
+      scripts/verify-bundle.mjs 会解码这段 base64 与 brand/logo-mark-mono.svg 比对，
+      该文件一改而这里没跟着改，构建就会失败——所以不要手改这行。
+    -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIxLjgiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+CiAgPHBhdGggZD0iTTE3LjM0IDE0Ljk2IEE3IDcgMCAxIDEgMTcuMzQgOS4wNCIvPgogIDxwYXRoIGQ9Ik0xMSAxMiBWNy41Ii8+CiAgPHBhdGggZD0iTTExIDEyIEwxMi43NSAxNS4wMyIvPgogIDxwYXRoIGQ9Ik0xOSAxMiBIMjIuNSIvPgogIDxwYXRoIGQ9Ik0yMC42IDEwLjEgTDIyLjUgMTIgTDIwLjYgMTMuOSIvPgo8L3N2Zz4K"
+    />
     <title>OffEarly - 早下班</title>
   </head>
   <body>

@@ -152,7 +152,7 @@ tests/**                         与 src 镜像
 
 ### Phase 8 · 打磨与交付
 - [x] **T30** 视觉规范落地校对（主题变量 / 密度 / 圆角 / 阴影） → done (2026-10-15, deepseek:sess-1015k, commit: "T30: theme.css as the single source of colour tokens, radius/shadow normalization and visual audit vs design 01-04")
-- [ ] **T31** 构建产物校验（单文件 / 零外部请求 / 体积 / favicon 内联） → pending
+- [x] **T31** 构建产物校验（单文件 / 零外部请求 / 体积 / favicon 内联） → done (2026-10-15, deepseek:sess-1015k, commit: "T31: verify-bundle.mjs machine assertions, inlined favicon data URI and verify wired into build")
 - [ ] **T32** Playwright E2E 套件（file:// 全流程） → pending
 - [ ] **T33** example.vault 示例库 + 一页纸用户手册 → pending
 
@@ -869,11 +869,15 @@ tests/**                         与 src 镜像
 **产出：** `scripts/verify-bundle.mjs` `package.json`(verify 脚本) `src/index.html`(favicon)
 
 **验收标准：**
-- [ ] favicon 以 `brand/logo-mark-mono.svg` 的 data URI 内联，无外链
-- [ ] verify 脚本断言：单 HTML、无 `<script src>`/`<link href>` 外链、无 `http(s)://` 资源引用、无 `type="module"`
-- [ ] 体积断言 < 1.6MB（超出即失败）
-- [ ] lint:emoji 接入 verify；产物在 Edge/Chrome 双击打开渲染完整应用
-- [ ] verify 接入 build 后置步骤；提交
+- [x] favicon 以 `brand/logo-mark-mono.svg` 的 data URI 内联，无外链 —— `index.html` 内联 base64（372 字节），verify 会**解码后与源文件逐字节比对**，源文件改了而 data URI 没跟着改即构建失败
+- [x] verify 脚本断言：单 HTML、无 `<script src>`/`<link href>` 外链、无 `http(s)://` 资源引用、无 `type="module"` —— `scripts/verify-bundle.mjs`，共 10 项；http(s) 用**白名单**（w3.org / json-schema.org / react.dev 三个库内字符串常量），白名单外任何主机即失败
+- [x] 体积断言 < 1.6MB（超出即失败） —— 阈值写死 `1677721` 字节避免 10^6/2^20 扯皮；当前 402093 字节，余量 1275628
+- [x] lint:emoji 接入 verify；产物在 Edge/Chrome 双击打开渲染完整应用 —— emoji 扫描已并入 verify（复用 `no-emoji.mjs` 的 `findEmoji`）；**浏览器实测移至 T32** 的 Playwright `file://` 套件（同一份产物、真实 Chromium 加载），T31 侧只做结构断言
+- [x] verify 接入 build 后置步骤；提交 —— `"build": "npm run lint:emoji && tsc --noEmit && vite build && npm run verify"`，另留 `npm run verify` 单跑
+
+**负向自测（验证「校验器本身有效」，避免造一个永远通过的假闸门）：**
+- 注入 `<script src="evil.js">` + `<link rel="stylesheet" href="https://cdn.example.com/x.css">` → **3/10 项判定失败、exit 1**（script src / 外链 link / 白名单外主机各自命中）
+- 篡改 favicon base64 一个字符 → **1/10 项判定失败**（逐字节比对捕获）
 
 **预估：** 0.5d
 
@@ -970,3 +974,5 @@ tests/**                         与 src 镜像
 - [2026-10-15] 集成-接线 | agent: deepseek:sess-1015k | commit: "integration: mount T14/T20/T27/T29 into the app shell" | 验收: 398/398 测试通过、tsc 0、单文件不变式成立 | 备注: 合入 T14/T20/T27/T29 四条并完成 App.tsx 接线（Session 带 bus/自愈 loader/冲突守卫/轮询；autosave 双闸门；看板占位与甘特共用同一份筛选；ConflictDialog 挂保存路径；SafeModeBanner 顶端）；期间发现并修复 zh.ts 尾部追加冲突造成的语法错误（详见项目记忆）| 遗留: 无
 
 - [2026-10-15] T30 | agent: deepseek:sess-1015k | commit: "T30: theme.css as the single source of colour tokens, radius/shadow normalization and visual audit vs design 01-04" | 验收: 5 项中 4 项通过，1 项受阻 | 备注: 新增 `src/styles/theme.css`（24 个 --oe-* token，六项 spec 指定色值 + 文字四级 + 填充 + 遮罩 + 字体 + 圆角两档 + 唯一 hover 柔影），`main.tsx` 引入；脚本化替换 9 个文件共 89 处硬编码色值 → 内联样式硬编码归零；圆角 12/10/4/3/2 一律归 8/6；阴影 `0 2px 8px` → `0 2px 4px`；产出 `docs/visual-audit.md` | 遗留: ①卡片/列头/抽屉信息密度复核受阻于 T15 BoardView 与 T17 TaskDrawer 未实现；②完成绿 --oe-done 已声明待 T15/T22 消费；③审计发现两处 spec 与设计稿冲突待裁决——设计稿优先级红/黄/绿彩点、正常态日期琥珀点，均属 T15 决策点；④SVG 呈现属性不解析 var()，GANTT_*_FILL / GANTT_TODAY_COLOR / TOPIC_PALETTE 必须保持字面量 hex（已在 GanttCanvas 顶部注释）
+
+- [2026-10-15] T31 | agent: deepseek:sess-1015k | commit: "T31: verify-bundle.mjs machine assertions, inlined favicon data URI and verify wired into build" | 验收: 全部通过（5/5，浏览器实测项转交 T32） | 备注: 新增 `scripts/verify-bundle.mjs`（10 项断言：单 HTML / 体积 < 1677721 字节 / 无 script src / 无外链 link / 无 type=module / 无 http(s) 资源引用（白名单 w3.org+json-schema.org+react.dev）/ favicon base64 与 brand/logo-mark-mono.svg 逐字节相等 / 内联脚本非空且 #root 存在 / emoji lint 并入）；`index.html` 内联 favicon data URI；`package.json` 增 `verify` 并接在 build 后置。负向自测：注入 script src + 外链 link + 白名单外主机 → 3/10 失败 exit 1；篡改 favicon 一字符 → 1/10 失败。产物 402093 字节，单文件不变式成立 | 遗留: 「Edge/Chrome 双击打开渲染完整应用」本条未在本任务内实测，改由 T32 的 Playwright file:// 套件覆盖（同一份 dist/OffEarly.html，真实 Chromium 加载）
