@@ -122,7 +122,7 @@ tests/**                         与 src 镜像
 
 ### Phase 3 · 领域层
 - [ ] **T10** lexorank + VaultStore + CommandBus（undo/redo） → pending
-- [ ] **T11** ScheduleEngine（工作日历工期计算） → pending
+- [x] **T11** ScheduleEngine（工作日历工期计算） → done (2026-10-15, workbuddy:sess-1015g, commit: "T11: ScheduleEngine with working-day calendar math and memoized date caching")
 - [ ] **T12** DependencyGraph（邻接 / 环 / 关键路径 / 阻塞链） → pending
 - [ ] **T13** TopicTree + QueryEngine（组合筛选 / 依赖跳数 / 全文） → pending
 
@@ -409,14 +409,31 @@ tests/**                         与 src 镜像
 **产出：** `src/domain/scheduleEngine.ts` `tests/domain/scheduleEngine.test.ts`
 
 **验收标准：**
-- [ ] `isWorkday(d, cal)` 正确区分周末、holidays、extraWorkdays（补班周六为工作日）
-- [ ] `addWorkdays(d, n)` 跳过非工作日；n=0 返回当日；负数向前推
-- [ ] `workdaysBetween(a, b)` 含端点；a>b 返回负值；跨年（12-30 → 01-03）正确
-- [ ] `duration(task)` = workdaysBetween(start, due)+1；start/due 缺失返回 null
-- [ ] memoize 生效：同日期二次调用不重复计算（以 spy 计数验证）
-- [ ] 单测 ≥15 例含节假日/补班/跨年；全绿并提交
+- [x] `isWorkday(d, cal)` 正确区分周末、holidays、extraWorkdays（补班周六为工作日）—— 优先级定为 `holidays > extraWorkdays > 周几`；同日同时出现在两个列表属矛盾配置，取「休息」（误把假期当工作日会让排期过于乐观，比反过来危险），有专测锁定
+- [x] `addWorkdays(d, n)` 跳过非工作日；n=0 返回当日；负数向前推 —— 语义对齐 Excel `WORKDAY`：**起点不计入**。n=0 原样返回当日（当日是周六也照样返回）；n=-1 从周一回到上周五；补班周六计入（`CAL_CN` 下 Fri+1 → 10-10，标准日历下 → 10-12）
+- [x] `workdaysBetween(a, b)` 含端点；a>b 返回负值；跨年（12-30 → 01-03）正确 —— **口径经用户裁决**：取 `(a, b]`「含末日、不含首日」，与 `duration` 的 `+1` 配套后工期正确（Mon→Fri = 4 → 工期 5；同日 = 0 → 工期 1）。字面「含两端」会让每个工期凭空多一天，故不采用。a>b 严格反对称（Fri→Mon = -4）；跨年 12-30 → 2027-01-03 = 2，反向 = -2
+- [x] `duration(task)` = workdaysBetween(start, due)+1；start/due 缺失返回 null —— 缺失三态（都缺 / 缺 start / 缺 due）均返回 null；恒等式对全部用例成立（含 due < start 的反向输入，此时得负值，由调用方校验 start ≤ due）
+- [x] memoize 生效：同日期二次调用不重复计算（以 spy 计数验证）—— `createScheduleEngine(cal, { onCompute })` 注入 spy：同日期二次 `isWorkday` 计数为 1；同区间二次 `workdaysBetween` 零新增；`duration` 首次实算 9 天（`(09-30, 10-09]`）、二次零新增且 `cacheSize()` 不变；`addWorkdays`/`nextWorkday` 同样走缓存；两实例缓存互不共享（证明模块级无共享可变状态）
+- [x] 单测 ≥15 例含节假日/补班/跨年；全绿并提交 —— **50 例**（要求 15），分 6 组：输入规整 / isWorkday / nextWorkday / addWorkdays / workdaysBetween / duration / memoize
+
+**实测证据：** `npx tsc --noEmit` exit 0；`npm test` → `Test Files 11 passed (11) / Tests 181 passed (181)`（本任务 50 条，T11 前基线 131 条全数保持绿）；`npm run lint:emoji` 干净；`npm run build` → 单文件 `dist/OffEarly.html` 325663 字节，`<script src>` 0 / `<link href>` 0 / `type="module"` 0 / `url(http` 0 / 外部 `http(s)://` 引用 0（T02 不变式复测通过）。
+
+除单测外另做两项独立验证：
+1. `workdaysBetween` 的计数逻辑与**独立参照实现**（原生 `Date` 逐日遍历 + 独立的工作日判定，不复用被测代码）在 2026-01-05 → 2027-12-31 的两年跨度上逐值比对一致（含 5 个假期、3 个补班），反向区间同样一致——这是对「+1 配套口径」的交叉验证，不是自己验自己。
+2. **dayjs 能否进 IIFE 产物**：dayjs 是 CJS（`export =`），而本产物必须是无 `type="module"` 的经典脚本。用一次性 vite 探针（`configFile:false`，绕开 singlefile 插件）把 `scheduleEngine` + dayjs 打成 IIFE 并以经典脚本方式执行：产物中 `require(` / `import` / `export` 残留均为 0，5 条运行时断言全 PASS（补班周六、假期、addWorkdays、workdaysBetween、duration）。探针目录已删除，未留痕。**T19 可直接 import 本模块，无需额外处理 CJS 互操作。**
+
+**实施注记（T11 发现）：**
+- **两条验收标准互相冲突，已提请用户裁决，不自行取舍。** 验收 3 字面要求 `workdaysBetween` 两端都含（Mon→Fri = 5），验收 4 又要求 `duration = workdaysBetween + 1`；两者同时成立会让每个任务的工期都多算一天（同日任务算成 2 天），直接污染 T19 甘特条长度与「工期 N 天」显示。用户裁决取「保工期正确」，即 `workdaysBetween` 取 `(a, b]`。**spec 5.2 与 T11 验收 3 的文字仍是「+1」+「含端点」的原始表述，建议由集成车道在 T19 落地前把口径写死在 spec 里**（见《变更提议》）。
+- **`nextWorkday` 定为「严格向后取第一个工作日」**，输入本身是工作日也继续往后走（`nextWorkday == addWorkdays(d, 1, cal)`）。若将来需要「当日是工作日就返回当日」的语义，应另开 `nextWorkdayInclusive` 而不是改这个函数，避免甘特图取后继日期时产生 off-by-one。
+- **防死循环护栏。** `workdays: []`（或日历上永不存在工作日）会让推移扫描永不收敛、把标签页卡死。`shiftWorkdays` 的扫描上限设为 `7|n| + 3660`（正常日历 10 年都碰不到），撞上限时抛 `ScheduleEngineError` 并提示检查 `calendar.workdays`，而不是静默挂起。
+- **非法日期显式抛错。** `toDateKey` 只接受合法 `YYYY-MM-DD`，`2026-02-30` / `2026-13-01` / `2026/10/05` / `not-a-date` 一律抛 `ScheduleEngineError`。用户手改 `vault.json` 时这类脏日期会经 T03 的 Zod 拦截；本模块的抛错是第二道防线，避免脏值以 `NaN` 形式顺着日期数学扩散到甘特图坐标。
+- **memoize 放在实例上而非模块级。** spec 5.2 只写了「按日期串 memoize（`Map<dateStr, boolean>`）」。做成模块级 Map 会让 `createScheduleEngine` 的两个实例互相污染（换日历不生效、测试之间相互影响），故缓存随实例创建，`onCompute` 钩子把「真的算了」暴露出来供断言。裸函数（`isWorkday(d, cal)` 等）保持无状态，与 spec 的签名一致。
+- **`DEFAULT_CALENDAR` 在 `schema.ts` 里有一份同形定义**，本模块没有 import 它——`domain/scheduleEngine` 不应反向依赖带 Zod 的 schema 层（纯函数模块引 zod 会破坏 spec 第 3 节的分层边界）。两处均为 `{ workdays: [1,2,3,4,5], holidays: [], extraWorkdays: [] }`，测试里有一条断言锁住本模块这份的取值。
+
+**变更提议（越界清单）：无。** 本次只改 `src/domain/scheduleEngine.ts`、`tests/domain/scheduleEngine.test.ts` 两个新文件，加 `package.json` 的 dayjs 依赖一行；未碰 `src/App.tsx`、`src/locales/*` 或其他任务文件。`package-lock.json` 按约定 `git checkout --` 还原，未纳入提交（本波次唯一允许改 `package.json` 的车道，lock 由主干统一生成）。附带一条**文字变更提议**（未自行改动文档）：spec 5.2 与 T11 验收 3 的 `workdaysBetween` 口径请按用户裁决改为「含末日、不含首日；与 `duration` 的 +1 配套」，以免 T19 的实施者按字面再实现一遍含两端的版本。
 
 **预估：** 1d
+
 
 ---
 
@@ -854,3 +871,6 @@ tests/**                         与 src 镜像
 - [2026-10-15] T07 | agent: qoder:sess-1015e | commit: "T07: VaultRepository + startup flow first screen with safe mode" | 验收: 全部通过（5/5） | 备注: 交付 `vaultRepository`（load/save/peekRevision/create）+ App 启动状态机（booting/need-dir/need-permission/busy/empty-dir/ready/safe-mode/failed 八相）。`npx tsc --noEmit` exit 0；`npm run test` 107/107 绿（本任务 27 条，repository 17 + App 10，先 RED 后 GREEN）；`npm run lint:emoji` 干净；`npm run build` 单文件 325.5 kB；产物真实浏览器 `file://` 冒烟：首屏「连接数据文件夹」渲染、控制台零消息。peekRevision 经新原语 `readHead` 只取文件头 4096 字节提 revision（save 自控键序为前提，键序被打乱时全量解析兜底）；「校验失败不写盘」由 App 测试断言原文件字节不变落在 mock FS 上。句柄打开成功才存 IndexedDB，空目录/坏库不污染下次启动；`create()` 对已存在 vault.json 拒绝覆盖 | 越界改动: ① locales 新增 `startup.*`/`board.emptyColumn` 14 键 + T04 键集合断言放宽为超集（用户已确认，spec 附录 A 补「锁定范围」注记，仍 v1.3）；② fsAdapter 追加 `readHead`（+4 用例）；③ mockFs `getFile` 补 `size`/`slice`、内容模型改字节拼接、暴露 `bytes()`；④ runtime 依赖 nanoid 6.0.2 | 并发: 工作树共享期间 `src/persistence/vaultRepository.ts` 与 `tests/persistence/vaultRepository.test.ts` 一度被未知进程删除（写入后、提交前），已重写恢复并即刻提交，后续 agent 若发现未提交产物丢失请优先怀疑并发清理并尽快落盘提交 | 遗留: 安全模式横幅的三按钮（恢复此快照/选择其他备份/导出当前）是 T29 的范围，本任务只交付占位卡（`data-testid="safe-mode"`）；「重启后句柄权限是否免提示」仍需在企业 Edge 真机复验（承接 T06 遗留）；App 的 locale 源在 T10 落地后应换接 VaultStore 的 LocaleSource
 
 - [2026-10-15] T08 | agent: workbuddy:sess-1015f | commit: "T08: autosave controller with dirty tracking, debounce, Ctrl+S and three-state save indicator" | 验收: 全部通过（5/5） | 备注: 交付 `createAutosave`（dirty 标记 / debounce 1200ms / Ctrl+S 立即保存 / 三态 saved-dirty-error / retry）+ `SaveIndicator` 指示器组件。`npm run test` 131/131 绿（本任务 24 条：autosave 19 + SaveIndicator 5，先 RED 后 GREEN——首轮 18/19，唯一红的是「写盘途中的编辑」，属测试构造缺陷：`chain.then` 把 doFlush 推到微任务，`fs.edit` 抢在写盘前跑完，改用 `io.waitEntered()` 等到真的进了 save 再构造并发编辑）；`npx tsc --noEmit` exit 0（首轮报 TS6196 未用导入，删除后干净）；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 325651 字节，`<script src`/`<link`/`type="module"`/`http(s)://` 资源引用四项均为 0（T02 不变式复测通过） | 依赖偏离: T08 依赖列了 T10，而 T10 仍 pending，未等待即开工——依 T04「接口注入、T10 的 VaultStore 即实现」的既定先例，autosave 只依赖最小端口 `AutosaveStore { subscribe, getVault, markSaved }`，不 import `domain/store`；T10 落地时让 VaultStore 实现该端口并调 `start()` 即可。**此条与《状态同步协议》第 1、4 条（依赖未 done 不得开工）相悖，请用户裁决：若要求严格串行，T08 应改回 pending 并在 T10 之后重做一次接线验收** | 越界改动: ① 新增 `src/views/SaveIndicator.tsx` + `tests/views/SaveIndicator.test.tsx`（产出清单漏了视图，而验收项 4 要求组件测试）；② locales 新增 `save.*` 4 键；③ 刻意**未**改 `src/App.tsx`（顶栏挂载点需要活着的 VaultStore） | 并发: 提交前工作树只有本任务新增的 3 个文件与 locales/task.md 改动，无其他 agent 的未提交产物 | 遗留: 顶栏挂载与 Ctrl+S 全局按键绑定归 T10/T15；保存流程目前无真正的写前快照（`snapshotter` 端口已就位、无人注入，等 T09）
+
+- [2026-10-15] T11 | agent: workbuddy:sess-1015g | commit: "T11: ScheduleEngine with working-day calendar math and memoized date caching" | 验收: 全部通过（6/6） | 备注: 交付 `src/domain/scheduleEngine.ts`（`toDateKey / isWorkday / nextWorkday / addWorkdays / workdaysBetween / duration` + `createScheduleEngine` 实例化 memoize 版 + `DEFAULT_CALENDAR` / `ScheduleEngineError`）与 50 条单测。纯函数、零 I/O；`dayjs 1.11.23` 加入 dependencies（精确锁版，与 zod/nanoid 同风格）。`npx tsc --noEmit` exit 0；`npm test` 181/181 绿（本任务 50 条，T11 前基线 131 条全绿未回退）；`npm run lint:emoji` 干净；`npm run build` 单文件 325663 字节，`<script src`/`<link href`/`type="module"`/`url(http`/外部 `http(s)://` 引用五项均为 0 | **口径裁决**: 验收 3（`workdaysBetween` 含端点）与验收 4（`duration = workdaysBetween + 1`）互相冲突，二者同时成立会让每个工期多算一天（同日任务算 2 天），并将污染 T19 甘特条长度与「工期 N 天」显示；已提请用户裁决，用户选择「保工期正确」，故 `workdaysBetween` 取 `(a, b]`（含末日、不含首日）：Mon→Fri = 4 → 工期 5、同日 = 0 → 工期 1，a>b 严格反对称（Fri→Mon = -4） | 验证强度: 除单测外另做两项独立验证——① 与独立参照实现（原生 `Date` 逐日遍历、**不复用被测代码**）在 2026-01-05→2027-12-31 两年跨度上逐值交叉验证（含 5 个假期 + 3 个补班），正反向均一致，即交叉验证「+1 配套口径」而非自己验自己；② **dayjs CJS → IIFE 互操作实测**（本产物必须是无 `type="module"` 的经典脚本，而 dayjs 是 `export =`，且 nanoid/singlefile 都曾在此处翻车）：用一次性 vite 探针（`configFile:false` 绕开 singlefile 插件）打成 IIFE 后以经典脚本方式执行，`require(`/`import`/`export` 残留均为 0、5 条运行时断言全 PASS，探针目录已删除未留痕，**T19 可直接 import 本模块、无需处理 CJS 互操作** | 越界改动: 无。只改 `src/domain/scheduleEngine.ts`、`tests/domain/scheduleEngine.test.ts` 两个新文件 + `package.json` 的 dayjs 一行；未碰 `src/App.tsx`、`src/locales/*` 及其他任务文件。`package-lock.json` 已按约定 `git checkout --` 还原、未纳入提交（本波次唯一允许改 `package.json` 的车道，lock 由主干统一生成） | 并发: 提交前工作树仅有本任务 2 个新文件 + `package.json` + `task.md`，无其他 agent 的未提交产物 | 遗留: **spec 5.2 与 T11 验收 3 的文字仍是「+1」+「含端点」的原始表述**，建议集成车道在 T19 落地前把本次裁决的口径写死进 spec（已记 T11 明细的《变更提议》，属文字变更，本任务未自行改文档）。`nextWorkday` 定为严格向后取第一个工作日（输入本身是工作日也继续往后），若将来需要「当日即工作日则返回当日」应另开函数而非改它，以免甘特图取后继日期时 off-by-one。`DEFAULT_CALENDAR` 与 `schema.ts` 内一份同形定义并存——刻意不 import，避免纯领域模块反向依赖带 Zod 的 schema 层（spec 第 3 节分层边界）；如需收敛为一处，需由同时拥有 T03/T11 的改动方统一决定。本模块尚未被应用代码引用，产物只随依赖图变化增减 12 字节，接线归 T19
+
