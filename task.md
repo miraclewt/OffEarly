@@ -93,7 +93,7 @@ tests/**                         与 src 镜像
 - [ ] **T09** SnapshotStore（自动与手动快照 / 保留策略 / 恢复） → pending
 
 ### Phase 3 · 领域层
-- [ ] **T10** lexorank + VaultStore + CommandBus（undo/redo） → pending
+- [x] **T10** lexorank + VaultStore + CommandBus（undo/redo） → done (2026-10-15, workbuddy:sess-1015g, commit: "T10: lexorank + VaultStore + CommandBus with undo/redo and app shell wiring")
 - [ ] **T11** ScheduleEngine（工作日历工期计算） → pending
 - [ ] **T12** DependencyGraph（邻接 / 环 / 关键路径 / 阻塞链） → pending
 - [ ] **T13** TopicTree + QueryEngine（组合筛选 / 依赖跳数 / 全文） → pending
@@ -363,11 +363,32 @@ tests/**                         与 src 镜像
 **产出：** `src/domain/lexorank.ts` `src/domain/store.ts` `src/domain/commandBus.ts` `tests/domain/{lexorank,commandBus}.test.ts`
 
 **验收标准：**
-- [ ] `mid(a, b)` 返回严格介于 a、b 之间的字符串；首尾插入（b/a 为 undefined）正确；连续 100 次插入不产生等长冲突退化
-- [ ] VaultStore 为 immutable 更新；selector 订阅精确（改 task 不触发 topic 订阅者，组件测试）
-- [ ] `CommandBus.apply(cmd)` 更新 Store、推 undo 栈、标记 dirty；`undo()/redo()` 可逆（以 MoveTask 命令验证往返一致）
-- [ ] 每个 Command 带 `inverse`；undo 后状态与 apply 前深度相等（结构化比较）
-- [ ] 单测全绿并提交
+- [x] `mid(a, b)` 返回严格介于 a、b 之间的字符串；首尾插入（b/a 为 undefined）正确；连续 100 次插入不产生等长冲突退化 —— 键是 62 进制「分数串」，比较只走词典序；有界间隙走真中点（逐位下钻、空隙 ≥2 就收工），开区间走「紧邻的上/下一个键」（最右可进位 +1 / 最右非零位 −1，该位为 1 时降到 0 再补最大的 `z` 留档位）。13 条单测：`'5' < mid('5','9') < '9'`、相邻位自动加长、共前缀下钻、逆序/等值入参抛错、尾部追加 100 次（长度 ≤4）与头部插入 100 次（长度 ≤8）各 100 个互异键且严格单调、同一间隙反复插 100 次全部落在间隙内、随机插 300 次整体有序无重复
+- [x] VaultStore 为 immutable 更新；selector 订阅精确（改 task 不触发 topic 订阅者，组件测试）—— zustand 5.0.15 vanilla + `subscribeWithSelector`；13 条单测含 2 条真组件测试：`useStore(store, s => s.vault.tasks)` 与 `s => s.vault.topics` 两个组件，改 tasks 时 tasks 组件渲染 1→2 次、topics 组件恒为 1 次；只改 settings 时两者都不重渲染。另附全局 `subscribe`（任何变更都通知，autosave/LocaleSource 用）与自定义 `equals` 的内容比较用例
+- [x] `CommandBus.apply(cmd)` 更新 Store、推 undo 栈、标记 dirty；`undo()/redo()` 可逆（以 MoveTask 命令验证往返一致）—— 20 条单测。dirty 不在 bus 里另立标志：Store 一变，T08 的 autosave 就经 `store.subscribe` 进 dirty 态，用例端到端断言 `bus.apply(...)` 后 `autosave.getState() === 'dirty'`；MoveTask 往返 `undo()` 后 `toEqual` apply 前快照；三步 undo/redo 严格按栈序回放；apply 清空 redo 栈；空栈 undo/redo 返回 false 且不动数据
+- [x] 每个 Command 带 `inverse`；undo 后状态与 apply 前深度相等（结构化比较）—— `Command = Mutation & { inverse: Mutation }`，逆元不再嵌套下一层（否则 undo 语义分叉）；5 个命令逐一断言带 inverse，且逐命令 apply→undo 后与快照深度相等。`task.delete` 的逆元带完整任务体**与原下标**，因此 delete→undo 后数组顺序也一致（不只是集合相等）
+- [x] 单测全绿并提交 —— `npm run test` 183/183（本任务 46 条：lexorank 13 + store 13 + commandBus 20，先 RED 后 GREEN；App 新增 6 条外壳用例）；`npx tsc --noEmit` exit 0（首轮报 `useStore` 与 `VaultStore.subscribe` 签名不兼容，把 subscribe 放宽成 zustand 的 `(state, prevState) => void` 后干净）；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 330024 字节，`<script src`/`<link`/`type="module"`/`http(s)://` 资源引用四项均为 0
+
+**实测证据：** 上一条逐项即证。额外做了产物冒烟（jsdom 真跑 `dist/OffEarly.html` 的内联 bundle）：`#root` 有内容、首屏渲染「连接数据文件夹」、侧栏品牌在位、顶栏占位存在、零脚本错误 —— 兜住「经典脚本能执行 + React 能挂上 #root + 装配没炸」这三类构建管线错误。脚本留在未跟踪的 `.tmp-preview/smoke.mjs`，不入库。
+
+**变更提议（越界清单，已实施并记录）**
+1. **改 `src/App.tsx` + `tests/App.test.tsx`**：T04/T07/T08 三条遗留都指向这里 —— 「locale 存于 VaultStore，T10 的 VaultStore 即为实现」（T04）、「App 的 locale 源在 T10 落地后应换接 VaultStore 的 LocaleSource」（T07）、「顶栏挂载与 Ctrl+S 全局按键绑定归 T10」（T08）。因此本任务把 ready 相改为由 `VaultStore` 承载（`{ dir, store, repository, autosave }`），删掉 App 里的 `phase.vault` 副本；locale 源换成 Store（`useI18n(phase.store)` 外层挂 `useSyncExternalStore`，locale 一变整棵树换语言）；顶栏 `<header data-testid="topbar">` 挂 `SaveIndicator`；`window` 上绑 Ctrl+S/Cmd+S。
+2. **新增 `tests/domain/store.test.tsx`**：产出清单只列了 `tests/domain/{lexorank,commandBus}.test.ts`，但验收项 2 要求「selector 订阅精确」的**组件测试**，store 的用例无处可放。
+3. **新增 runtime 依赖 `zustand` 5.0.15（精确锁版）**：spec 技术栈与模块清单都把 VaultStore 的实现标注为 Zustand，且 `subscribeWithSelector` 就是「selector 精确订阅」的现成实现。体积代价约 +4.4 kB（325.6 → 330.0 kB）。
+4. `App` 新增可选 prop `onSession?: (session: Session) => void`：会话建好的一次性外送口，测试靠它拿到 Store 去驱动 Ctrl+S / locale 换语言链路；T15 用 Context 重做时可直接替换。
+
+**实施注记（T10 发现）**
+- **domain 不 import persistence，靠结构化端口互认。** `store.ts` 只 import `zustand` 与 `./types`；它满足 T04 的 `LocaleSource` 与 T08 的 `AutosaveStore` 是**形状相同**而非继承关系，因此不违反「依赖只向下」。测试里显式写 `const s: AutosaveStore = store` 把这条承诺钉成编译期约束。
+- **LexoRank 的真正坑在「前缀」而不是「加长」。** 词典序下 `'5' < '5V'` 但没有任何字符串介于 `'5'` 与 `'50'` 之间。所以键必须永远至少含一个非零位：这样邻对永不出现「k 与 k+全零」的形状，`mid` 才总可解；`mid` 仍保留一条兜底抛错，输入这种邻对时明确报错而不是悄悄给出顺序错乱的键。开区间的插入刻意用「贴近的上下一个键」而不是二分，否则反复在同侧插入会每位只容纳 6 次（二分）而不是约 61 次。
+- **`task.move` 的逆元是 `task.patch` 而不是 `task.move`。** 移到 done 会把 `progress` 抬到 100，只把 status/order 换回去会残留 100 的进度，undo 就不再深度相等。
+- **reducer 先算再写。** `apply` 先 `reduce` 得到新 vault 才 `setVault`，非法输入（未知 id）抛错时 Store 一个字节都没动 —— 用例 spy `setVault` 断言零调用。
+- **T08 的依赖偏离就此解除。** App 现在用真 `VaultStore` 实例化 autosave 并 `start()`，T08 记录的「注入端口待 T10 接线」已闭合，App 外壳用例覆盖了 Ctrl+S 落盘、revision 递增、保存失败→重试。
+
+**遗留：**
+- 顶栏目前只有保存指示；撤销/重做按钮、视图切换是 T15 的范围（`commandBus` 尚未被 App 实例化，T13 看板拖拽落地时在会话里建一个，`src/domain/commandBus.ts` 因此暂不进产物、被 tree-shake）。
+- `createCommandBus` 未做「同一 Store 只允许一个 bus」的缓存：调用方（T13/T15）需要自己保证每会话建一次，否则会出现两个互不知情的撤销栈。
+- `useI18n` 里 `createI18n(source)` 对 source 的订阅没有拆卸手段（`createI18n` 不返回 teardown，T04 的接口如此）；目前每个会话最多漏一个监听器，可接受，若要修需动 T04 的 `i18n.ts`。
+- 任务/话题的 order 生成仍由调用方负责（T13 拖拽时用 `mid` 取邻位中点）；本任务只提供 `mid` 与命令工厂，没有替看板预先算 order。
 
 **预估：** 1d
 
@@ -825,4 +846,6 @@ tests/**                         与 src 镜像
 
 - [2026-10-15] T07 | agent: qoder:sess-1015e | commit: "T07: VaultRepository + startup flow first screen with safe mode" | 验收: 全部通过（5/5） | 备注: 交付 `vaultRepository`（load/save/peekRevision/create）+ App 启动状态机（booting/need-dir/need-permission/busy/empty-dir/ready/safe-mode/failed 八相）。`npx tsc --noEmit` exit 0；`npm run test` 107/107 绿（本任务 27 条，repository 17 + App 10，先 RED 后 GREEN）；`npm run lint:emoji` 干净；`npm run build` 单文件 325.5 kB；产物真实浏览器 `file://` 冒烟：首屏「连接数据文件夹」渲染、控制台零消息。peekRevision 经新原语 `readHead` 只取文件头 4096 字节提 revision（save 自控键序为前提，键序被打乱时全量解析兜底）；「校验失败不写盘」由 App 测试断言原文件字节不变落在 mock FS 上。句柄打开成功才存 IndexedDB，空目录/坏库不污染下次启动；`create()` 对已存在 vault.json 拒绝覆盖 | 越界改动: ① locales 新增 `startup.*`/`board.emptyColumn` 14 键 + T04 键集合断言放宽为超集（用户已确认，spec 附录 A 补「锁定范围」注记，仍 v1.3）；② fsAdapter 追加 `readHead`（+4 用例）；③ mockFs `getFile` 补 `size`/`slice`、内容模型改字节拼接、暴露 `bytes()`；④ runtime 依赖 nanoid 6.0.2 | 并发: 工作树共享期间 `src/persistence/vaultRepository.ts` 与 `tests/persistence/vaultRepository.test.ts` 一度被未知进程删除（写入后、提交前），已重写恢复并即刻提交，后续 agent 若发现未提交产物丢失请优先怀疑并发清理并尽快落盘提交 | 遗留: 安全模式横幅的三按钮（恢复此快照/选择其他备份/导出当前）是 T29 的范围，本任务只交付占位卡（`data-testid="safe-mode"`）；「重启后句柄权限是否免提示」仍需在企业 Edge 真机复验（承接 T06 遗留）；App 的 locale 源在 T10 落地后应换接 VaultStore 的 LocaleSource
 
-- [2026-10-15] T08 | agent: workbuddy:sess-1015f | commit: "T08: autosave controller with dirty tracking, debounce, Ctrl+S and three-state save indicator" | 验收: 全部通过（5/5） | 备注: 交付 `createAutosave`（dirty 标记 / debounce 1200ms / Ctrl+S 立即保存 / 三态 saved-dirty-error / retry）+ `SaveIndicator` 指示器组件。`npm run test` 131/131 绿（本任务 24 条：autosave 19 + SaveIndicator 5，先 RED 后 GREEN——首轮 18/19，唯一红的是「写盘途中的编辑」，属测试构造缺陷：`chain.then` 把 doFlush 推到微任务，`fs.edit` 抢在写盘前跑完，改用 `io.waitEntered()` 等到真的进了 save 再构造并发编辑）；`npx tsc --noEmit` exit 0（首轮报 TS6196 未用导入，删除后干净）；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 325651 字节，`<script src`/`<link`/`type="module"`/`http(s)://` 资源引用四项均为 0（T02 不变式复测通过） | 依赖偏离: T08 依赖列了 T10，而 T10 仍 pending，未等待即开工——依 T04「接口注入、T10 的 VaultStore 即实现」的既定先例，autosave 只依赖最小端口 `AutosaveStore { subscribe, getVault, markSaved }`，不 import `domain/store`；T10 落地时让 VaultStore 实现该端口并调 `start()` 即可。**此条与《状态同步协议》第 1、4 条（依赖未 done 不得开工）相悖，请用户裁决：若要求严格串行，T08 应改回 pending 并在 T10 之后重做一次接线验收** | 越界改动: ① 新增 `src/views/SaveIndicator.tsx` + `tests/views/SaveIndicator.test.tsx`（产出清单漏了视图，而验收项 4 要求组件测试）；② locales 新增 `save.*` 4 键；③ 刻意**未**改 `src/App.tsx`（顶栏挂载点需要活着的 VaultStore） | 并发: 提交前工作树只有本任务新增的 3 个文件与 locales/task.md 改动，无其他 agent 的未提交产物 | 遗留: 顶栏挂载与 Ctrl+S 全局按键绑定归 T10/T15；保存流程目前无真正的写前快照（`snapshotter` 端口已就位、无人注入，等 T09）
+- [2026-10-15] T08 | agent: workbuddy:sess-1015f | commit: "T08: autosave controller with dirty tracking, debounce, Ctrl+S and three-state save indicator"| 验收: 全部通过（5/5） | 备注: 交付 `createAutosave`（dirty 标记 / debounce 1200ms / Ctrl+S 立即保存 / 三态 saved-dirty-error / retry）+ `SaveIndicator` 指示器组件。`npm run test` 131/131 绿（本任务 24 条：autosave 19 + SaveIndicator 5，先 RED 后 GREEN——首轮 18/19，唯一红的是「写盘途中的编辑」，属测试构造缺陷：`chain.then` 把 doFlush 推到微任务，`fs.edit` 抢在写盘前跑完，改用 `io.waitEntered()` 等到真的进了 save 再构造并发编辑）；`npx tsc --noEmit` exit 0（首轮报 TS6196 未用导入，删除后干净）；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 325651 字节，`<script src`/`<link`/`type="module"`/`http(s)://` 资源引用四项均为 0（T02 不变式复测通过） | 依赖偏离: T08 依赖列了 T10，而 T10 仍 pending，未等待即开工——依 T04「接口注入、T10 的 VaultStore 即实现」的既定先例，autosave 只依赖最小端口 `AutosaveStore { subscribe, getVault, markSaved }`，不 import `domain/store`；T10 落地时让 VaultStore 实现该端口并调 `start()` 即可。**此条与《状态同步协议》第 1、4 条（依赖未 done 不得开工）相悖，请用户裁决：若要求严格串行，T08 应改回 pending 并在 T10 之后重做一次接线验收** | 越界改动: ① 新增 `src/views/SaveIndicator.tsx` + `tests/views/SaveIndicator.test.tsx`（产出清单漏了视图，而验收项 4 要求组件测试）；② locales 新增 `save.*` 4 键；③ 刻意**未**改 `src/App.tsx`（顶栏挂载点需要活着的 VaultStore） | 并发: 提交前工作树只有本任务新增的 3 个文件与 locales/task.md 改动，无其他 agent 的未提交产物 | 遗留: 顶栏挂载与 Ctrl+S 全局按键绑定归 T10/T15；保存流程目前无真正的写前快照（`snapshotter` 端口已就位、无人注入，等 T09）
+
+- [2026-10-15] T10 | agent: workbuddy:sess-1015g | commit: "T10: lexorank + VaultStore + CommandBus with undo/redo and app shell wiring" | 验收: 全部通过（5/5） | 备注: 交付 `lexorank.mid`（62 进制分数串，词典序比较；有界走真中点、开区间走紧邻的上下一个键）+ `createVaultStore`（zustand 5.0.15 vanilla + subscribeWithSelector，immutable，结构化满足 T04 LocaleSource 与 T08 AutosaveStore）+ `createCommandBus`（apply/undo/redo + 5 个命令工厂，Command = Mutation & { inverse: Mutation }）。`npm run test` 183/183 绿（本任务 46 条：lexorank 13 + store 13 + commandBus 20；另在 App 追加 6 条外壳用例，先 RED 后 GREEN）；`npx tsc --noEmit` exit 0（首轮唯一报错是 `useStore` 与 `VaultStore.subscribe` 签名不兼容，把 subscribe 放宽成 zustand 的 `(state, prevState) => void` 即消）；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 330024 字节，四项外链不变式（`<script src`/`<link`/`type="module"`/`http(s)://`）复测全 0；额外用 jsdom 真跑产物内联 bundle 冒烟：`#root` 有内容、首屏「连接数据文件夹」、侧栏品牌在位、顶栏占位存在、零脚本错误 | 依赖: T03 ✓（唯一依赖，全部就绪）| 越界改动: ① 改 `src/App.tsx` + `tests/App.test.tsx`（收口 T04/T07/T08 三条明确指向 T10 的遗留：ready 相改由 VaultStore 承载、locale 源换接 Store、顶栏挂 SaveIndicator、window 上绑 Ctrl+S）；② 新增 `tests/domain/store.test.tsx`（验收项 2 要求组件测试，store 用例无产出位）；③ 新增 runtime 依赖 `zustand` 5.0.15 精确锁版（spec 技术栈与模块清单都标注 VaultStore 用 Zustand）；④ App 新增可选 prop `onSession`（测试拿会话驱动链路，T15 换 Context 时替换）| 并发: 提交前工作树无其他 agent 的未提交产物；`zustand` 的依赖行与 lockfile 由本任务一次性加入（T05 记录里提到的 `zustand` 行是当时另一 agent 写入后又回退的，本次才是真落地）| 前序遗留闭合: **T08 的依赖偏离就此解除** —— App 现在用真 VaultStore 实例化 autosave 并 start()，Ctrl+S 落盘/revision 递增/失败重试都有了外壳级用例；T04 的 LocaleSource 与 T07 的「换接 Store」均已落地 | 遗留: 顶栏撤销/重做按钮与视图切换归 T15（`commandBus` 尚未被 App 实例化，暂被 tree-shake）；`createCommandBus` 未缓存「一 Store 一 bus」，调用方需自行保证；`useI18n` 对 source 的订阅没有 teardown（T04 的 `createI18n` 未返回拆卸手段，每会话最多漏一个监听器）；任务 order 由调用方（T13 拖拽）用 `mid` 生成

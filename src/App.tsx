@@ -1,9 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
+import { useStore } from 'zustand'
 
-import type { LocaleSetting, Vault } from './domain/types'
+import { createVaultStore } from './domain/store'
+import type { VaultStore } from './domain/store'
+import type { Vault } from './domain/types'
 import { createI18n } from './locales/i18n'
-import type { I18n, MsgKey } from './locales/i18n'
+import type { I18n, LocaleSource, MsgKey } from './locales/i18n'
+import { createAutosave } from './persistence/autosave'
+import type { Autosave } from './persistence/autosave'
 import { connectDir } from './persistence/fsAdapter'
 import { handleStore, verifyPermission } from './persistence/handleStore'
 import type { VaultDirHandle } from './persistence/handleStore'
@@ -11,6 +16,7 @@ import { createVaultRepository } from './persistence/vaultRepository'
 import type { VaultRepository } from './persistence/vaultRepository'
 import { VaultValidationError } from './domain/schema'
 import { Icon, IconSprite } from './views/IconSprite'
+import { SaveIndicator } from './views/SaveIndicator'
 
 const INDIGO = '#4F46E5'
 const BORDER = '#E5E7EB'
@@ -67,13 +73,23 @@ export function startupPorts(): StartupPorts {
   }
 }
 
+/** 库打开前的 locale：按浏览器语言解析；打开后换接 VaultStore（见 useI18n）。 */
+const BOOT_LOCALE: LocaleSource = { getLocale: () => 'auto', subscribe: () => () => {} }
+
+/** 打开一个库拿到的三件套。 */
+export interface Session {
+  store: VaultStore
+  repository: VaultRepository
+  autosave: Autosave
+}
+
 type Phase =
   | { kind: 'booting' }
   | { kind: 'need-dir' }
   | { kind: 'need-permission'; dir: VaultDirHandle }
   | { kind: 'busy'; dir: VaultDirHandle }
   | { kind: 'empty-dir'; dir: VaultDirHandle }
-  | { kind: 'ready'; dir: VaultDirHandle; vault: Vault }
+  | ({ kind: 'ready'; dir: VaultDirHandle } & Session)
   | { kind: 'safe-mode'; dir: VaultDirHandle; reason: string }
   | { kind: 'failed'; reason: string }
 
@@ -89,12 +105,28 @@ function isAbort(e: unknown): boolean {
   return e instanceof Error && e.name === 'AbortError'
 }
 
-/** 启动屏与看板共享一份 i18n：locale 来自已打开的库，库未打开前按浏览器语言。 */
-function useI18n(localeSetting: LocaleSetting): I18n {
-  return useMemo(
-    () => createI18n({ getLocale: () => localeSetting, subscribe: () => () => {} }),
-    [localeSetting],
-  )
+/** 打开一个库 = 建 Store + 落盘面 + 自动保存；Store 从此是唯一状态源（T10）。 */
+function openSession(repository: VaultRepository, vault: Vault): Session {
+  const store = createVaultStore(vault)
+  return {
+    repository,
+    store,
+    // autosave 必须挂在同一个 store 上，否则它盯的是另一份内存，永远等不到变更
+    autosave: createAutosave({
+      store,
+      sink: { save: (next) => repository.save(next) },
+    }),
+  }
+}
+
+/**
+ * 启动屏与看板共享一份 i18n：locale 存在库里，源就是 VaultStore。
+ * 外层 useSyncExternalStore 让 settings.locale 一变整棵树就重渲染（T04 的接线收口）。
+ */
+function useI18n(source: LocaleSource): I18n {
+  const i18n = useMemo(() => createI18n(source), [source])
+  useSyncExternalStore(i18n.subscribe, i18n.getLocale)
+  return i18n
 }
 
 const CARD: CSSProperties = {
@@ -163,8 +195,9 @@ function StartupScreen(props: {
   )
 }
 
-function EmptyBoard(props: { vault: Vault; t: (key: MsgKey) => string }) {
-  const { vault, t } = props
+function EmptyBoard(props: { store: VaultStore; t: (key: MsgKey) => string }) {
+  const { store, t } = props
+  const vault = useStore(store, (state) => state.vault)
   return (
     <div
       data-testid="board"
@@ -197,23 +230,30 @@ function EmptyBoard(props: { vault: Vault; t: (key: MsgKey) => string }) {
   )
 }
 
-export function App(props: { ports?: StartupPorts }) {
+export function App(props: { ports?: StartupPorts; onSession?: (session: Session) => void }) {
   const ports = props.ports ?? startupPorts()
   const [phase, setPhase] = useState<Phase>({ kind: 'booting' })
+
+  /** 会话建好的一次性外送口：宿主与测试由此拿到 Store/落盘面/自动保存。 */
+  function makeSession(repository: VaultRepository, vault: Vault): Session {
+    const session = openSession(repository, vault)
+    props.onSession?.(session)
+    return session
+  }
 
   // 打开成功才记住句柄：空目录、损坏的库都不该污染下次启动
   function openDir(dir: VaultDirHandle): Promise<void> {
     setPhase({ kind: 'busy', dir })
-    return ports
-      .openRepository(dir)
+    const repository = ports.openRepository(dir)
+    return repository
       .load()
-      .then(async (vault) => {
+      .then((vault) => (vault === null ? null : ports.storeDir(dir).then(() => vault)))
+      .then((vault) => {
         if (vault === null) {
           setPhase({ kind: 'empty-dir', dir })
-        } else {
-          await ports.storeDir(dir)
-          setPhase({ kind: 'ready', dir, vault })
+          return
         }
+        setPhase({ kind: 'ready', dir, ...makeSession(repository, vault) })
       })
       .catch((e: unknown) => {
         setPhase({ kind: 'safe-mode', dir, reason: loadFailureReason(e) })
@@ -242,6 +282,30 @@ export function App(props: { ports?: StartupPorts }) {
     }
   }, [ports])
 
+  // 自动保存跟着会话起停；start 幂等，重复挂载也安全
+  const autosave = phase.kind === 'ready' ? phase.autosave : null
+  useEffect(() => {
+    if (autosave === null) return
+    autosave.start()
+    return () => {
+      autosave.stop()
+    }
+  }, [autosave])
+
+  // Ctrl+S / Cmd+S 立即落盘（spec 8.2）
+  useEffect(() => {
+    if (autosave === null) return
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
+      event.preventDefault()
+      void autosave?.saveNow()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [autosave])
+
   function handlePick() {
     void ports
       .pickDir()
@@ -262,20 +326,19 @@ export function App(props: { ports?: StartupPorts }) {
   }
 
   function handleCreate(dir: VaultDirHandle) {
-    void ports
-      .openRepository(dir)
+    const repository = ports.openRepository(dir)
+    void repository
       .create()
       .then(async (vault) => {
         await ports.storeDir(dir)
-        setPhase({ kind: 'ready', dir, vault })
+        setPhase({ kind: 'ready', dir, ...makeSession(repository, vault) })
       })
       .catch((e: unknown) => {
         setPhase({ kind: 'failed', reason: loadFailureReason(e) })
       })
   }
 
-  const localeSetting: LocaleSetting = phase.kind === 'ready' ? phase.vault.settings.locale : 'auto'
-  const i18n = useI18n(localeSetting)
+  const i18n = useI18n(phase.kind === 'ready' ? phase.store : BOOT_LOCALE)
   const t = i18n.t
 
   let main: ReactNode
@@ -320,7 +383,7 @@ export function App(props: { ports?: StartupPorts }) {
       )
       break
     case 'ready':
-      main = <EmptyBoard vault={phase.vault} t={t} />
+      main = <EmptyBoard store={phase.store} t={t} />
       break
     case 'safe-mode':
       main = (
@@ -379,7 +442,26 @@ export function App(props: { ports?: StartupPorts }) {
           </div>
         </div>
       </aside>
-      <main style={{ flex: 1, minWidth: 0 }}>{main}</main>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        {/* 顶栏：T15 在此补撤销/重做与视图切换，本任务先落保存指示 */}
+        <header
+          data-testid="topbar"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: 12,
+            height: 40,
+            flex: '0 0 40px',
+            padding: '0 16px',
+            background: '#FFFFFF',
+            borderBottom: `1px solid ${BORDER}`,
+          }}
+        >
+          {phase.kind === 'ready' ? <SaveIndicator autosave={phase.autosave} t={t} /> : null}
+        </header>
+        <main style={{ flex: 1, minWidth: 0, minHeight: 0 }}>{main}</main>
+      </div>
     </div>
   )
 }

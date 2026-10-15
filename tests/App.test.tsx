@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '../src/App'
-import type { StartupPorts } from '../src/App'
+import type { Session, StartupPorts } from '../src/App'
 import { createNewVault, createVaultRepository } from '../src/persistence/vaultRepository'
 import { asDirHandle, makeDir, makeFile } from './persistence/mockFs'
 import type { MockDirHandle } from './persistence/mockFs'
 import type { VaultDirHandle } from '../src/persistence/handleStore'
+import type { Vault } from '../src/domain/types'
 
 function vaultJson(): string {
   return JSON.stringify(createNewVault())
@@ -31,6 +32,8 @@ function ports(options: {
   dir?: MockDirHandle
   hasPermission?: boolean
   requestResult?: boolean
+  /** 传进来就能让落盘按需失败，用来构造「保存失败 → 重试」链路。 */
+  saveGate?: { failing: boolean }
 }): StartupPorts {
   const dir = asDirHandle(options.dir ?? dirWith({}))
   return {
@@ -39,12 +42,23 @@ function ports(options: {
     hasWritePermission: vi.fn(async () => options.hasPermission ?? true),
     requestWritePermission: vi.fn(async () => options.requestResult ?? true),
     pickDir: vi.fn(async () => dir),
-    openRepository: vi.fn((handle: VaultDirHandle) => createVaultRepository(handle)),
+    openRepository: vi.fn((handle: VaultDirHandle) => {
+      const repository = createVaultRepository(handle)
+      const gate = options.saveGate
+      if (gate === undefined) return repository
+      return {
+        ...repository,
+        save: async (vault: Vault) => {
+          if (gate.failing) throw new Error('disk full')
+          await repository.save(vault)
+        },
+      }
+    }),
   }
 }
 
-async function renderApp(p: StartupPorts) {
-  render(<App ports={p} />)
+async function renderApp(p: StartupPorts, onSession?: (session: Session) => void) {
+  render(<App ports={p} onSession={onSession} />)
   return p
 }
 
@@ -156,5 +170,102 @@ describe('启动流程：损坏的库进入只读安全模式', () => {
     await renderApp(ports({ dir }))
 
     expect(await screen.findByText(/请升级 OffEarly/)).toBeTruthy()
+  })
+})
+
+function decodeVault(dir: MockDirHandle): Vault {
+  const file = dir.files.get('vault.json')
+  if (file === undefined) throw new Error('vault.json 不存在')
+  return JSON.parse(new TextDecoder().decode(file.bytes())) as Vault
+}
+
+/** 顶栏保存指示 / Ctrl+S / locale 源 —— T04、T07、T08 的接线在此收口（T10）。 */
+describe('应用外壳：保存指示、Ctrl+S 与 locale 源', () => {
+  async function openReady(options: { saveGate?: { failing: boolean }; locale?: 'en' } = {}) {
+    const raw = JSON.parse(vaultJson()) as Vault
+    if (options.locale !== undefined) raw.settings.locale = options.locale
+    const dir = dirWith({ vault: JSON.stringify(raw) })
+    const captured: Session[] = []
+    await renderApp(ports({ dir, ...options }), (session) => captured.push(session))
+    await waitFor(() => expect(screen.getByTestId('board')).toBeTruthy())
+    const session = captured[0]
+    if (session === undefined) throw new Error('会话未建立')
+    return { dir, session }
+  }
+
+  it('库打开后顶栏出现保存指示，初始为已保存', async () => {
+    await openReady()
+
+    const indicator = screen.getByTestId('save-indicator')
+    expect(indicator.getAttribute('data-state')).toBe('saved')
+    expect(screen.getByText('已保存')).toBeTruthy()
+    // 顶栏确实在页面里，而不只是渲染到了游离节点
+    expect(screen.getByTestId('topbar').contains(indicator)).toBe(true)
+  })
+
+  it('Ctrl+S 立即落盘：提示转已保存，磁盘 revision 递增', async () => {
+    const { dir, session } = await openReady()
+    expect(decodeVault(dir).revision).toBe(0)
+
+    act(() => {
+      session.store.update((vault) => ({ ...vault }))
+    })
+    expect(screen.getByText('未保存')).toBeTruthy()
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+    expect(decodeVault(dir).revision).toBe(1)
+  })
+
+  it('没有未保存变更时 Ctrl+S 不写盘', async () => {
+    const { dir } = await openReady()
+    const before = new TextDecoder().decode(dir.files.get('vault.json')?.bytes())
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+
+    expect(new TextDecoder().decode(dir.files.get('vault.json')?.bytes())).toBe(before)
+  })
+
+  it('保存失败时顶栏给出保存失败与重试，修好后点重试恢复已保存', async () => {
+    const gate = { failing: true }
+    const { dir, session } = await openReady({ saveGate: gate })
+
+    act(() => {
+      session.store.update((vault) => ({ ...vault }))
+    })
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+
+    await waitFor(() => expect(screen.getByText('保存失败')).toBeTruthy())
+    expect(decodeVault(dir).revision).toBe(0)
+
+    gate.failing = false
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+    expect(decodeVault(dir).revision).toBe(1)
+  })
+
+  it('locale 源是 VaultStore：库里是 en 就直接按英文渲染', async () => {
+    await openReady({ locale: 'en' })
+
+    expect(screen.getByText('To Do')).toBeTruthy()
+    expect(screen.queryByText('待办')).toBeNull()
+  })
+
+  it('改 settings.locale 后整棵树跟着换语言（T04 接线收口）', async () => {
+    const { session } = await openReady()
+    expect(screen.getByText('待办')).toBeTruthy()
+
+    act(() => {
+      session.store.update((vault) => ({
+        ...vault,
+        settings: { ...vault.settings, locale: 'en' },
+      }))
+    })
+
+    await waitFor(() => expect(screen.getByText('To Do')).toBeTruthy())
+    expect(screen.queryByText('待办')).toBeNull()
   })
 })
