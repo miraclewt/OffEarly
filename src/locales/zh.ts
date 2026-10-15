@@ -46,6 +46,24 @@ export const zh = {
     error: '保存失败',
     retry: '重试',
   },
+  // T14 追加：topic 侧栏（尾部追加，不改动既有键）
+  sidebar: {
+    topics: '话题',
+    newTopic: '新建话题',
+    newSubtopic: '新建子话题',
+    rename: '重命名',
+    changeColor: '改色',
+    archive: '归档',
+    unarchive: '取消归档',
+    showArchived: '显示已归档',
+    hideArchived: '隐藏已归档',
+    milestones: '里程碑',
+    filters: '筛选器',
+    backup: '备份',
+    settings: '设置',
+    untitled: '未命名话题',
+    newTopicPlaceholder: '话题名称',
+  },
 } as const
 
 export type MsgKey = NestedKeyOf<typeof zh>
