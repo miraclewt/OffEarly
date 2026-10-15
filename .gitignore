@@ -4,3 +4,9 @@ vibe_images/
 *.log
 .DS_Store
 Thumbs.db
+
+# agent-local scratch（非交付物）
+# .tmp-preview/  预览与冒烟脚本（T05/T10 落在这里，按约定不入库）
+# .workbuddy/    WorkBuddy 工作区元数据与记忆
+.tmp-preview/
+.workbuddy/
