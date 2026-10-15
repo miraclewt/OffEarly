@@ -75,6 +75,34 @@ tests/**                         与 src 镜像
 
 ---
 
+## 分支与合入约定（trunk-based 短分支）
+
+**主干：** `feat/foundation`。所有车道分支从主干切出、回合主干；合入单元是**单个任务**，不是整条车道。
+
+**车道划分（按 spec 第 3 节分层边界，文件域互斥）：**
+
+| 车道 | 分支 | 任务链 | 主要文件域 |
+|---|---|---|---|
+| A 领域·状态 | `feat/lane-domain-state` | T10 | `src/domain/{lexorank,store,commandBus}.ts` |
+| B 领域·算法 | `feat/lane-depgraph` | T12 → T13 → T19 | `src/domain/{dependencyGraph,topicTree,queryEngine,ganttModel}.ts` |
+| C 日程引擎 | `feat/lane-schedule` | T11 | `src/domain/scheduleEngine.ts` |
+| D 持久化·安全 | `feat/lane-persistence` | T09 → T27 → T29 → T26 → T28 | `src/persistence/*` |
+| E 看板 UI | `feat/lane-board-ui` | T14 → T15 → T17 → T24 → T25 | `src/views/{Topic*,Board*,Task*,Filter*,Milestone*,NoteEditor,Lightbox}.tsx` |
+| F 甘特 UI | `feat/lane-gantt` | T20 → T21 → T22 → T23 | `src/views/Gantt*`、`src/controllers/ganttViewport.ts` |
+| G 集成·交付 | 主干直做 | T30 → T31 → T32 → T33 | 全库（单一 owner） |
+
+**合入规则（五条，违反即视为冲突源）：**
+
+1. **一个任务一合入。** 某 Txx 验收全绿 → 立即 rebase 到主干 → `git merge --no-ff` → 车道继续 rebase。**分支寿命 ≤1 天**；禁止长期分歧后再合。
+2. **热文件单写者。** `task.md` / `src/App.tsx` / `package.json` / `package-lock.json` 同一时刻只允许一个车道持有未提交改动。`src/locales/*` 一律**尾部追加**键。
+3. **依赖安装串行。** 同一波次内只允许一条车道改 `package.json`；合并后由主干统一 `npm install` 生成 lock，其余车道再 rebase 取新 lock。
+4. **App.tsx 单 owner。** 视图挂载 / 路由接线统一由集成车道（主干）执行；车道只交付「可挂载」的组件（沿用 T05 IconSprite、T08 SaveIndicator 的既定手法）。
+5. **状态同步不变。** 仍遵《状态同步协议》；本约定只补充「用哪条分支、怎么合」。
+
+**依赖修正（2026-10-15）：** `T12` 的依赖由 `T10` **放宽为 `T03`**。依据 spec 第 3 节模块表——`DependencyGraph` 是纯函数模块（依赖「无」），只需要 T03 的类型定义，不需要 T10 的 VaultStore。放宽后首波可并行 **T09 / T10 / T11 / T12** 四个文件域互斥的任务。其余依赖保持不变（`T13←T12`、`T19←T11,T12,T13` 均为真实调用依赖，不放宽）。
+
+---
+
 ## 任务总表
 
 ### Phase 0 · 风险验证
@@ -417,7 +445,7 @@ tests/**                         与 src 镜像
 
 **背景：** Jira 式依赖能力核心；环检测决定关键路径是否可算；阻塞链驱动看板标记与筛选。
 
-**依赖：** T10
+**依赖：** T03（原为 T10，2026-10-15 放宽：DependencyGraph 为纯函数模块，只需 T03 类型；依据见《分支与合入约定》）
 **产出：** `src/domain/dependencyGraph.ts` `tests/domain/dependencyGraph.test.ts`
 
 **验收标准：**
