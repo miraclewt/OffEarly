@@ -144,7 +144,7 @@ tests/**                         与 src 镜像
 - [ ] R1 验证 `showDirectoryPicker` 在 `file://` 可调用并返回目录句柄、可读写子文件 —— **需用户手势，待企业 Edge 实测**（API 存在性与 `isSecureContext=true` 已确认）
 - [x] R2 验证句柄存入 IndexedDB 后重开页面可取出（失败则记录降级：每次启动重选目录）—— PASS：IndexedDB 在 `file://` 可读写
 - [x] R3 验证内联样式 SVG → data URI → Canvas → `toBlob` 导出不抛 SecurityError（taint）—— PASS：产出 5981 字节 PNG，画布未 taint
-- [x] R4 验证剪贴板粘贴图片在 `file://` 可取到 File（失败则降级为仅拖入/选文件）—— **FAIL（用户 2026-10-15 在企业 Edge 实测）**：降级已启用，笔记图片只保留拖入 / 工具栏选择两条路径；spec 6.4 与 11.1 同步裁剪，不留条件开关。失败签名待补（权限被策略拒绝 / 剪贴板无图片项）
+- [x] R4 验证剪贴板粘贴图片在 `file://` 可取到 File（失败则降级为仅拖入/选文件）—— **FAIL（用户 2026-10-15 在企业 Edge 实测）**：签名 `NotAllowedError: Failed to execute 'read' on 'Clipboard'`，即 API 可达但被权限门拦下；降级已启用，笔记图片只保留拖入 / 工具栏选择两条路径，spec 6.4 与 11.1 同步裁剪，不留条件开关。待一次复测区分成因（权限被拒 vs `Document is not focused`）
 - [x] R5 用 5000 任务样本 JSON 测 `JSON.stringify` 耗时并记录毫秒数 —— PASS：stringify 18.1ms / parse 8.1ms / 2691 KB
 - [ ] 结果回填 spec 第 11 节表格，据此裁剪降级路径；spike 归档并提交 —— 已回填 11.1 实测结果；待 R1/R4/R6 人工复验后归档
 
@@ -758,3 +758,5 @@ tests/**                         与 src 镜像
 - [2026-10-15] T03 | agent: qoder:sess-1015a | commit: "T03: domain types + zod schema + migration pipeline" | 验收: 全部通过 | 备注: `npx vitest run` 19/19 绿，`npx tsc --noEmit` 零错，`npm run build` 仍产出单文件 `dist/OffEarly.html`（type=module 0 / 外链 0 / http 引用 0，T02 不变式复测通过）；spec 4.2 补写 `Settings` 显式类型与 `Status/Kind/Priority` 别名，文档版本 v1.3；依赖新增 zod 4.6.7（runtime）、vitest 5.0.4（dev） | 越界改动: `tsconfig.json` include 增 `"tests"`、`package.json` 增 `test` 脚本（见 T03 变更提议） | 遗留: `src/domain/*` 尚未被应用代码引用，产物体积不变，接线在 T07/T10；`progress` 与 `status=done` 的联动约束属领域规则，留给 T10 CommandBus 强制，schema 只校验 0-100 区间
 
 - [2026-10-15] T01（补记 R4） | agent: qoder:sess-1015a | commit: "T01: R4 clipboard paste confirmed unavailable in enterprise Edge" | 验收: R4 判定完成（结果 FAIL），R1/R6 仍待用户回报 | 备注: 用户在企业 Edge 实测回报「R4 fail」，按 spec 第 11 节预案启用降级——笔记图片只保留拖入与工具栏选择两条路径，剪贴板粘贴不做条件开关；已同步改 spec 6.4、11.1 与 T25 的第 595 行验收项（跨任务裁剪，依据即本条） | 遗留: R4 失败签名未采集，需在 `spike.html` 红卡上区分「权限被策略拒绝」与「剪贴板内无图片项」；R1/R6 结果仍待用户回报，R1 未通过前 T06 不启动
+
+- [2026-10-15] T01（补记 R4 签名） | agent: qoder:sess-1015a | commit: "T01: record R4 NotAllowedError signature" | 验收: R4 仍判 FAIL，成因待一次复测区分 | 备注: 用户提供红卡原文 `NotAllowedError: Failed to execute 'read' on 'Clipboard'`，说明 API 存在且可达、失败发生在权限门，不是能力缺失；Chromium 的 `NotAllowedError` 有两类成因——权限被拒（弹窗取消或组策略）与 `Document is not focused`（截图工具抢占前台焦点，真实使用中不复现）。降级维持不变：拖入与工具栏选择已完整覆盖图片插入，粘贴路径不做条件开关，仅在复测通过时恢复。已同步 spec 11.1 的 R4 行与 T01 验收项 | 遗留: R1/R6 结果仍待用户回报，R1 未通过前 T06 不启动

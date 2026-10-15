@@ -474,7 +474,7 @@ spike 结果回填本文档第 11 节并据此裁剪降级路径，然后才进�
 | R1 | 待人工验证 | API 存在已确认；目录选择与子文件读写需用户手势，待企业 Edge 实测 |
 | R2 | **PASS** | IndexedDB 在 `file://` 可读写；句柄结构化克隆往返由 R1 授权后自动复检 |
 | R3 | **PASS** | SVG→data URI→Canvas→PNG 成功（5981 字节），画布未被 taint |
-| R4 | **FAIL**（企业 Edge 实测） | `navigator.clipboard.read()` 在 `file://` 下不可用；按预案裁剪粘贴路径，笔记图片只保留拖入 / 工具栏选择两条路径（见 6.4）。具体失败签名待补：区分「权限被策略拒绝」与「剪贴板内无图片项」 |
+| R4 | **FAIL**（企业 Edge 实测） | `navigator.clipboard.read()` 抛 `NotAllowedError: Failed to execute 'read' on 'Clipboard'`——API 存在且可达，是被权限门拦下，而非不支持。按预案裁剪粘贴路径，笔记图片只保留拖入 / 工具栏选择两条（见 6.4）。`NotAllowedError` 在 Chromium 有两种成因：权限被拒（弹窗点了取消或组策略禁止）与 `Document is not focused`（截图工具抢走前台焦点）；后者在真实使用中不复现，故保留一次复测机会 |
 | R5 | **PASS** | 5000 任务：stringify 18.1ms、parse 8.1ms、2691 KB，远低于 200ms 阈值 |
 | R6 | 待人工验证 | 依赖 R1 句柄做读写往返计时；同步盘延迟需人工观察 |
 
