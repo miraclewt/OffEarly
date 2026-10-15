@@ -95,7 +95,7 @@ tests/**                         与 src 镜像
 
 1. **一个任务一合入。** 某 Txx 验收全绿 → 立即 rebase 到主干 → `git merge --no-ff` → 车道继续 rebase。**分支寿命 ≤1 天**；禁止长期分歧后再合。
 2. **热文件单写者。** `task.md` / `src/App.tsx` / `package.json` / `package-lock.json` 同一时刻只允许一个车道持有未提交改动。`src/locales/*` 一律**尾部追加**键。
-3. **依赖安装串行。** 同一波次内只允许一条车道改 `package.json`；合并后由主干统一 `npm install` 生成 lock，其余车道再 rebase 取新 lock。
+3. **依赖安装串行。** 同一波次内只允许一条车道改 `package.json`；合并后由主干统一 `npm install` 生成 lock，其余车道再 rebase 取新 lock。**车道一律不提交 `package-lock.json` 的差异**——跑完 `npm install` 后若 lock 被改写，先 `git checkout -- package-lock.json` 还原，再只提交 `package.json` 的依赖行。
 4. **App.tsx 单 owner。** 视图挂载 / 路由接线统一由集成车道（主干）执行；车道只交付「可挂载」的组件（沿用 T05 IconSprite、T08 SaveIndicator 的既定手法）。
 5. **状态同步不变。** 仍遵《状态同步协议》；本约定只补充「用哪条分支、怎么合」。
 
