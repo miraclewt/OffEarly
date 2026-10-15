@@ -118,7 +118,7 @@ tests/**                         与 src 镜像
 - [x] **T06** FsAccessAdapter + handleStore（目录连接 / 权限恢复 / 降级） → done (2026-10-15, qoder:sess-1015d, commit: "T06: FsAccessAdapter + handleStore with IndexedDB persistence and R2 fallback")
 - [x] **T07** VaultRepository + 启动流程首屏 → done (2026-10-15, qoder:sess-1015e, commit: "T07: VaultRepository + startup flow first screen with safe mode")
 - [x] **T08** Autosave controller（dirty / debounce / Ctrl+S / 保存指示） → done (2026-10-15, workbuddy:sess-1015f, commit: "T08: autosave controller with dirty tracking, debounce, Ctrl+S and three-state save indicator")
-- [ ] **T09** SnapshotStore（自动与手动快照 / 保留策略 / 恢复） → pending
+- [x] **T09** SnapshotStore（自动与手动快照 / 保留策略 / 恢复） → done (2026-10-15, workbuddy:sess-1015g, commit: "T09: SnapshotStore with rolling backups, retention policy and restore")
 
 ### Phase 3 · 领域层
 - [ ] **T10** lexorank + VaultStore + CommandBus（undo/redo） → pending
@@ -373,11 +373,22 @@ tests/**                         与 src 镜像
 **产出：** `src/persistence/snapshotStore.ts` `tests/persistence/snapshotStore.test.ts`
 
 **验收标准：**
-- [ ] `snapshot()` 把当前 vault.json 复制为 `.backup/vault-<YYYYMMDD-HHmmss>.json`
-- [ ] 自动策略：每会话首存 1 份 + 距上次 ≥30min 1 份（假计时器验证）
-- [ ] 保留策略：最近 20 份 + 每日首份保留 30 天，超出删除（构造 25 份样本验证）
-- [ ] `list()` 返回时间/大小/任务数；`restore(id)` 恢复前对当前版本再打一份快照
-- [ ] 单测全绿并提交
+- [x] `snapshot()` 把当前 vault.json 复制为 `.backup/vault-<YYYYMMDD-HHmmss>.json` —— 逐字节复制当前磁盘文件（非重新序列化内存对象）；文件名取注入时钟的本地时间；同秒重名追加 `-2` 序号防覆盖；vault.json 不存在时抛 `SnapshotError` 且不产生空快照
+- [x] 自动策略：每会话首存 1 份 + 距上次 ≥30min 1 份（假计时器验证）—— `autoSnapshot()` 由 `lastSnapshotAt`（会话内状态，构造时为 null）闸门控制：首次必打，之后 `<30min` 返回 null 不落盘、`≥30min` 再打；手动 `snapshot()` 也重置该窗口。`vi.useFakeTimers()` + `setSystemTime` 覆盖 4 条
+- [x] 保留策略：最近 20 份 + 每日首份保留 30 天，超出删除（构造 25 份样本验证）—— 纯函数 `selectRetained` 逐条断言：25 份同日样本留 21（当日首份 + 最近 20 份）；>30 天的每日首份不再保护、窗口内的每日首份即便掉出最近 20 份仍保留；另有落盘集成断言（`snapshot()` 后磁盘旧样本被 `remove`）
+- [x] `list()` 返回时间/大小/任务数；`restore(id)` 恢复前对当前版本再打一份快照 —— `list()` 按时间倒序返回 `{id, createdAt, sizeBytes, taskCount}`，`.backup/` 不存在返回空数组、非快照命名忽略、损坏快照按任务数 0 计入；`restore(id)` 先读快照内容再打「恢复前安全快照」（读在前是为了避开 prune 误删）、最后覆盖 vault.json；快照不存在抛错且不改盘
+- [x] 单测全绿并提交 —— `npx vitest run tests/persistence/snapshotStore.test.ts` 20/20；`npm test` 151/151（11 文件）；`npx tsc --noEmit` exit 0；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 325663 字节
+
+**实测证据：** 上条即逐项证据。`npx tsc --noEmit` exit 0；`npm test` → `Test Files 11 passed (11) / Tests 151 passed (151)`（本任务 20 条，先 RED 后 GREEN——首轮 17/20，3 条红均为测试构造缺陷：两处 `T(1,...)` 误把「9 月 1 日」写成「10 月 1 日」、一处未把假时钟拨到 12:00 导致断言错文件；改正后全绿）；`npm run build` 仍产出单文件 `dist/OffEarly.html` 325663 字节（`dist` 在 `.gitignore` 内，不入提交）。
+
+**实施注记（T09 发现）：**
+- **快照口径取「复制磁盘上的 vault.json」，不取「序列化传入的 Vault」。** spec 8.2 第 3 步的语义是「写前保存上一版已知good状态」，而磁盘上那份才是可回滚基线；`createWritable()` 截断写会把好文件截坏，只有逐字节副本能兜住。为此 `snapshot()` 读盘复制，与 T08 `AutosaveSnapshotter` 传入的内存对象解耦。
+- **桥接 T08 的写前快照端口。** 交付 `autoSnapshotter()` 返回 `{ snapshot(): Promise<void> }`（结构兼容 `AutosaveSnapshotter`，不 import `autosave`），内部走自动策略闸门——autosave 每次保存都调它，但只有会话首次与每 30min 才真正落一份，兑现 spec 8.2「会话首次写 / 距上次 ≥30min」。App 侧注入归集成车道（`src/App.tsx` 不在本任务产出清单），本任务只交付可挂载件。
+- **`selectRetained` 抽成纯函数。** 保留策略是纯日期/计数逻辑，独立导出后可用构造样本直接断言（25 份样本三条），不必依赖真实文件系统；`prune()` 只负责把「该删的」映射成 `remove` 调用。
+- **本地时间贯穿到底。** 文件名时间戳、`createdAt`、每日首份分组全部用本地时间：`createdAt` 输出为带时区偏移的 ISO（如 `2026-10-15T09:30:12+08:00`），切片前 10 位即本地日期；若用 `toISOString()`（UTC），UTC+8 下本地 00:30 的快照会被串到前一天、每日首份分组错位。
+- **`restore` 的读写顺序是有意的。** `writeSnapshot()` 末尾会触发保留策略清理，直接恢复的那份旧快照有可能正好落在清理集里；因此先 `readText` 取出内容、再打安全快照、最后写入，避免「边恢复边被 prune 删掉」的竞态。
+
+**变更提议（越界清单）：** 无。只动了产出清单内的两个文件（`src/persistence/snapshotStore.ts`、`tests/persistence/snapshotStore.test.ts`）与 `task.md`；`package.json` 无新增依赖（复用既有 vitest/nanoid/fsAdapter），`package-lock.json` 无净改动（`npm install` 的差异已 `git checkout --` 还原）。
 
 **预估：** 1d
 
@@ -854,3 +865,5 @@ tests/**                         与 src 镜像
 - [2026-10-15] T07 | agent: qoder:sess-1015e | commit: "T07: VaultRepository + startup flow first screen with safe mode" | 验收: 全部通过（5/5） | 备注: 交付 `vaultRepository`（load/save/peekRevision/create）+ App 启动状态机（booting/need-dir/need-permission/busy/empty-dir/ready/safe-mode/failed 八相）。`npx tsc --noEmit` exit 0；`npm run test` 107/107 绿（本任务 27 条，repository 17 + App 10，先 RED 后 GREEN）；`npm run lint:emoji` 干净；`npm run build` 单文件 325.5 kB；产物真实浏览器 `file://` 冒烟：首屏「连接数据文件夹」渲染、控制台零消息。peekRevision 经新原语 `readHead` 只取文件头 4096 字节提 revision（save 自控键序为前提，键序被打乱时全量解析兜底）；「校验失败不写盘」由 App 测试断言原文件字节不变落在 mock FS 上。句柄打开成功才存 IndexedDB，空目录/坏库不污染下次启动；`create()` 对已存在 vault.json 拒绝覆盖 | 越界改动: ① locales 新增 `startup.*`/`board.emptyColumn` 14 键 + T04 键集合断言放宽为超集（用户已确认，spec 附录 A 补「锁定范围」注记，仍 v1.3）；② fsAdapter 追加 `readHead`（+4 用例）；③ mockFs `getFile` 补 `size`/`slice`、内容模型改字节拼接、暴露 `bytes()`；④ runtime 依赖 nanoid 6.0.2 | 并发: 工作树共享期间 `src/persistence/vaultRepository.ts` 与 `tests/persistence/vaultRepository.test.ts` 一度被未知进程删除（写入后、提交前），已重写恢复并即刻提交，后续 agent 若发现未提交产物丢失请优先怀疑并发清理并尽快落盘提交 | 遗留: 安全模式横幅的三按钮（恢复此快照/选择其他备份/导出当前）是 T29 的范围，本任务只交付占位卡（`data-testid="safe-mode"`）；「重启后句柄权限是否免提示」仍需在企业 Edge 真机复验（承接 T06 遗留）；App 的 locale 源在 T10 落地后应换接 VaultStore 的 LocaleSource
 
 - [2026-10-15] T08 | agent: workbuddy:sess-1015f | commit: "T08: autosave controller with dirty tracking, debounce, Ctrl+S and three-state save indicator" | 验收: 全部通过（5/5） | 备注: 交付 `createAutosave`（dirty 标记 / debounce 1200ms / Ctrl+S 立即保存 / 三态 saved-dirty-error / retry）+ `SaveIndicator` 指示器组件。`npm run test` 131/131 绿（本任务 24 条：autosave 19 + SaveIndicator 5，先 RED 后 GREEN——首轮 18/19，唯一红的是「写盘途中的编辑」，属测试构造缺陷：`chain.then` 把 doFlush 推到微任务，`fs.edit` 抢在写盘前跑完，改用 `io.waitEntered()` 等到真的进了 save 再构造并发编辑）；`npx tsc --noEmit` exit 0（首轮报 TS6196 未用导入，删除后干净）；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 325651 字节，`<script src`/`<link`/`type="module"`/`http(s)://` 资源引用四项均为 0（T02 不变式复测通过） | 依赖偏离: T08 依赖列了 T10，而 T10 仍 pending，未等待即开工——依 T04「接口注入、T10 的 VaultStore 即实现」的既定先例，autosave 只依赖最小端口 `AutosaveStore { subscribe, getVault, markSaved }`，不 import `domain/store`；T10 落地时让 VaultStore 实现该端口并调 `start()` 即可。**此条与《状态同步协议》第 1、4 条（依赖未 done 不得开工）相悖，请用户裁决：若要求严格串行，T08 应改回 pending 并在 T10 之后重做一次接线验收** | 越界改动: ① 新增 `src/views/SaveIndicator.tsx` + `tests/views/SaveIndicator.test.tsx`（产出清单漏了视图，而验收项 4 要求组件测试）；② locales 新增 `save.*` 4 键；③ 刻意**未**改 `src/App.tsx`（顶栏挂载点需要活着的 VaultStore） | 并发: 提交前工作树只有本任务新增的 3 个文件与 locales/task.md 改动，无其他 agent 的未提交产物 | 遗留: 顶栏挂载与 Ctrl+S 全局按键绑定归 T10/T15；保存流程目前无真正的写前快照（`snapshotter` 端口已就位、无人注入，等 T09）
+
+- [2026-10-15] T09 | agent: workbuddy:sess-1015g | commit: "T09: SnapshotStore with rolling backups, retention policy and restore" | 验收: 全部通过（5/5） | 备注: 交付 `createSnapshotStore`（`snapshot` / `autoSnapshot` / `list` / `restore` / `autoSnapshotter`）+ 纯函数 `selectRetained`。`npm run test` 151/151 绿（本任务 20 条，先 RED 后 GREEN——首轮 17/20，3 条红全是我测试构造的错：两处 `T(1,...)` 把「9 月 1 日」误写成「10 月 1 日」、一处未把假时钟拨到 12:00 导致断言了错文件名）；`npx tsc --noEmit` exit 0；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 325663 字节（`dist` 已 gitignore，不入提交） | 设计要点: ① 快照口径取「复制磁盘上的 vault.json」而非「序列化传入的 Vault」——spec 8.2 要保的是上一版已知good状态，只有逐字节副本能兜住截断写，故 `snapshot()` 读盘复制、与 T08 传入的内存对象解耦；② 交付 `autoSnapshotter()`（结构兼容 T08 `AutosaveSnapshotter`，不 import autosave），内部走自动策略闸门，接上 T08「snapshotter 端口已就位、无人注入」的遗留；App 注入归集成车道（未改 `src/App.tsx`）；③ 保留策略抽成纯函数 `selectRetained(entries, now, opts)`，25 份样本三条纯断言 + 一条落盘集成断言；④ 全程本地时间——`createdAt` 输出带时区偏移的 ISO，切片前 10 位即本地日期（若用 UTC ISO，UTC+8 下本地 00:30 会被串到前一天、每日首份分组错位）；⑤ `restore` 先读快照内容、再打安全快照、最后覆盖，避开 prune 误删正在恢复的那份 | 变更提议: 无（只动产出清单两文件 + task.md；无新依赖；`package-lock.json` 的 `npm install` 差异已 `git checkout --` 还原，未入提交） | 遗留: ① `src/App.tsx` 的 autosave + snapshotStore 接线归集成车道；② `restore()` 只做逐字节覆盖、不校验快照内容，损坏快照的「最近可用」挑选与启动自愈归 T29；③ 快照只复制 vault.json 单文件、不含 assets/，整库导出归 T28 的「导出库副本」；④ 首次保存前若 vault.json 尚不存在，`snapshot()` 抛 `SnapshotError`（autosave 据此不写盘），正常运行序下 T07 `create()` 已先落盘 vault.json，此分支仅在异常启动路径出现
