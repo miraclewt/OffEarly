@@ -148,7 +148,7 @@ tests/**                         与 src 镜像
 ### Phase 7 · 备份、冲突与安全模式
 - [x] **T27** ConflictDialog（revision 冲突三选 + 30s 轮询） → done (2026-10-15, workbuddy:sess-1015i, commit: "T27: conflict guard with three-way resolution, backup-first overwrite and 30s revision polling")
 - [ ] **T28** BackupPanel（快照列表 / 恢复 / 导出库副本 / 导入） → pending
-- [ ] **T29** SafeModeBanner + 启动自愈 → pending
+- [x] **T29** SafeModeBanner + 启动自愈 → done (2026-10-15, workbuddy:sess-1015i, commit: "T29: self-healing startup with latest-snapshot fallback, read-only guard and safe mode banner")
 
 ### Phase 8 · 打磨与交付
 - [ ] **T30** 视觉规范落地校对（主题变量 / 密度 / 圆角 / 阴影） → pending
@@ -816,11 +816,19 @@ tests/**                         与 src 镜像
 **产出：** `src/views/SafeModeBanner.tsx` `src/persistence/vaultRepository.ts`(自愈) `tests/persistence/safemode.test.ts`
 
 **验收标准：**
-- [ ] vault.json 解析/校验/迁移失败 → 不写盘，加载最近可用快照为只读视图
-- [ ] 顶部横幅含三按钮：恢复此快照 / 选择其他备份 / 导出当前
-- [ ] 只读模式下所有写操作禁用（CommandBus 拒绝并提示）
-- [ ] 启动自愈：解析失败自动尝试最近快照一次，仍失败才进安全模式
-- [ ] 单测覆盖损坏→自愈→只读链路；提交
+- [x] vault.json 解析/校验/迁移失败 → 不写盘，加载最近可用快照为只读视图
+- [x] 顶部横幅含三按钮：恢复此快照 / 选择其他备份 / 导出当前
+- [x] 只读模式下所有写操作禁用（CommandBus 拒绝并提示）
+- [x] 启动自愈：解析失败自动尝试最近快照一次，仍失败才进安全模式
+- [x] 单测覆盖损坏→自愈→只读链路；提交
+
+**实施注记（T29 发现）**：交付 `src/views/SafeModeBanner.tsx`（纯视图：零文件系统 / 零 CommandBus 依赖，三按钮 + `labels` 覆盖位；「选择其他备份」只做回调 props，不 import 尚不存在的 BackupPanel）与 `vaultRepository.ts` 新增的自愈段（`createSelfHealingLoader(dir, repo, deps)`）。要点：
+- **「不写盘」是结构性的**：`load()` 只在 `repo.load()` 抛错后走快照读取路径，**全程零 `writeText`**；单测用 spy 断言自愈过程中 `writeText` 调用次数为 0，且 `vault.json` 字节逐字节不变（三种失败形态各验一次：JSON 语法 / Zod 结构 / schemaVersion 过高）。
+- **一次尝试 vs 最近可用**：`maxAttempts` 默认 **1**，对应 spec 8.2「自动从 `.backup/` 最近快照恢复」与 8.5 的「仍失败才进安全模式」；候选按文件名（YYYYMMDD-HHmmss）新→旧排序，额度用尽即 `safemode`。想退到更旧的可用快照需显式传 `maxAttempts`（「选择其他备份」这类用户主动操作走 `loadSnapshot(id)`，不受额度限制）。
+- **三条出路**：`restoreSnapshot(id)` **先校验快照再覆盖**（坏快照绝不能盖掉磁盘），覆盖前把当前（可能已损坏的）`vault.json` 逐字节留底进 `.backup/` 并返回其 id；`loadSnapshot(id)` 只载入不写盘；`exportCurrent(vault)` 写 `vault-export-<ts>.json`，不碰 `vault.json`。
+- **只读的落点有两个**：`guardCommandBus(bus, guard, onRejected)` 包在 CommandBus 外面，只读时 `apply/undo/redo` 一律抛 `ReadOnlyError` + 回调提示，`canUndo/canRedo` 取 false 让按钮同步置灰（底层 bus 与撤销栈原样保留，解除只读即可继续用）；落盘面用 `saveGuarded(vault)`，只读时抛同一个错误。守卫是独立对象 `createReadOnlyGuard()`，两侧共享同一实例，避免「谁在判」散落成多个布尔标志。
+- **`CommandBusLike<C>` 结构性接口**：守卫不 import `domain/commandBus`（spec 3 硬规则 1 的分层边界），只在形状上认 `apply/undo/redo`；测试用真 `createCommandBus` 驱动，验证守卫与原 bus 的组合行为。
+- **顺带提取（行为不变）**：把 T27 的 `backupDisk` 抽成模块级 `writeBackupCopy(dir, fs, now)`，冲突备份与恢复留底共用一份「先读原文→确保子目录→撞名加序号→写 `.backup/`」逻辑；`load()` 内联的「JSON→迁移→校验」也抽成模块级 `parseVaultText(text)`，与快照加载共用同一套解析语义，避免两条链路的判据漂移。两处提取均由既有用例回归（T07 的 6 条 load 用例 + T27 的 18 条冲突用例全绿）。
 
 **预估：** 1d
 
@@ -944,3 +952,5 @@ tests/**                         与 src 镜像
 
 
 - [2026-10-15] T27 | agent: workbuddy:sess-1015i | commit: "T27: conflict guard with three-way resolution, backup-first overwrite and 30s revision polling" | 验收: 全部通过（4/4） | 备注: 交付 `src/views/ConflictDialog.tsx`（纯视图：零文件系统调用，只渲染 + 转发 props，三按钮带 `data-testid`，丢失条数用 `{n}` 插值写进确认文案）与 `vaultRepository.ts` 新增的冲突检测段（`createConflictGuard(dir, repo, deps)`：`detect` / `saveGuarded` / `keepMine` / `takeDisk` / `exportMine`；`createRevisionWatcher`：30s 轮询两分支）。`npm test` 337/337 绿（本任务 18 条，先 RED 后 GREEN——首轮 3 条红全在组件用例，成因是「组件用例与仓库用例同文件却漏了 `afterEach(cleanup)`」，DOM 叠加导致命中多个节点，不是实现缺陷）；`npx tsc --noEmit` exit 0（一次过）；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 330036 字节，四项外链不变式（`<script src` / `<link` / `type="module"` / `(src\|href)="http(s)://`）复测全 0，体积与 T19 后持平（新模块尚未被应用代码引用，被 tree-shake） | 口径裁决（自行确定，已写进代码注释与测试标题）: ① 冲突判据取 `peekRevision() > 本地 vault.revision`；「以我为准」写回 revision 取 `max(本地, 磁盘+1)` —— 若照原样写低版本，下一次 save 会被自己的闸门再判成冲突，形成弹窗死循环；② 丢失条数口径 =「磁盘上没有的本地任务数」（按 id 差集），同一口径既进弹窗预告也作三条路径的返回值；③ 冲突备份落 `.backup/vault-<YYYYMMDD-HHmmss>.json`（与 SnapshotStore 同命名格式，T28 面板能列出并回滚），本文件就地声明 `BACKUP_DIR` 而未 import snapshotStore —— 后者 import 本文件的 `VAULT_FILE`，避免形成循环依赖；④ 「导出我的副本」写数据文件夹根目录（给用户手动合并的产物，不是自动保留项），随后按 spec 8.3 重载磁盘版；⑤ 轮询判定「磁盘 revision > 内存 revision」，自己保存后 revision 同步抬升故不会误判外部变更；`peekRevision` 抛错返回 `'failed'` 不冒泡（权限撤销 / 文件损坏归 T29 自愈路径） | 越界改动: **无**。只改产出清单三文件（`src/views/ConflictDialog.tsx`、`src/persistence/vaultRepository.ts` 仅新增冲突段、`tests/persistence/conflict.test.ts`）+ `task.md`；未碰 `src/App.tsx`、`src/locales/*` 及其他车道文件；无新依赖，`package-lock.json` 未动（`npm install` 后经 `git status` 复检确认 lock 无差异） | 文案待接线: 本轮车道禁改 `src/locales/*`，组件自带中文兜底 + `labels?: Partial<ConflictLabels>` 覆盖位（`{n}` 插值），集成车道接 locales 时传 labels 即可 | 环境注记: 本工作树 `node_modules` 停留在 T09 时代（84 包），缺 `zustand` / `dayjs`，故先跑 `npm install` 补齐（未改写 lock）才有 `tsc`/`vitest` 全绿；同车道后续窗口若遇 `TS2307: Cannot find module 'zustand'` 按同法处理 | 并发: 提交前工作树仅本任务 3 个文件 + `task.md`，无其他 agent 未提交产物 | 遗留: ① 弹窗与轮询的**接线**（autosave 的 sink 换 `saveGuarded`、watch 触发 `store.setVault` 与顶栏提示）归集成车道，本轮只交付可挂载组件与控制面；② 「顶栏提示」目前是一个 `notify` 回调，提示条组件本身不在本任务产出清单内；③ `keepMine` 只保 vault.json、不含 assets/（整库导出归 T28）；④ 冲突副本无清理策略（用户手动合并后自行删除）
+
+- [2026-10-15] T29 | agent: workbuddy:sess-1015i | commit: "T29: self-healing startup with latest-snapshot fallback, read-only guard and safe mode banner" | 验收: 全部通过（5/5） | 备注: 交付 `src/views/SafeModeBanner.tsx`（纯视图，role=alert 顶部横幅，三按钮 + `data-testid`，`snapshot: null` 时禁用「恢复此快照」并说明，`labels` 覆盖位供接 locales）与 `vaultRepository.ts` 新增的自愈段（`createSelfHealingLoader(dir, repo, deps)` / `createReadOnlyGuard()` / `guardCommandBus()` / `ReadOnlyError` / `parseVaultText()` / `writeBackupCopy()`）。`npm test` 360/360 绿（本任务 23 条，先 RED 后 GREEN——首轮 21/23，两条红都是我的用例写错：`undo()/redo()` 期望返回 false 而实现与 apply 一致地抛 `ReadOnlyError`（三个写入口行为统一，按钮另由 `canUndo/canRedo` 置灰），另一条是断言文案与 label 实际文本不一致）；`npx tsc --noEmit` exit 0（一次过）；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 330066 字节，四项外链不变式（`<script src` / `<link` / `type="module"` / `(src\|href)="http(s)://`）复测全 0 | 口径裁决（自行确定，已写进代码注释与测试标题）: ① **「不写盘」做成结构性保证**——`load()` 只在 `repo.load()` 抛错后走快照读取路径，全程零 `writeText`，单测以 spy 断言自愈期 `writeText` 调用为 0 且 `vault.json` 逐字节不变（JSON 语法 / Zod 结构 / schemaVersion 过高三种失败形态各验一次）；② `maxAttempts` 默认 **1**，直接对应 spec 8.2「自动从 .backup/ 最近快照恢复一次」与 8.5「仍失败才进安全模式」，候选按文件名（YYYYMMDD-HHmmss，与 SnapshotStore 同格式）新→旧排序；`loadSnapshot(id)`（「选择其他备份」）不受该额度限制，是用户显式选择；③ `restoreSnapshot` **先校验快照再覆盖**（坏快照绝不能盖掉磁盘），并把当前可能已损坏的 `vault.json` 逐字节留底进 `.backup/` 后返回其 id；`exportCurrent` 写 `vault-export-<ts>.json`、不碰 `vault.json`；④ 只读落在两处——`guardCommandBus` 包在 CommandBus 之外（`apply/undo/redo` 统一抛 `ReadOnlyError` + `onRejected` 提示，`canUndo/canRedo` 取 false，底层 bus 与撤销栈原样保留，解除只读即可继续用）与落盘面 `saveGuarded`（同一错误）；守卫用独立对象 `createReadOnlyGuard()`，两侧共享同一实例；⑤ 守卫以 `CommandBusLike<C>` 结构性接口收口，**不 import `domain/commandBus`**，守住 spec 3「依赖只向下」；⑥ `createSelfHealingLoader(dir, repo, deps)` 显式收 `repo` 而不是自建，避免与 T07 已验收的读写入口分叉 | 越界改动: **无新增文件之外的范围**。只改产出清单三文件 + `task.md`；未碰 `src/App.tsx`、`src/locales/*`、其他车道文件；无新依赖，`package-lock.json` 未动 | 顺带重构（行为不变，同 commit）: ① 把 T27 的 `backupDisk` 抽成模块级 `writeBackupCopy(dir, fs, now)`，冲突备份与恢复留底共用「读原文→确保子目录→撞名加序号→写 .backup/」；② `load()` 内联的「JSON→needsMigration→migrate→Zod」抽成模块级 `parseVaultText(text)`，与快照加载共用同一解析语义，消除两条链路判据漂移的风险。两处提取均由既有用例回归（T07 6 条 load + T27 18 条冲突用例全绿），`git log` 可见 T27 提交未受影响 | 并发: 提交前工作树仅本任务 3 个文件 + `task.md`，无其他 agent 未提交产物 | 遗留: ① **接线归集成车道**——真实启动流程要把 `App.tsx` 的 `repository.load()` 换成 `loader.load()`，`ready` 相用 `saveGuarded` 作 autosave sink，`readonly/safemode` 相挂 `SafeModeBanner`（「选择其他备份」接 T28 的 BackupPanel）；② 当前只读视图的**编辑入口**（看板/抽屉的禁用态）由视图层消费 `readOnly.isReadOnly()` 决定，本轮只提供控制面；③ 只读模式下 `CommandBus` 的拒绝是抛错 + 回调提示，需要集成车道挂一个提示条（toast）承载 `onRejected` 文案；④ `restoreSnapshot` 只恢复 `vault.json`、不含 `assets/`（整库恢复归 T28）;⑤ spec 8.2/8.5 未规定 `maxAttempts` 与「导出当前」的落点，本轮已按最小惊讶原则定死的口径写进代码注释，建议集成车道确认后回填 spec

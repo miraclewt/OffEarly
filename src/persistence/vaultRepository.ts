@@ -70,6 +70,25 @@ function asValidationError(e: unknown): VaultValidationError {
   return new VaultValidationError(e instanceof Error ? e.message : String(e))
 }
 
+/**
+ * 「文本 → Vault」的唯一解析语义：JSON 语法 → schemaVersion 方向 → 迁移 → Zod 校验。
+ * `load()`（磁盘）与 T29 的快照恢复共用它，避免两条链路的判据漂移。
+ */
+function parseVaultText(text: string): Vault {
+  let raw: unknown
+  try {
+    raw = JSON.parse(text)
+  } catch {
+    throw new VaultValidationError('vault.json 不是合法的 JSON')
+  }
+  try {
+    needsMigration(raw) // 版本高于当前时在此抛错（T03 语义）
+    return migrate(raw)
+  } catch (e) {
+    throw asValidationError(e)
+  }
+}
+
 export function createVaultRepository(
   dir: FileSystemDirectoryHandle,
   deps: VaultFs = fsAdapter,
@@ -83,18 +102,7 @@ export function createVaultRepository(
         if (isNotFound(e)) return null
         throw e
       }
-      let raw: unknown
-      try {
-        raw = JSON.parse(text)
-      } catch {
-        throw new VaultValidationError('vault.json 不是合法的 JSON')
-      }
-      try {
-        needsMigration(raw) // 版本高于当前时在此抛错（T03 语义）
-        return migrate(raw)
-      } catch (e) {
-        throw asValidationError(e)
-      }
+      return parseVaultText(text)
     },
 
     async save(vault) {
@@ -239,6 +247,37 @@ function countDropped(local: Vault, disk: Vault): number {
   return local.tasks.filter((task) => !onDisk.has(task.id)).length
 }
 
+/**
+ * 逐字节把当前 vault.json 复制进 .backup/，返回备份文件名；文件不存在时返回 null。
+ * 冲突（T27「以我为准」）与恢复（T29「恢复此快照」）共用：两处都必须在覆盖前留底。
+ */
+async function writeBackupCopy(
+  dir: FileSystemDirectoryHandle,
+  fs: ConflictFs,
+  now: () => Date,
+): Promise<string | null> {
+  let text: string
+  try {
+    text = await fs.readText(dir, VAULT_FILE)
+  } catch (e) {
+    if (isNotFound(e)) return null
+    throw e
+  }
+  await fs.ensureSubdirs(dir)
+  const base = `vault-${formatConflictStamp(now())}`
+  let names: Set<string>
+  try {
+    names = new Set(await fs.list(dir, BACKUP_DIR))
+  } catch (e) {
+    if (isNotFound(e)) names = new Set()
+    else throw e
+  }
+  let id = `${base}.json`
+  for (let i = 2; names.has(id); i += 1) id = `${base}-${i}.json`
+  await fs.writeText(dir, `${BACKUP_DIR}/${id}`, text)
+  return id
+}
+
 export function createConflictGuard(
   dir: FileSystemDirectoryHandle,
   repo: VaultRepository,
@@ -253,26 +292,7 @@ export function createConflictGuard(
 
   /** 逐字节复制当前 vault.json 进 .backup/；文件不存在时返回 null（无从备份）。 */
   async function backupDisk(): Promise<string | null> {
-    let text: string
-    try {
-      text = await fs.readText(dir, VAULT_FILE)
-    } catch (e) {
-      if (isNotFound(e)) return null
-      throw e
-    }
-    await fs.ensureSubdirs(dir)
-    const base = `vault-${formatConflictStamp(now())}`
-    let names: Set<string>
-    try {
-      names = new Set(await fs.list(dir, BACKUP_DIR))
-    } catch (e) {
-      if (isNotFound(e)) names = new Set()
-      else throw e
-    }
-    let id = `${base}.json`
-    for (let i = 2; names.has(id); i += 1) id = `${base}-${i}.json`
-    await fs.writeText(dir, `${BACKUP_DIR}/${id}`, text)
-    return id
+    return writeBackupCopy(dir, fs, now)
   }
 
   async function report(local: Vault): Promise<ConflictReport | null> {
@@ -388,6 +408,363 @@ export function createRevisionWatcher(deps: RevisionWatcherDeps): RevisionWatche
       if (timer === null) return
       clearInterval(timer)
       timer = null
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// T29 · 启动自愈与只读安全模式（spec 8.2 写中断 / 8.5 迁移与只读安全模式）
+//
+// 不变量：**解析/校验/迁移失败时一个字节都不许写回磁盘。**
+// File System Access API 没有原子 rename，写中断会把好文件截成半个（spec 8.2），
+// 因此「磁盘坏了」的正确反应是加载 `.backup/` 里最近可用的快照、以只读方式呈现，
+// 把决定权交回用户 —— 绝不静默覆盖，也绝不静默修补。
+//
+// 三条出路由视图（SafeModeBanner）触发、由本模块执行：
+//   恢复此快照 → restoreSnapshot()：先给当前（可能已损坏的）文件留底，再逐字节覆盖
+//   选择其他备份 → loadSnapshot()：把指定快照载入只读视图（打开备份面板是 T28 的活）
+//   导出当前 → exportCurrent()：把正在看的只读内容导出成独立文件
+// ---------------------------------------------------------------------------
+
+/** 只读下的写尝试：CommandBus 与落盘面都抛这个，UI 据此提示。 */
+export class ReadOnlyError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ReadOnlyError'
+  }
+}
+
+/**
+ * 只读开关。做成独立对象而不是散落的布尔标志，是为了让「谁在判、判什么」
+ * 只有一个入口：CommandBus 守卫与落盘守卫共享同一个实例。
+ */
+export interface ReadOnlyGuard {
+  isReadOnly(): boolean
+  /** 进入只读的原因（提示文案用）；非只读时为 null。 */
+  reason(): string | null
+  enter(reason: string): void
+  exit(): void
+}
+
+export function createReadOnlyGuard(): ReadOnlyGuard {
+  let reason: string | null = null
+  return {
+    isReadOnly: () => reason !== null,
+    reason: () => reason,
+    enter(next) {
+      reason = next
+    },
+    exit() {
+      reason = null
+    },
+  }
+}
+
+/** 只读提示的文案口径（本车道不碰 locales，故与组件一样自带中文兜底）。 */
+export function readOnlyMessage(reason: string | null): string {
+  return reason === null
+    ? '只读安全模式：写操作已禁用'
+    : `只读安全模式：写操作已禁用（${reason}）`
+}
+
+/** CommandBus 的结构面：只认这三个写入口，不 import domain 层（spec 3 硬规则 1）。 */
+export interface CommandBusLike<C> {
+  apply(command: C): void
+  undo(): boolean
+  redo(): boolean
+  canUndo?(): boolean
+  canRedo?(): boolean
+}
+
+/**
+ * spec 8.5 的「所有写操作禁用」在 CommandBus 一侧的落点：
+ * 守卫包在原 bus 外面，只读时 apply/undo/redo 一律抛 ReadOnlyError 并回调提示，
+ * canUndo/canRedo 取 false 让按钮同时置灰。底层 bus 与撤销栈原样保留 ——
+ * 解除只读（恢复快照后）即可继续使用，不需要重建。
+ */
+export function guardCommandBus<C>(
+  bus: CommandBusLike<C>,
+  guard: ReadOnlyGuard,
+  onRejected?: (message: string) => void,
+): CommandBusLike<C> {
+  function blocked(): never {
+    const message = readOnlyMessage(guard.reason())
+    onRejected?.(message)
+    throw new ReadOnlyError(message)
+  }
+  return {
+    apply(command) {
+      if (guard.isReadOnly()) blocked()
+      bus.apply(command)
+    },
+    undo() {
+      if (guard.isReadOnly()) blocked()
+      return bus.undo()
+    },
+    redo() {
+      if (guard.isReadOnly()) blocked()
+      return bus.redo()
+    },
+    canUndo: () => !guard.isReadOnly() && (bus.canUndo?.() ?? false),
+    canRedo: () => !guard.isReadOnly() && (bus.canRedo?.() ?? false),
+  }
+}
+
+/** 快照条目的只读视图（SafeModeBanner「选择其他备份」的候选行）。 */
+export interface SafeModeSnapshotRef {
+  id: string
+  createdAt: string
+  sizeBytes: number
+  taskCount: number
+}
+
+export type StartupStatus = 'healthy' | 'readonly' | 'safemode' | 'empty'
+
+export interface StartupOutcome {
+  status: StartupStatus
+  /** healthy 与 readonly 有值；safemode / empty 为 null。 */
+  vault: Vault | null
+  /** 失败原因（readonly / safemode 有值）。 */
+  reason: string | null
+  /** readonly 时命中的快照。 */
+  snapshot: SafeModeSnapshotRef | null
+  /** 自愈过程中尝试过的快照 id（按新→旧），用于说明「试过了什么」。 */
+  attempts: string[]
+}
+
+export interface SelfHealingLoaderDeps {
+  fs?: ConflictFs
+  now?: () => Date
+  /**
+   * 启动自愈最多尝试几份快照。默认 1 —— spec 8.2/8.5 的口径是
+   * 「自动从 .backup/ 最近快照恢复一次，仍失败才进安全模式」；
+   * 传更大的值即退化为「从新到旧找最近可用」（供「选择其他备份」这类显式操作使用）。
+   */
+  maxAttempts?: number
+}
+
+export interface SelfHealingLoader {
+  readOnly: ReadOnlyGuard
+  /** 启动主入口：先试磁盘，失败则自愈，再失败才 safemode。 */
+  load(): Promise<StartupOutcome>
+  /** 列出 `.backup/` 里的快照（时间倒序）。 */
+  listSnapshots(): Promise<SafeModeSnapshotRef[]>
+  /** 把指定快照载入只读视图（不写盘）。 */
+  loadSnapshot(id: string): Promise<StartupOutcome>
+  /** 恢复指定快照：先留底再覆盖写盘，成功后解除只读。 */
+  restoreSnapshot(id: string): Promise<{ vault: Vault; safetySnapshotId: string | null }>
+  /** 导出当前（只读）内容为独立文件，不动 vault.json。 */
+  exportCurrent(vault: Vault): Promise<{ filename: string }>
+  /** 带只读闸门的落盘：只读时抛 ReadOnlyError。 */
+  saveGuarded(vault: Vault): Promise<void>
+}
+
+export const SNAPSHOT_PREFIX = 'vault-'
+export const EXPORT_PREFIX = 'vault-export-'
+
+const SNAPSHOT_NAME_RE = /^vault-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})(?:-\d+)?\.json$/
+
+/** 从备份文件名解析本地时间；非快照命名返回 null（拒掉 vault-conflict-* 等外来文件）。 */
+function parseSnapshotName(name: string): Date | null {
+  const m = SNAPSHOT_NAME_RE.exec(name)
+  if (m === null) return null
+  return new Date(
+    Number(m[1]),
+    Number(m[2]) - 1,
+    Number(m[3]),
+    Number(m[4]),
+    Number(m[5]),
+    Number(m[6]),
+  )
+}
+
+/** 与 SnapshotStore.toLocalIso 同形（带偏移），供横幅显示。 */
+function toLocalIso(d: Date): string {
+  const offset = -d.getTimezoneOffset()
+  const sign = offset < 0 ? '-' : '+'
+  const abs = Math.abs(offset)
+  return (
+    `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` +
+    `T${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}` +
+    `${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`
+  )
+}
+
+function countTasksIn(text: string): number {
+  try {
+    const raw = JSON.parse(text) as { tasks?: unknown }
+    return Array.isArray(raw.tasks) ? raw.tasks.length : 0
+  } catch {
+    return 0
+  }
+}
+
+export function createSelfHealingLoader(
+  dir: FileSystemDirectoryHandle,
+  repo: VaultRepository,
+  deps: SelfHealingLoaderDeps = {},
+): SelfHealingLoader {
+  const fs = deps.fs ?? fsAdapter
+  const now = deps.now ?? (() => new Date())
+  const maxAttempts = deps.maxAttempts ?? 1
+  const readOnly = createReadOnlyGuard()
+  const encoder = new TextEncoder()
+
+  /** 首次失败的原始原因：只读视图整个生命周期都挂着，横幅据此说明「为什么只读」。 */
+  let failureReason: string | null = null
+
+  function reasonOf(e: unknown): string {
+    if (e instanceof VaultValidationError) {
+      return e.issues.length > 0 ? `${e.message}（${e.issues.join('；')}）` : e.message
+    }
+    return e instanceof Error ? e.message : String(e)
+  }
+
+  async function backupNames(): Promise<string[]> {
+    try {
+      return await fs.list(dir, BACKUP_DIR)
+    } catch (e) {
+      if (isNotFound(e)) return []
+      throw e
+    }
+  }
+
+  const backupPath = (id: string): string => `${BACKUP_DIR}/${id}`
+
+  async function listSnapshots(): Promise<SafeModeSnapshotRef[]> {
+    const refs: SafeModeSnapshotRef[] = []
+    for (const name of await backupNames()) {
+      const at = parseSnapshotName(name)
+      if (at === null) continue
+      let text: string
+      try {
+        text = await fs.readText(dir, backupPath(name))
+      } catch {
+        // 并发删除 / 读失败：跳过这一条，不影响其余候选
+        continue
+      }
+      refs.push({
+        id: name,
+        createdAt: toLocalIso(at),
+        sizeBytes: encoder.encode(text).length,
+        taskCount: countTasksIn(text),
+      })
+    }
+    // 文件名即 YYYYMMDD-HHmmss，倒序 = 新→旧；同秒撞名时按文件名再定序
+    refs.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+    return refs
+  }
+
+  async function readSnapshotText(id: string): Promise<string> {
+    try {
+      return await fs.readText(dir, backupPath(id))
+    } catch (e) {
+      if (isNotFound(e)) throw new VaultValidationError(`快照不存在：${id}`)
+      throw e
+    }
+  }
+
+  function enterReadOnly(reason: string): void {
+    failureReason = reason
+    readOnly.enter(reason)
+  }
+
+  /** 把快照内容解析成 Vault；解析失败抛 VaultValidationError（不自愈、不写盘）。 */
+  async function snapshotVault(id: string): Promise<Vault> {
+    return parseVaultText(await readSnapshotText(id))
+  }
+
+  async function toReadOnlyOutcome(attempts: string[]): Promise<StartupOutcome> {
+    const candidates = await listSnapshots()
+    for (const ref of candidates.slice(0, maxAttempts)) {
+      attempts.push(ref.id)
+      try {
+        const vault = await snapshotVault(ref.id)
+        return {
+          status: 'readonly',
+          vault,
+          reason: failureReason,
+          snapshot: ref,
+          attempts,
+        }
+      } catch {
+        // 换下一份候选（若还有额度）；全部落空则由调用方转向 safemode
+      }
+    }
+    return { status: 'safemode', vault: null, reason: failureReason, snapshot: null, attempts }
+  }
+
+  return {
+    readOnly,
+
+    async load() {
+      try {
+        const vault = await repo.load()
+        if (vault === null) {
+          return {
+            status: 'empty',
+            vault: null,
+            reason: null,
+            snapshot: null,
+            attempts: [],
+          }
+        }
+        failureReason = null
+        readOnly.exit()
+        return { status: 'healthy', vault, reason: null, snapshot: null, attempts: [] }
+      } catch (e) {
+        enterReadOnly(reasonOf(e))
+        return toReadOnlyOutcome([])
+      }
+    },
+
+    listSnapshots,
+
+    async loadSnapshot(id) {
+      try {
+        const vault = await snapshotVault(id)
+        const refs = await listSnapshots()
+        return {
+          status: 'readonly',
+          vault,
+          reason: failureReason,
+          snapshot: refs.find((ref) => ref.id === id) ?? null,
+          attempts: [id],
+        }
+      } catch (e) {
+        // 选到坏快照：不升级也不降级，留在安全模式并换一条原因
+        enterReadOnly(reasonOf(e))
+        return {
+          status: 'safemode',
+          vault: null,
+          reason: failureReason,
+          snapshot: null,
+          attempts: [id],
+        }
+      }
+    },
+
+    async restoreSnapshot(id) {
+      const text = await readSnapshotText(id)
+      // 先校验再覆盖：坏快照绝不能盖掉磁盘
+      const vault = parseVaultText(text)
+      // 当前（可能已损坏的）文件先进 .backup/，恢复错了也能追回来
+      const safetySnapshotId = await writeBackupCopy(dir, fs, now)
+      await fs.writeText(dir, VAULT_FILE, text)
+      failureReason = null
+      readOnly.exit()
+      return { vault, safetySnapshotId }
+    },
+
+    async exportCurrent(vault) {
+      const filename = `${EXPORT_PREFIX}${formatConflictStamp(now())}.json`
+      await fs.writeText(dir, filename, JSON.stringify(vault))
+      return { filename }
+    },
+
+    async saveGuarded(vault) {
+      if (readOnly.isReadOnly()) throw new ReadOnlyError(readOnlyMessage(readOnly.reason()))
+      await repo.save(vault)
     },
   }
 }
