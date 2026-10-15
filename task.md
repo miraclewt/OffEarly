@@ -87,7 +87,7 @@ tests/**                         与 src 镜像
 - [x] **T05** IconSprite 线性图标集 + 禁 emoji lint → done (2026-10-15, qoder:sess-1015c, commit: "T05: inline SVG icon sprite + no-emoji lint")
 
 ### Phase 2 · 持久化基座
-- [ ] **T06** FsAccessAdapter + handleStore（目录连接 / 权限恢复 / 降级） → pending
+- [x] **T06** FsAccessAdapter + handleStore（目录连接 / 权限恢复 / 降级） → done (2026-10-15, qoder:sess-1015d, commit: "T06: FsAccessAdapter + handleStore with IndexedDB persistence and R2 fallback")
 - [ ] **T07** VaultRepository + 启动流程首屏 → pending
 - [ ] **T08** Autosave controller（dirty / debounce / Ctrl+S / 保存指示） → pending
 - [ ] **T09** SnapshotStore（自动与手动快照 / 保留策略 / 恢复） → pending
@@ -253,11 +253,11 @@ tests/**                         与 src 镜像
 **产出：** `src/persistence/fsAdapter.ts` `src/persistence/handleStore.ts` `tests/persistence/fsAdapter.test.ts`
 
 **验收标准：**
-- [ ] `connectDir()` 调 `showDirectoryPicker` 返回目录句柄；`ensureSubdirs()` 创建 `assets/` 与 `.backup/`（已存在则跳过）
-- [ ] `readText/writeText/readBinary/writeBinary/remove/list` 六个原语齐备，write 后 `close()` flush
-- [ ] handleStore 将句柄存 IndexedDB；重开可取出并 `queryPermission`；无权限时 `requestPermission` 一次点击恢复
-- [ ] R2 降级生效：IndexedDB 不可用时 handleStore 返回 null 且不抛错（启动走重选目录路径）
-- [ ] 单测以 mock 句柄覆盖六原语与降级分支；全绿并提交
+- [x] `connectDir()` 调 `showDirectoryPicker` 返回目录句柄；`ensureSubdirs()` 创建 `assets/` 与 `.backup/`（已存在则跳过）
+- [x] `readText/writeText/readBinary/writeBinary/remove/list` 六个原语齐备，write 后 `close()` flush
+- [x] handleStore 将句柄存 IndexedDB；重开可取出并 `queryPermission`；无权限时 `requestPermission` 一次点击恢复
+- [x] R2 降级生效：IndexedDB 不可用时 handleStore 返回 null 且不抛错（启动走重选目录路径）
+- [x] 单测以 mock 句柄覆盖六原语与降级分支；全绿并提交
 
 **预估：** 1d
 
@@ -782,3 +782,5 @@ tests/**                         与 src 镜像
 - [2026-10-15] T04 | agent: qoder:sess-1015a | commit: "T04: i18n base with typed message keys and locale switching" | 验收: 全部通过（6/6） | 备注: `npx tsc --noEmit` exit 0；`npm run test` 34/34 绿（本任务 15 条）；`npm run build` 仍为单文件 220522 字节，与 T03 一致——`src/locales/*` 暂未被应用代码引用，接线在 T15+。负例已实跑：从 `en.ts` 删去 `workweek` 得 `TS2741`（exit 1），补回后 exit 0，故「缺翻译编译期报错」不是推断而是测量。组件重渲染按验收要求做成真测试（jsdom + `useSyncExternalStore`，「评审中」→「In Review」且 `data-locale` 同步） | 越界改动: 新增 devDeps jsdom 30.1.3 / @testing-library/react 16.3.0 / @testing-library/dom 10.4.1，`package.json` 随之变动；环境用测试文件顶部 `// @vitest-environment jsdom` 指定，未触碰 T02 的 `vite.config.ts` | 遗留: dayjs locale（日期/星期/月份名）不在本任务产出内，归 T11 排期引擎与 T19 甘特图表头使用
 
 - [2026-10-15] T05 | agent: qoder:sess-1015c | commit: "T05: inline SVG icon sprite + no-emoji lint" | 验收: 全部通过（5/5） | 备注: 32 个 `<symbol>`（验收清单 31 个全覆盖，另加 `chevron-right` 给 T14 话题树），描边属性集中在 symbol 上（`<use>` 的 shadow 内容只继承使用处上下文，挂 sprite 根无效），颜色走 currentColor；`npm run lint:emoji` 默认扫 `src` + `src/locales`，命中输出 `文件:行:列 U+码位` 并 exit 1，已作为 `build` 前置；负例实跑（临时 `src/__emoji-probe.ts` → exit 1，删除后 exit 0）。图标质量按「可测量」处理：真实 Chromium `file://` 下 32 个 symbol 的 `getBBox()` 全落在 0.4–23.6 安全区，并用 Path2D+canvas 栅格化成字符图逐个目检，据此放大 `list-task` 复选框与 `dependency` 节点圆、加宽 `filter` 下管。`npx tsc --noEmit` exit 0；`npm run test` 76/76 绿（本任务 15 条）；`npm run build` 仍为单文件 220.54 kB | 越界改动: 新增 `tests/views/IconSprite.test.tsx`、`tests/scripts/noEmoji.test.ts`（依「tests 与 src 镜像」+ TDD 约束）；`package.json` 只加 `lint:emoji` 与 `build` 前置两行，`package-lock.json` 未动 | 并发: 提交时工作树有另一 agent 的 T06 未提交产物（`src/persistence/*`、`tests/persistence/*`），本次只 stage T05 的四个新文件 + `package.json` + `task.md`，未纳入对方文件；对方曾写入的 `zustand` 依赖行与 T10 `in_progress` 行已由其自行回退，故不在本 commit 内 | 遗留: sprite 挂载点未接线（`src/App.tsx` 不在本任务产出清单，归 T07 启动流程一次性挂 `<IconSprite />`）；效果预览留在未跟踪的 `.tmp-preview/preview.html`（双击可看 16/24/48px 与深色底三轮），后续 agent 请勿 commit 该目录；禁 emoji lint 目前只覆盖 `src`，`tests`/`docs`/`spike.html` 不在扫描范围，T31 的 verify 若要吃全量需显式传目标
+
+- [2026-10-15] T06 | agent: qoder:sess-1015d | commit: "T06: FsAccessAdapter + handleStore with IndexedDB persistence and R2 fallback" | 验收: 全部通过（5/5） | 备注: `fsAdapter` 六原语 + `connectDir`/`ensureSubdirs`；所有写路径统一 `createWritable() → write → close()`（close 即 flush，单测断言 close 被调用）；`remove` 命中 `NotFoundError` 返回 false 而非抛错；路径解析拒绝含 `..` 的段，越界在读之前就挡掉（测试用 spy 断言句柄完全未被触碰）。`handleStore` 把 backend 抽成 `{get,set,remove}` 注入点，IndexedDB 实现走 `offearly/handles` 单键存储；降级做成三层兜底（backend 抛错 → save=false/load=null/clear=false；存的是脏数据 → load=null；环境无 `indexedDB` 全局 → load=null），全程不抛错，T07 启动流程只需判 `load()===null` 即走重选目录。`verifyPermission(handle, requestIfDenied)` 先 `queryPermission`，未授权且允许交互时才 `requestPermission` 一次，用户拒绝则 false，请求参数固定 `{mode:'readwrite'}` | 验证: `npx tsc --noEmit` exit 0；`npm run test` 76/76 绿（本任务 27 条，先 RED 后 GREEN）；`npm run build` 单文件 220.54 kB，与 T05 持平——persistence 层尚未被应用代码引用，接线归 T07 | 越界改动: 新增 `tests/persistence/mockFs.ts`（手写 mock 句柄，依「tests 与 src 镜像」+ TDD 约束）；TS lib.dom 未声明 `FileSystemDirectoryHandle.queryPermission/requestPermission`（Chromium 实际有），故在 `handleStore` 内补齐 `VaultDirHandle` 交叉类型，未改 tsconfig | 并发: 等 T05 提交（1b822c3）落地后才提交，本次只 stage `src/persistence/*`、`tests/persistence/*`、`task.md`；`.tmp-preview/`（T05 预览目录）保持未跟踪、未纳入 | 遗留: 真实启动流程里「重启后句柄权限是否仍免提示」需 T07 在目标企业 Edge 复验（spike R1 的待办移交至此）；`list()` 只回名字数组、不区分文件/目录，若 T09 保留策略需要类型信息再扩展；mock 覆盖不到真实 IndexedDB 的结构化克隆，首次落盘需在 T07 冒烟
