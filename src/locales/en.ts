@@ -103,4 +103,17 @@ export const en: Record<MsgKey, string> = {
   'safemode.busy': 'Working…',
   'safemode.failed': 'Failed',
   'safemode.resolved': 'Resolved, loading…',
+
+  // T15 tail-append: board card copy (C-plan six items / blocked marker / dependency badge; append-only)
+  'card.blocked': 'Blocked',
+  'card.blockedHint': 'Has unfinished predecessors',
+  'card.blockedBy': 'Blocked by {n}',
+  'card.noDependency': 'No predecessors',
+  'card.hasNote': 'Has note',
+  'card.progressRatio': 'Average progress in this column',
+  'card.kind.feature': 'Feature',
+  'card.kind.bug': 'Bug',
+  'card.kind.chore': 'Chore',
+  'card.kind.research': 'Research',
+  'card.kind.doc': 'Doc',
 }
