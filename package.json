@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "lint:emoji": "node scripts/no-emoji.mjs",
+    "build": "npm run lint:emoji && tsc --noEmit && vite build",
     "test": "vitest run",
     "preview": "vite preview"
   },

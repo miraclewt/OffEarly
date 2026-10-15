@@ -84,7 +84,7 @@ tests/**                         与 src 镜像
 - [x] **T02** Vite + TS + singlefile(iife) 构建管线与空壳产物 → done (2026-10-15, qoder:sess-1015a, commit: "T02: build pipeline")
 - [x] **T03** 领域类型 + Zod Schema + 迁移管线 → done (2026-10-15, qoder:sess-1015a, commit: "T03: domain types + zod schema + migration pipeline")
 - [x] **T04** i18n 基座（zh/en 消息表 + t() + locale 切换） → done (2026-10-15, qoder:sess-1015a, commit: "T04: i18n base with typed message keys and locale switching")
-- [ ] **T05** IconSprite 线性图标集 + 禁 emoji lint → pending
+- [x] **T05** IconSprite 线性图标集 + 禁 emoji lint → done (2026-10-15, qoder:sess-1015c, commit: "T05: inline SVG icon sprite + no-emoji lint")
 
 ### Phase 2 · 持久化基座
 - [ ] **T06** FsAccessAdapter + handleStore（目录连接 / 权限恢复 / 降级） → pending
@@ -229,11 +229,17 @@ tests/**                         与 src 镜像
 **产出：** `src/views/IconSprite.tsx` `scripts/no-emoji.mjs` `package.json`(lint 脚本)
 
 **验收标准：**
-- [ ] IconSprite 以 `<symbol>`+`<use>` 提供 ≥24 个图标：chevron、search、undo、redo、export、download、zoom-in、zoom-out、filter、backup、settings、note、dependency、milestone、attach、image、bold、italic、strike、code、list-ol、list-ul、list-task、quote、link、table、divider、close、plus、calendar、clock
-- [ ] 全部图标 1.5px 描边、round cap，无填充块、无 emoji 字符
-- [ ] `npm run lint:emoji` 扫描 src/ 与 locales/，命中 emoji 码位范围（U+1F300–U+1FAFF、U+2600–U+27BF 等）即退出码 1
-- [ ] CI/构建脚本接入 lint:emoji；负例（临时插入一个 emoji）验证能失败后移除
-- [ ] 提交
+- [x] IconSprite 以 `<symbol>`+`<use>` 提供 ≥24 个图标：chevron、search、undo、redo、export、download、zoom-in、zoom-out、filter、backup、settings、note、dependency、milestone、attach、image、bold、italic、strike、code、list-ol、list-ul、list-task、quote、link、table、divider、close、plus、calendar、clock —— 共 **32** 个（清单 31 个全覆盖，另加 `chevron-right` 供 T14 话题树展开使用），单测逐名断言
+- [x] 全部图标 1.5px 描边、round cap，无填充块、无 emoji 字符 —— 描边语言写在 `<symbol>` 上（`fill=none` `stroke=currentColor` `stroke-width=1.5` `stroke-linecap/linejoin=round`），子节点只有 `<path>` 且**不得自带 fill/stroke**（单测断言）；`dependency`/`settings`/`list-ul` 的圆用两段圆弧 path 表达，全表无 circle/rect 元素
+- [x] `npm run lint:emoji` 扫描 src/ 与 locales/，命中 emoji 码位范围（U+1F300–U+1FAFF、U+2600–U+27BF 等）即退出码 1 —— 默认目标 `src` + `src/locales`，命中输出 `文件:行:列 U+码位 区段说明`；8 条单测覆盖 U+1F600/U+2600–27BF/U+FE0F/区域指示符、非文本扩展名跳过、以及**不误伤 `→`(U+2192) 与中日韩文本**（源码注释在用）
+- [x] CI/构建脚本接入 lint:emoji；负例（临时插入一个 emoji）验证能失败后移除 —— `build` 改为 `npm run lint:emoji && tsc --noEmit && vite build`；负例实跑：临时 `src/__emoji-probe.ts` → `src/__emoji-probe.ts:1:19 U+1F600`、exit 1，删除后 exit 0
+- [x] 提交
+
+**实测证据：** `npx tsc --noEmit` exit 0；`npm run test` → `Test Files 6 passed (6) / Tests 76 passed (76)`（本任务 15 条）；`npm run build` → `dist/index.html` 220.54 kB 单文件（lint:emoji 作为 build 前置已生效）。图标质量不是推断：在真实 Chromium 的 `file://` 页面里对 32 个 symbol 逐个跑 `use.getBBox()`（全部落在 0.4–23.6 安全区内）并用 `Path2D` + canvas 栅格化为字符图逐个目检，据此放大了 `list-task` 复选框（4.5→6 单位，1.5px 描边下原本糊成实心）、加宽 `filter` 漏斗下管（10–14→9.5–14.5）、放大 `dependency` 节点圆（r2.5→3）以露出环空。
+
+**实施注记（T05 发现）**：`<use>` 的 shadow 内容**不继承 sprite 根 `<svg>`** 的呈现属性，只继承 `<use>` 所在上下文——所以描边属性必须挂在 `<symbol>` 上而不是 sprite 容器上，`stroke="currentColor"` 因此仍按使用处的文字色解析，图标颜色跟着主题走。React 19 的 `<use href>` 即可，无需 `xlink:href`。`Icon` 默认可选 `label`：省略即 `aria-hidden`（装饰性，按钮内已有文字），给了就走 `role="img" + aria-label`。sprite 需在应用根挂载一次，本任务只交付组件、**未改 `src/App.tsx`**（不在产出清单内），接线归 T07 启动流程。
+
+**越界/并发说明**：`tests/views/IconSprite.test.tsx`、`tests/scripts/noEmoji.test.ts` 依「tests/** 与 src 镜像」与 TDD 全局约束新增（与 T03/T04 同样的测试文件补法，未改邻居任务文件）。`package-lock.json` 本次无改动。提交期间工作树存在另一 agent 的 T06 未提交产物（`src/persistence/*`、`tests/persistence/*`），本次 commit 只 stage 本任务四个新文件 + `package.json` + `task.md`，未纳入也未改写对方文件；对方一度写入 `package.json` 的 `zustand` 依赖行与 T10 的 `in_progress` 行在其自行回退后才提交，故本 commit 的 `package.json` 只含 lint 脚本两行。
 
 **预估：** 0.5d
 
@@ -774,3 +780,5 @@ tests/**                         与 src 镜像
 - [2026-10-15] T01（定案） | agent: qoder:sess-1015a | commit: "T01: all six file:// risks verified in enterprise Edge, spike archived" | 验收: 7/7 全部勾选，任务转 done | 备注: 用户回报「R1 R6 测试通过」，至此 R1–R6 六项全部 PASS（R2/R3/R5 内置浏览器自动化实测，R1/R4/R6 企业 Edge 手动实测）。**第 11 节六条降级方案一条都不必启用**，全部转为已备不用的兜底；**T06（FsAccessAdapter）门槛解除**。`spike.html` 加归档说明后复测：页面在 `file://` 正常加载，R2/R3/R5 自动通过、R1/R4/R6 处于待手势的 pending 态、8 张卡片齐全、控制台零消息 | 遗留: R6 的写/读往返毫秒数未回传（OneDrive 伪冲突仍需日常观察，冲突弹窗保留「导出副本」兜底）；R1 每次重启后句柄权限是否仍免提示，由 T06 在真实启动流程里复验 | 教训: 与前两条 R4 记录同源——spike 要按目标功能真实使用的机制测，报错要分档显示成因
 
 - [2026-10-15] T04 | agent: qoder:sess-1015a | commit: "T04: i18n base with typed message keys and locale switching" | 验收: 全部通过（6/6） | 备注: `npx tsc --noEmit` exit 0；`npm run test` 34/34 绿（本任务 15 条）；`npm run build` 仍为单文件 220522 字节，与 T03 一致——`src/locales/*` 暂未被应用代码引用，接线在 T15+。负例已实跑：从 `en.ts` 删去 `workweek` 得 `TS2741`（exit 1），补回后 exit 0，故「缺翻译编译期报错」不是推断而是测量。组件重渲染按验收要求做成真测试（jsdom + `useSyncExternalStore`，「评审中」→「In Review」且 `data-locale` 同步） | 越界改动: 新增 devDeps jsdom 30.1.3 / @testing-library/react 16.3.0 / @testing-library/dom 10.4.1，`package.json` 随之变动；环境用测试文件顶部 `// @vitest-environment jsdom` 指定，未触碰 T02 的 `vite.config.ts` | 遗留: dayjs locale（日期/星期/月份名）不在本任务产出内，归 T11 排期引擎与 T19 甘特图表头使用
+
+- [2026-10-15] T05 | agent: qoder:sess-1015c | commit: "T05: inline SVG icon sprite + no-emoji lint" | 验收: 全部通过（5/5） | 备注: 32 个 `<symbol>`（验收清单 31 个全覆盖，另加 `chevron-right` 给 T14 话题树），描边属性集中在 symbol 上（`<use>` 的 shadow 内容只继承使用处上下文，挂 sprite 根无效），颜色走 currentColor；`npm run lint:emoji` 默认扫 `src` + `src/locales`，命中输出 `文件:行:列 U+码位` 并 exit 1，已作为 `build` 前置；负例实跑（临时 `src/__emoji-probe.ts` → exit 1，删除后 exit 0）。图标质量按「可测量」处理：真实 Chromium `file://` 下 32 个 symbol 的 `getBBox()` 全落在 0.4–23.6 安全区，并用 Path2D+canvas 栅格化成字符图逐个目检，据此放大 `list-task` 复选框与 `dependency` 节点圆、加宽 `filter` 下管。`npx tsc --noEmit` exit 0；`npm run test` 76/76 绿（本任务 15 条）；`npm run build` 仍为单文件 220.54 kB | 越界改动: 新增 `tests/views/IconSprite.test.tsx`、`tests/scripts/noEmoji.test.ts`（依「tests 与 src 镜像」+ TDD 约束）；`package.json` 只加 `lint:emoji` 与 `build` 前置两行，`package-lock.json` 未动 | 并发: 提交时工作树有另一 agent 的 T06 未提交产物（`src/persistence/*`、`tests/persistence/*`），本次只 stage T05 的四个新文件 + `package.json` + `task.md`，未纳入对方文件；对方曾写入的 `zustand` 依赖行与 T10 `in_progress` 行已由其自行回退，故不在本 commit 内 | 遗留: sprite 挂载点未接线（`src/App.tsx` 不在本任务产出清单，归 T07 启动流程一次性挂 `<IconSprite />`）；效果预览留在未跟踪的 `.tmp-preview/preview.html`（双击可看 16/24/48px 与深色底三轮），后续 agent 请勿 commit 该目录；禁 emoji lint 目前只覆盖 `src`，`tests`/`docs`/`spike.html` 不在扫描范围，T31 的 verify 若要吃全量需显式传目标
