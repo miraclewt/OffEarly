@@ -15,6 +15,7 @@ import type { Autosave } from './persistence/autosave'
 import { connectDir } from './persistence/fsAdapter'
 import { handleStore, verifyPermission } from './persistence/handleStore'
 import type { VaultDirHandle } from './persistence/handleStore'
+import { createSnapshotStore } from './persistence/snapshotStore'
 import {
   createConflictGuard,
   createRevisionWatcher,
@@ -177,6 +178,9 @@ function openSession(
 
   const autosave = createAutosave({
     store,
+    // spec 8.2「写前必有快照」：T09 的自动策略闸门（会话首存 1 份 / 距上次 ≥30min）
+    // 挂在 sink.save 之前；快照失败按保存失败处理，绝不无备份覆盖。
+    snapshotter: createSnapshotStore(dir).autoSnapshotter(),
     // autosave 必须挂在同一个 store 上，否则它盯的是另一份内存，永远等不到变更。
     // sink 依次过两道闸门：只读（T29）→ 冲突（T27）。
     sink: {
@@ -395,7 +399,10 @@ function Workspace(props: {
 }
 
 export function App(props: { ports?: StartupPorts; onSession?: (session: Session) => void }) {
-  const ports = props.ports ?? startupPorts()
+  // ports 必须稳定：startupPorts() 每次调用都返回新对象，
+  // 若直接内联，启动 effect（依赖 [ports]）会在每次渲染后重跑，
+  // 反复 setPhase 形成渲染死循环，用户点击推进的相位会被立刻覆盖回 need-dir。
+  const ports = useMemo(() => props.ports ?? startupPorts(), [props.ports])
   const [phase, setPhase] = useState<Phase>({ kind: 'booting' })
   const [view, setView] = useState<'board' | 'gantt'>('board')
   const [conflict, setConflict] = useState<ConflictReport | null>(null)
@@ -528,7 +535,9 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
   function handlePick() {
     void ports
       .pickDir()
-      .then((dir) => openDir(dir))
+      .then((dir) => {
+        return openDir(dir)
+      })
       .catch((e: unknown) => {
         if (isAbort(e)) {
           setPhase({ kind: 'need-dir' })

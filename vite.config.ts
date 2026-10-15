@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { defineConfig, type PluginOption } from 'vite'
+import type { PluginOption } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { viteSingleFile } from 'vite-plugin-singlefile'
 
@@ -40,6 +41,13 @@ function finalizeSingleFile(): PluginOption {
 export default defineConfig({
   base: './',
   plugins: [react(), viteSingleFile(), finalizeSingleFile()],
+  // T32：单元测试（vitest，jsdom/node）与端到端测试（Playwright，真实 Chromium +
+  // file://）跑在两套完全不同的运行时里。这里把边界钉死——只收 tests/ 下的用例，
+  // 否则 vitest 会去加载 e2e/*.spec.ts 并因缺少 Playwright 运行时整片报错。
+  test: {
+    include: ['tests/**/*.{test,spec}.{ts,tsx}'],
+    exclude: ['node_modules', 'dist', 'e2e'],
+  },
   build: {
     target: 'es2022',
     sourcemap: false,

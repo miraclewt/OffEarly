@@ -5,6 +5,12 @@ vibe_images/
 .DS_Store
 Thumbs.db
 
+# T32 · Playwright 运行产物（trace / 截图 / 报告都不入库）
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
 # agent-local scratch（非交付物）
 # .tmp-preview/  预览与冒烟脚本（T05/T10 落在这里，按约定不入库）
 # .workbuddy/    WorkBuddy 工作区元数据与记忆
