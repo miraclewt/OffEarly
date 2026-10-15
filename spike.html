@@ -23,12 +23,20 @@
            border-radius: 6px; cursor: pointer; }
   button:hover { border-color: #4F46E5; color: #4F46E5; }
   .env { font-size: 12.5px; color: #6B7280; }
+  #paste-target { min-height: 44px; border: 1px dashed #D1D5DB; border-radius: 6px;
+                  padding: 10px; margin-top: 8px; }
+  #paste-target:focus { border-color: #4F46E5; outline: none; }
 </style>
 </head>
 <body>
 <h1>OffEarly file:// risk spike</h1>
-<p class="sub">R1 / R4 需要用户手势，请点击各行按钮验证；其余项在页面加载时自动完成。</p>
+<p class="sub">R1 / R6 需要用户手势，请点击各行按钮验证；R4 请点页面中的粘贴框后按 Ctrl+V；其余项在页面加载时自动完成。</p>
 <div id="out"></div>
+<div class="card">
+  <div class="row"><span class="id">R4</span><span class="name">粘贴框：点一下让它获得焦点，再按 Ctrl+V（这是富文本编辑器实际走的 paste 事件路径）</span></div>
+  <div id="paste-target" contenteditable="true" spellcheck="false"></div>
+  <div class="detail" id="paste-detail">等待粘贴…（先复制一张截图或图片文件）</div>
+</div>
 <div class="card env" id="env"></div>
 
 <script>
@@ -36,7 +44,7 @@ const RISKS = [
   { id: 'R1', name: 'showDirectoryPicker 在 file:// 可用且可读写子文件', gesture: true },
   { id: 'R2', name: '目录句柄可存入 IndexedDB 并在重开页面后取出', gesture: false },
   { id: 'R3', name: '内联样式 SVG -> Canvas 导出不被 taint', gesture: false },
-  { id: 'R4', name: '剪贴板图片粘贴在 file:// 可取到 File', gesture: true },
+  { id: 'R4', name: '剪贴板图片可取到 File（结论以下方粘贴框的 paste 事件为准；此按钮只探 clipboard.read）', gesture: true },
   { id: 'R5', name: '5000 任务库 JSON 全量序列化耗时', gesture: false },
   { id: 'R6', name: 'vault.json 读写往返耗时（同步盘伪冲突代理指标）', gesture: true },
 ];
@@ -163,18 +171,60 @@ async function runR1() {
   }
 }
 
-// ---- R4 (gesture) ----
+// ---- R4 (两个信号：paste 事件路径 + clipboard.read 探针) ----
+const R4 = { paste: 'idle', read: 'idle', pasteMsg: '等待粘贴…', readMsg: '未运行' };
+
+function r4sync() {
+  const v = R4.paste === 'image' || R4.read === 'pass' ? 'pass'
+          : R4.paste === 'nodata' || R4.read === 'fail' ? 'fail'
+          : 'pending';
+  set('R4', v, `paste 事件：${R4.pasteMsg} ｜ clipboard.read：${R4.readMsg}`);
+  document.getElementById('paste-detail').textContent =
+    `paste 事件：${R4.pasteMsg}（结论以这一路为准，编辑器走的就是它）`;
+}
+
+function runR4PasteProbe() {
+  const target = document.getElementById('paste-target');
+  target.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const cd = e.clipboardData;
+    if (!cd) { R4.paste = 'nodata'; R4.pasteMsg = '事件已触发但 clipboardData 缺失，Chromium 已禁用该路径'; r4sync(); return; }
+    const items = Array.from(cd.items || []);
+    const img = items.find(i => i.kind === 'file' && i.type.startsWith('image/'));
+    if (img) {
+      const f = img.getAsFile();
+      R4.paste = 'image';
+      R4.pasteMsg = `取到 File：${f.type}，${f.size} 字节，名称 ${f.name || '(无名)'}，hasFocus=${document.hasFocus()}`;
+    } else if (cd.getData('text/plain')) {
+      R4.paste = 'text'; R4.pasteMsg = '只取到文本，说明剪贴板里没有图片；请先复制一张截图再按 Ctrl+V';
+    } else {
+      R4.paste = 'empty'; R4.pasteMsg = 'clipboardData 无图片项（剪贴板为空或内容非图片）';
+    }
+    r4sync();
+  });
+}
+
 async function runR4() {
+  const focused = document.hasFocus();
   try {
+    let perm = 'n/a';
+    try { perm = (await navigator.permissions.query({ name: 'clipboard-read' })).state; } catch (_) {}
     const items = await navigator.clipboard.read();
-    const img = items.find(i => i.types.some(t => t.startsWith('image/')));
-    if (!img) { set('R4', 'fail', '剪贴板中未找到图片项。请先复制一张截图再重试。'); return; }
-    const type = img.types.find(t => t.startsWith('image/'));
-    const blob = await img.getType(type);
-    set('R4', 'pass', `取到 File：${type}，${blob.size} 字节。`);
+    const clip = items.find(i => i.types.some(t => t.startsWith('image/')));
+    if (!clip) { R4.read = 'text'; R4.readMsg = `调用成功（权限 ${perm}），剪贴板内无图片项`; }
+    else {
+      const type = clip.types.find(t => t.startsWith('image/'));
+      const blob = await clip.getType(type);
+      R4.read = 'pass'; R4.readMsg = `取到 ${type}，${blob.size} 字节（权限 ${perm}）`;
+    }
   } catch (e) {
-    set('R4', 'fail', `${e && e.name}: ${e && e.message}。降级：仅支持拖入 / 工具栏选文件。`);
+    const msg = (e && e.message) || String(e);
+    R4.read = /not focused/i.test(msg) ? 'nofocus' : 'fail';
+    R4.readMsg = /not focused/i.test(msg)
+      ? `NotAllowedError：文档未获得焦点（hasFocus=${focused}），非决定性`
+      : `${e && e.name}: ${msg}`;
   }
+  r4sync();
 }
 
 // ---- R6 (gesture, needs R1) ----
@@ -207,7 +257,7 @@ document.getElementById('env').textContent =
   `showOpenFilePicker=${'showOpenFilePicker' in window}  ` +
   `createWritable=${'createWritable' in (window.FileSystemFileHandle ? window.FileSystemFileHandle.prototype : {})}  ` +
   `ua=${navigator.userAgent}`;
-runR2(); runR3(); runR5();
+runR2(); runR3(); runR5(); runR4PasteProbe();
 window.__SPIKE_RESULT__ = () => JSON.stringify(R, null, 2);
 </script>
 </body>
