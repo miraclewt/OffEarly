@@ -146,7 +146,7 @@ tests/**                         与 src 镜像
 - [ ] **T26** 清理未引用附件 → pending
 
 ### Phase 7 · 备份、冲突与安全模式
-- [ ] **T27** ConflictDialog（revision 冲突三选 + 30s 轮询） → pending
+- [x] **T27** ConflictDialog（revision 冲突三选 + 30s 轮询） → done (2026-10-15, workbuddy:sess-1015i, commit: "T27: conflict guard with three-way resolution, backup-first overwrite and 30s revision polling")
 - [ ] **T28** BackupPanel（快照列表 / 恢复 / 导出库副本 / 导入） → pending
 - [ ] **T29** SafeModeBanner + 启动自愈 → pending
 
@@ -771,10 +771,20 @@ tests/**                         与 src 镜像
 **产出：** `src/views/ConflictDialog.tsx` `src/persistence/vaultRepository.ts`(冲突检测) `tests/persistence/conflict.test.ts`
 
 **验收标准：**
-- [ ] save 前 `peekRevision()` > 内存基线 → 弹 ConflictDialog 三选：以我为准 / 以磁盘为准 / 导出我的副本
-- [ ] 「以我为准」覆盖磁盘且磁盘旧版已进 .backup；「以磁盘为准」重载并警告丢失条数；「导出副本」写 `vault-conflict-<ts>.json` 后重载
-- [ ] 30s 轮询 peekRevision：磁盘变且本地不 dirty → 静默重载；dirty → 顶栏提示
-- [ ] 单测覆盖三路径与轮询两分支（假计时器）；提交
+- [x] save 前 `peekRevision()` > 内存基线 → 弹 ConflictDialog 三选：以我为准 / 以磁盘为准 / 导出我的副本
+- [x] 「以我为准」覆盖磁盘且磁盘旧版已进 .backup；「以磁盘为准」重载并警告丢失条数；「导出副本」写 `vault-conflict-<ts>.json` 后重载
+- [x] 30s 轮询 peekRevision：磁盘变且本地不 dirty → 静默重载；dirty → 顶栏提示
+- [x] 单测覆盖三路径与轮询两分支（假计时器）；提交
+
+**实施注记（T27 发现）**：`src/views/ConflictDialog.tsx` 是纯视图（零文件系统调用，只渲染 + 转发 props），三条出路全部落在 `vaultRepository.ts` 新增的 `createConflictGuard(dir, repo, deps)`：
+- **判定口径**：`detect(local)` 用 `local.revision` 当内存基线，与 `peekRevision()` 比大小；`vault.json` 不存在算无冲突（新库首存不是冲突）。`saveGuarded(local)` 是 save 前的闸门——干净才写，冲突只回报告、**磁盘逐字节不变**。
+- **「以我为准」的 revision 单调性**：覆盖写盘时 revision 取 `max(本地, 磁盘+1)`。若照原样写本地 revision（低于磁盘），下一次 save 会被自己的闸门再判成冲突，形成弹窗死循环。
+- **备份口径**：逐字节复制覆盖前的 `vault.json` 进 `.backup/vault-<YYYYMMDD-HHmmss>.json`，文件名与 SnapshotStore 同格式，因此 T28 的备份面板能直接列出并回滚（本文件就地声明 `BACKUP_DIR` 而未 import snapshotStore，避免与 `snapshotStore → vaultRepository(VAULT_FILE)` 形成循环依赖）。
+- **「导出我的副本」的落点**：写在数据文件夹根目录（不是 `.backup/`），因为它是给用户手动合并用的产物，不是自动保留项；随后按 spec 8.3 重载磁盘版。
+- **丢失条数**：口径为「磁盘上没有的本地任务数」（按 id 差集），同时进 `ConflictReport` 供弹窗预告、作为三条路径的共同返回值。
+- **30s 轮询**：`createRevisionWatcher` 判定「磁盘 revision > 内存 revision」，因此**自己保存后 revision 同步抬升，不会被误判为外部变更**；两分支为 `reload()`（不 dirty，静默）与 `notify()`（dirty，顶栏提示）；`peekRevision` 抛错时返回 `'failed'` 而不冒泡——权限被撤/文件损坏归 T29 的自愈路径，轮询不该打断应用。
+- **文案与 locales**：本轮车道不碰 `src/locales/*`，故组件自带中文兜底并开放 `labels?: Partial<ConflictLabels>` 覆盖位（`{n}` 插值），集成车道接 locales 时传 labels 即可，组件无需改动。
+- **测试文件后缀**：产出清单固定 `tests/persistence/conflict.test.ts`（`.ts` 不能写 JSX），组件用例一律用 `createElement` 渲染；文件整体走 jsdom 环境（docblock），仓库用例不受影响。
 
 **预估：** 1d
 
@@ -932,3 +942,5 @@ tests/**                         与 src 镜像
 
 - [2026-10-15] T19 | agent: workbuddy:sess-1015h | commit: "T19: buildGanttModel with column geometry, topic grouping, dependency arrows and cycle-safe critical path" | 验收: 全部通过（6/6） | 备注: 交付 `buildGanttModel(vault, filter, scale, viewport)` 与 `GANTT_ROW_HEIGHT`（32）`colorOfTopic`。几何全部在领域层算完——列 `x/width`、条 `x/y/width/progressWidth`、基线细灰条、里程碑菱形、箭头折线拐点与现成的 `path` 字符串；视图只投影不做计算（spec 5.1）。依赖只向下：import T12 `createDependencyGraph`、T11 `createScheduleEngine/toDateKey`、T13 `createQueryEngine/createTopicTree`，零 React / 零 DOM / 零 I/O。`npm test` 319/319 绿（本任务 17 条，先 RED 后 GREEN——首轮 15/17，两条红都是我的期望算错：周一起点算成 `09-29` 实为 `09-28`；跨话题里程碑在话题筛选下仍出现，是我漏看了自己的 `inScope(null)===true` 规则）；`npx tsc --noEmit` exit 0（一次过，无返工）；`npm run lint:emoji` 干净；`npm run build` 单文件 330036 字节，四项外链不变式复测全 0——**体积与 T13 后持平**，因本模块尚未被应用代码引用、被 tree-shake 掉，接线归 T20 | 口径裁决（本任务自行确定，已写进代码与测试标题）: ① `viewport` 定义为 `{ today?, range?: {start?, end?}, paddingDays? }`——`range` 显式给出时原样使用、不给 padding；缺省或单侧缺省时按「已排期任务的 [最早 start, 最晚 due] ∪ 里程碑日期」派生并两端各留 3 天；无任何排期数据时退化为 `today..today` 单列；② `criticalIds` 与 `blockedOnly` 同口径，**建立在全库 `vault.links/tasks` 的图上、不随筛选收缩**（关键路径是项目属性，不是视图属性），故按 topic 筛选时行内任务仍带正确的高亮；③ 跨话题里程碑（`topicId === null`）**不受话题筛选影响**，恒在轨道上；④ week 刻度下「列」仍是天（宽 14），第二级表头按周合并——这样今日线与虚拟化按天对齐，两种刻度共用同一套列索引，符合 spec 5.4「两种刻度各自保留缩放状态」的隐含前提；⑤ `GanttModel` 在 spec 5.1 的字段之外补了 `cycles`（验收 5 要求）与 `width`/`rowHeight`（几何归领域层） | 缺口闭合: ① T12 遗留「关键路径默认自然日口径，工作日口径需 T19 注入 ScheduleEngine」——已注入 `duration: engine.duration(task) ?? 1`，接上 T11 的裁决口径；② T11 遗留「本模块尚未被应用代码引用」的接线链条推进到 T20；③ T13 遗留「`options.duration` 端口已就位但需 T19 注入」——已注入 | 越界改动: **无**。只改产出清单两文件（`src/domain/ganttModel.ts`、`tests/domain/ganttModel.test.ts`）+ `task.md`；未碰 `src/App.tsx`、`src/locales/*`、`src/views/*`；无新依赖，`package-lock.json` 未动 | 遗留: ① 本模块尚未被应用代码引用，接线归 T20（渲染）、T22（未排期侧栏用 `unscheduled`）、T23（导出复用同一模型）、T30（视觉校对读 `columns[].isToday` 等）；② 箭头只处理 FS 语义的四种 `DependencyType` 中的连线走向，**SS/FF/SF 的端点选择尚未区分**（当前一律「前置右端 → 后置左端」），T21 做箭头层时需按 type 分支并补 hover 高亮；③ 行虚拟化（视口 ±10 行）属渲染层，模型一次性给全量 `rows`，大库下的切片归 T20；④ `leftPanel` 固定表所需的「任务/开始/结束/进度」直接取 `row.task`，无需模型加字段；⑤ spec 5.1 的 `GanttModel` 接口未收录 `cycles`/`width`/`rowHeight`，建议集成车道补文档（属文字变更）
 
+
+- [2026-10-15] T27 | agent: workbuddy:sess-1015i | commit: "T27: conflict guard with three-way resolution, backup-first overwrite and 30s revision polling" | 验收: 全部通过（4/4） | 备注: 交付 `src/views/ConflictDialog.tsx`（纯视图：零文件系统调用，只渲染 + 转发 props，三按钮带 `data-testid`，丢失条数用 `{n}` 插值写进确认文案）与 `vaultRepository.ts` 新增的冲突检测段（`createConflictGuard(dir, repo, deps)`：`detect` / `saveGuarded` / `keepMine` / `takeDisk` / `exportMine`；`createRevisionWatcher`：30s 轮询两分支）。`npm test` 337/337 绿（本任务 18 条，先 RED 后 GREEN——首轮 3 条红全在组件用例，成因是「组件用例与仓库用例同文件却漏了 `afterEach(cleanup)`」，DOM 叠加导致命中多个节点，不是实现缺陷）；`npx tsc --noEmit` exit 0（一次过）；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 330036 字节，四项外链不变式（`<script src` / `<link` / `type="module"` / `(src\|href)="http(s)://`）复测全 0，体积与 T19 后持平（新模块尚未被应用代码引用，被 tree-shake） | 口径裁决（自行确定，已写进代码注释与测试标题）: ① 冲突判据取 `peekRevision() > 本地 vault.revision`；「以我为准」写回 revision 取 `max(本地, 磁盘+1)` —— 若照原样写低版本，下一次 save 会被自己的闸门再判成冲突，形成弹窗死循环；② 丢失条数口径 =「磁盘上没有的本地任务数」（按 id 差集），同一口径既进弹窗预告也作三条路径的返回值；③ 冲突备份落 `.backup/vault-<YYYYMMDD-HHmmss>.json`（与 SnapshotStore 同命名格式，T28 面板能列出并回滚），本文件就地声明 `BACKUP_DIR` 而未 import snapshotStore —— 后者 import 本文件的 `VAULT_FILE`，避免形成循环依赖；④ 「导出我的副本」写数据文件夹根目录（给用户手动合并的产物，不是自动保留项），随后按 spec 8.3 重载磁盘版；⑤ 轮询判定「磁盘 revision > 内存 revision」，自己保存后 revision 同步抬升故不会误判外部变更；`peekRevision` 抛错返回 `'failed'` 不冒泡（权限撤销 / 文件损坏归 T29 自愈路径） | 越界改动: **无**。只改产出清单三文件（`src/views/ConflictDialog.tsx`、`src/persistence/vaultRepository.ts` 仅新增冲突段、`tests/persistence/conflict.test.ts`）+ `task.md`；未碰 `src/App.tsx`、`src/locales/*` 及其他车道文件；无新依赖，`package-lock.json` 未动（`npm install` 后经 `git status` 复检确认 lock 无差异） | 文案待接线: 本轮车道禁改 `src/locales/*`，组件自带中文兜底 + `labels?: Partial<ConflictLabels>` 覆盖位（`{n}` 插值），集成车道接 locales 时传 labels 即可 | 环境注记: 本工作树 `node_modules` 停留在 T09 时代（84 包），缺 `zustand` / `dayjs`，故先跑 `npm install` 补齐（未改写 lock）才有 `tsc`/`vitest` 全绿；同车道后续窗口若遇 `TS2307: Cannot find module 'zustand'` 按同法处理 | 并发: 提交前工作树仅本任务 3 个文件 + `task.md`，无其他 agent 未提交产物 | 遗留: ① 弹窗与轮询的**接线**（autosave 的 sink 换 `saveGuarded`、watch 触发 `store.setVault` 与顶栏提示）归集成车道，本轮只交付可挂载组件与控制面；② 「顶栏提示」目前是一个 `notify` 回调，提示条组件本身不在本任务产出清单内；③ `keepMine` 只保 vault.json、不含 assets/（整库导出归 T28）；④ 冲突副本无清理策略（用户手动合并后自行删除）

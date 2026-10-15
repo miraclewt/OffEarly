@@ -13,9 +13,12 @@ import { ZodError } from 'zod'
 import { CURRENT_SCHEMA_VERSION } from '../domain/types'
 import type { Vault } from '../domain/types'
 import { VaultSchema, VaultValidationError, migrate, needsMigration } from '../domain/schema'
-import * as fs from './fsAdapter'
+import * as fsAdapter from './fsAdapter'
 
 export const VAULT_FILE = 'vault.json'
+
+/** spec 4.1：滚动备份目录。与 SnapshotStore 同名同义，此处就地声明以避开循环 import。 */
+const BACKUP_DIR = '.backup'
 
 /** peekRevision 只读文件头；文件头里没有 revision 时才退回全量解析。 */
 const REVISION_HEAD_BYTES = 4096
@@ -69,7 +72,7 @@ function asValidationError(e: unknown): VaultValidationError {
 
 export function createVaultRepository(
   dir: FileSystemDirectoryHandle,
-  deps: VaultFs = fs,
+  deps: VaultFs = fsAdapter,
 ): VaultRepository {
   return {
     async load() {
@@ -131,7 +134,7 @@ export function createVaultRepository(
       } catch (e) {
         if (!isNotFound(e)) throw e
         // 不存在才继续初始化；存在则走下面拒绝分支
-        await fs.ensureSubdirs(dir)
+        await fsAdapter.ensureSubdirs(dir)
         const vault = createNewVault()
         await this.save(vault)
         return vault
@@ -156,3 +159,236 @@ export function createNewVault(now: Date = new Date()): Vault {
     assets: [],
   })
 }
+
+// ---------------------------------------------------------------------------
+// T27 · 冲突检测（spec 8.2 save 前置检查 / 8.3 三选 / 30s 轮询）
+//
+// 全部逻辑集中在此，原因有二：
+//   1. 冲突的判据是「磁盘 revision vs 内存基线 revision」，而 revision 归本仓库所有；
+//   2. 三条出路（以我为准 / 以磁盘为准 / 导出副本）都要读写 vault.json 与 .backup/，
+//      只有这里握有正确的路径与键序约定。
+// 视图（ConflictDialog）只拿结果渲染，不碰文件系统（spec 3 硬规则 1）。
+// ---------------------------------------------------------------------------
+
+/** spec 8.3：30 秒轮询磁盘 revision。 */
+export const CONFLICT_POLL_MS = 30_000
+
+/** spec 8.3：导出本地副本的文件名前缀（vault-conflict-<ts>.json）。 */
+export const CONFLICT_EXPORT_PREFIX = 'vault-conflict-'
+
+/** 冲突报告：既是弹窗的输入，也是「以磁盘为准」丢失量的预告。 */
+export interface ConflictReport {
+  /** 磁盘上的 revision（即另一端写入后的版本）。 */
+  diskRevision: number
+  localTaskCount: number
+  diskTaskCount: number
+  /** 磁盘上没有的本地任务数 —— 选「以磁盘为准」就会丢掉这么多条。 */
+  droppedTaskCount: number
+}
+
+/** 冲突路径用到的文件面（比 VaultFs 多出 list/ensureSubdirs，备份要写进 .backup/）。 */
+export interface ConflictFs extends VaultFs {
+  list(dir: FileSystemDirectoryHandle, dirPath: string): Promise<string[]>
+  ensureSubdirs(dir: FileSystemDirectoryHandle): Promise<void>
+}
+
+export interface ConflictGuardDeps {
+  fs?: ConflictFs
+  now?: () => Date
+}
+
+export interface ConflictGuard {
+  /**
+   * save 前的闸门：磁盘 revision > 内存基线 → 返回报告（UI 弹三选）；
+   * 无冲突返回 null（可安全落盘）；vault.json 不存在同样算无冲突。
+   */
+  detect(local: Vault): Promise<ConflictReport | null>
+  /** 干净则落盘，冲突则原样返回报告且**不写盘**。 */
+  saveGuarded(local: Vault): Promise<ConflictReport | null>
+  /**
+   * 以我为准：磁盘旧版先进 .backup/（可回滚），再覆盖写盘。
+   * 写回的 revision = max(本地, 磁盘+1) —— 否则下一次 save 会再次判成冲突。
+   */
+  keepMine(local: Vault): Promise<{ backupId: string | null; revision: number }>
+  /** 以磁盘为准：丢弃本地未保存变更并重载磁盘版，回报丢失条数。 */
+  takeDisk(local: Vault): Promise<{ vault: Vault; droppedTaskCount: number }>
+  /** 导出我的副本：内存版本写成 vault-conflict-<ts>.json，然后重载磁盘版。 */
+  exportMine(
+    local: Vault,
+  ): Promise<{ filename: string; vault: Vault; droppedTaskCount: number }>
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+/**
+ * 与 SnapshotStore 同格式的本地时间戳（vault-YYYYMMDD-HHmmss）：
+ * 冲突备份落进 .backup/ 后要能被 SnapshotStore.list() 认出来（T28 的备份面板）。
+ */
+export function formatConflictStamp(d: Date): string {
+  return (
+    `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}` +
+    `-${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`
+  )
+}
+
+/** 磁盘上有而内存里没有的任务数（「以磁盘为准」的丢失量预告）。 */
+function countDropped(local: Vault, disk: Vault): number {
+  const onDisk = new Set(disk.tasks.map((task) => task.id))
+  return local.tasks.filter((task) => !onDisk.has(task.id)).length
+}
+
+export function createConflictGuard(
+  dir: FileSystemDirectoryHandle,
+  repo: VaultRepository,
+  deps: ConflictGuardDeps = {},
+): ConflictGuard {
+  const fs = deps.fs ?? fsAdapter
+  const now = deps.now ?? (() => new Date())
+
+  async function readDisk(): Promise<Vault | null> {
+    return repo.load()
+  }
+
+  /** 逐字节复制当前 vault.json 进 .backup/；文件不存在时返回 null（无从备份）。 */
+  async function backupDisk(): Promise<string | null> {
+    let text: string
+    try {
+      text = await fs.readText(dir, VAULT_FILE)
+    } catch (e) {
+      if (isNotFound(e)) return null
+      throw e
+    }
+    await fs.ensureSubdirs(dir)
+    const base = `vault-${formatConflictStamp(now())}`
+    let names: Set<string>
+    try {
+      names = new Set(await fs.list(dir, BACKUP_DIR))
+    } catch (e) {
+      if (isNotFound(e)) names = new Set()
+      else throw e
+    }
+    let id = `${base}.json`
+    for (let i = 2; names.has(id); i += 1) id = `${base}-${i}.json`
+    await fs.writeText(dir, `${BACKUP_DIR}/${id}`, text)
+    return id
+  }
+
+  async function report(local: Vault): Promise<ConflictReport | null> {
+    const diskRevision = await repo.peekRevision()
+    if (diskRevision === null || diskRevision <= local.revision) return null
+    const disk = await readDisk()
+    if (disk === null) return null
+    return {
+      diskRevision,
+      localTaskCount: local.tasks.length,
+      diskTaskCount: disk.tasks.length,
+      droppedTaskCount: countDropped(local, disk),
+    }
+  }
+
+  async function takeDisk(local: Vault) {
+    const disk = await readDisk()
+    if (disk === null) throw new VaultValidationError('磁盘上的 vault.json 已不存在')
+    return { vault: disk, droppedTaskCount: countDropped(local, disk) }
+  }
+
+  return {
+    detect: report,
+
+    async saveGuarded(local) {
+      const conflict = await report(local)
+      if (conflict !== null) return conflict
+      await repo.save(local)
+      return null
+    },
+
+    async keepMine(local) {
+      // 先备份再覆盖：顺序反了就再也拿不回磁盘旧版
+      const backupId = await backupDisk()
+      const diskRevision = await repo.peekRevision()
+      const revision = Math.max(local.revision, (diskRevision ?? local.revision) + 1)
+      await repo.save({ ...local, revision, updatedAt: now().toISOString() })
+      return { backupId, revision }
+    },
+
+    async exportMine(local) {
+      const filename = `${CONFLICT_EXPORT_PREFIX}${formatConflictStamp(now())}.json`
+      await fs.writeText(dir, filename, JSON.stringify(local))
+      const disk = await takeDisk(local)
+      return { filename, ...disk }
+    },
+
+    takeDisk,
+  }
+}
+
+/** 轮询结果：集成车道据此决定要不要刷新视图 / 顶栏。 */
+export type PollOutcome = 'unchanged' | 'reloaded' | 'notified' | 'failed'
+
+export interface RevisionWatcherDeps {
+  /** 便宜地读磁盘 revision（VaultRepository.peekRevision）。 */
+  peekRevision: () => Promise<number | null>
+  /** 内存基线（VaultStore 当前 revision）。 */
+  getMemoryRevision: () => number
+  /** 本地是否有未保存改动（Autosave.isDirty）。 */
+  isDirty: () => boolean
+  /** 磁盘变且本地不 dirty：静默重载。 */
+  reload: () => Promise<void>
+  /** 磁盘变但本地 dirty：顶栏提示「另一端已更新，保存时将询问」（spec 8.3）。 */
+  notify: (info: { diskRevision: number; memoryRevision: number }) => void
+  intervalMs?: number
+}
+
+export interface RevisionWatcher {
+  /** 单次判定的结果；start() 每次触发都会走这条路径。 */
+  check(): Promise<PollOutcome>
+  start(): void
+  stop(): void
+}
+
+/**
+ * spec 8.3 的 30s 轮询。判定口径是「磁盘 revision > 内存 revision」——
+ * 自己保存后 Store 的 revision 会跟着抬升，因此自己的写不会被误判成外部变更。
+ */
+export function createRevisionWatcher(deps: RevisionWatcherDeps): RevisionWatcher {
+  const intervalMs = deps.intervalMs ?? CONFLICT_POLL_MS
+  let timer: ReturnType<typeof setInterval> | null = null
+
+  async function check(): Promise<PollOutcome> {
+    let diskRevision: number | null
+    try {
+      diskRevision = await deps.peekRevision()
+    } catch {
+      // 读不到不算「外部更新」：权限被撤或文件损坏由 T29 的安全模式路径处理，
+      // 轮询只负责发现变更，不该把应用打断。
+      return 'failed'
+    }
+    if (diskRevision === null) return 'unchanged'
+    const memoryRevision = deps.getMemoryRevision()
+    if (diskRevision <= memoryRevision) return 'unchanged'
+    if (deps.isDirty()) {
+      deps.notify({ diskRevision, memoryRevision })
+      return 'notified'
+    }
+    await deps.reload()
+    return 'reloaded'
+  }
+
+  return {
+    check,
+    start() {
+      if (timer !== null) return
+      timer = setInterval(() => {
+        void check()
+      }, intervalMs)
+    },
+    stop() {
+      if (timer === null) return
+      clearInterval(timer)
+      timer = null
+    },
+  }
+}
+
