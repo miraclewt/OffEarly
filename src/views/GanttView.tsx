@@ -97,6 +97,11 @@ export function GanttView(props: GanttViewProps) {
     }
   }, [viewport])
 
+  // T21：「关键路径」开关，默认开。计算在领域层（criticalPath）已完成，这里只做投影与开关——
+  // 关闭时不加粗、不展示计算结果。状态留在本组件（基线开关在 viewport 控制器里，两者刻意分开：
+  // 基线是「看哪一层」的视口属性，关键路径是「是否展示计算结果」的呈现开关）。
+  const [criticalPathVisible, setCriticalPathVisible] = useState(true)
+
   const model = useMemo(
     () => buildGanttModel(vault, filter, state.scale, { today: props.today, range: props.range }),
     [vault, filter, state.scale, props.today, props.range],
@@ -260,6 +265,20 @@ export function GanttView(props: GanttViewProps) {
           />
           {t('baseline')}
         </label>
+
+        {/* T21：关键路径高亮开关（默认开） */}
+        <label
+          data-testid="gantt-critical-label"
+          style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TEXT_MUTED, cursor: 'pointer' }}
+        >
+          <input
+            type="checkbox"
+            data-testid="gantt-critical-toggle"
+            checked={criticalPathVisible}
+            onChange={() => setCriticalPathVisible((visible) => !visible)}
+          />
+          {t('criticalPath')}
+        </label>
       </div>
 
       <div style={{ display: 'flex', height: canvasHeight, minHeight: 0 }}>
@@ -283,6 +302,7 @@ export function GanttView(props: GanttViewProps) {
           columnWindow={columnWindow}
           zoom={zoom}
           baselineVisible={baselineVisible}
+          criticalPathVisible={criticalPathVisible}
           scrollLeft={state.scrollLeft}
           t={t}
           onScroll={handleScroll}
