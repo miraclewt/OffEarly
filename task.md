@@ -78,7 +78,7 @@ tests/**                         与 src 镜像
 ## 任务总表
 
 ### Phase 0 · 风险验证
-- [ ] **T01** file:// 六项风险 spike 验证 → in_progress (2026-10-15, qoder:sess-1015a)
+- [x] **T01** file:// 六项风险 spike 验证 → done (2026-10-15, qoder:sess-1015a, commit: "T01: all six file:// risks verified in enterprise Edge, spike archived")
 
 ### Phase 1 · 工程基座
 - [x] **T02** Vite + TS + singlefile(iife) 构建管线与空壳产物 → done (2026-10-15, qoder:sess-1015a, commit: "T02: build pipeline")
@@ -141,12 +141,12 @@ tests/**                         与 src 镜像
 
 **验收标准：**
 - [x] spike.html 双击在目标企业浏览器（Edge/Chrome）打开，页面列出 R1–R6 六项的 true/false 结果
-- [ ] R1 验证 `showDirectoryPicker` 在 `file://` 可调用并返回目录句柄、可读写子文件 —— **需用户手势，待企业 Edge 实测**（API 存在性与 `isSecureContext=true` 已确认）
+- [x] R1 验证 `showDirectoryPicker` 在 `file://` 可调用并返回目录句柄、可读写子文件 —— **PASS（用户 2026-10-15 企业 Edge 实测）**：目录选择、`assets/` 子目录创建、`spike-write.json` 读写、句柄存 IndexedDB 后复检身份全链路通过。数据文件夹方案成立，**T06 门槛解除**
 - [x] R2 验证句柄存入 IndexedDB 后重开页面可取出（失败则记录降级：每次启动重选目录）—— PASS：IndexedDB 在 `file://` 可读写
 - [x] R3 验证内联样式 SVG → data URI → Canvas → `toBlob` 导出不抛 SecurityError（taint）—— PASS：产出 5981 字节 PNG，画布未 taint
 - [x] R4 验证剪贴板粘贴图片在 `file://` 可取到 File（失败则降级为仅拖入/选文件）—— **PASS（用户 2026-10-15 企业 Edge 复测）**：粘贴框 `paste` 事件取到 `image/png`、22821 字节、名称 `image.png`、`hasFocus=true`；`clipboard.read` 探针同时取到同一张图（权限 `prompt`）。首轮 FAIL 属 spike 采集方式缺陷（拿需要前台焦点+权限的 API 测不依赖它的功能），非环境问题。**降级不启用**，三条插入路径全保留；实现只走 `paste` 事件的 `clipboardData`
 - [x] R5 用 5000 任务样本 JSON 测 `JSON.stringify` 耗时并记录毫秒数 —— PASS：stringify 18.1ms / parse 8.1ms / 2691 KB
-- [ ] 结果回填 spec 第 11 节表格，据此裁剪降级路径；spike 归档并提交 —— 已回填 11.1 实测结果（R2/R3/R4/R5 已定案）；待 R1/R6 人工复验后归档
+- [x] 结果回填 spec 第 11 节表格，据此裁剪降级路径；spike 归档并提交 —— 已回填 11.1：**R1–R6 全部通过，六条降级方案一条都不必启用**（保留为已备不用的兜底）；`spike.html` 标注为 T01 归档件保留在仓库根目录，可随时双击复测
 
 **预估：** 0.5d
 
@@ -764,3 +764,5 @@ tests/**                         与 src 镜像
 - [2026-10-15] 更正 T01（R4 首轮判定作废） | agent: qoder:sess-1015a | commit: "T01: R4 verdict voided, spike now measures the paste path" | 验收: R4 改回待复验；R1/R6 仍待用户回报 | 备注: 用户补全红卡原文 `NotAllowedError: Failed to execute 'read' on 'Clipboard': Document is not focused.`，成因是**焦点**不是**能力**——`clipboard.read()` 要求文档持有系统前台焦点并具备 clipboard-read 权限，截图工具抢焦点即报此错，故前两条补记里「FAIL / 权限门拦下」的判读作废，据此做的裁剪（spec 6.4 两条路径、T25 验收项）已全部撤回。`spike.html` 的 R4 改为双信号：新增静态粘贴框，以 `paste` 事件的 `clipboardData` 判定（这才是 TipTap 实际走的路径，无需权限），原按钮降级为 `clipboard.read` 探针并把失焦报错标注为非决定性。内置浏览器 `file://` 实测三分支：注入图片 File→PASS 并回报 `image/png, 2048 字节, 名称 shot.png, hasFocus=false`；仅文本→PENDING 并提示复制图片；探针在无焦点下报「非决定性」且不下拉结论；`render()` 重建卡片后粘贴框仍在（焦点不被打断）；控制台零消息 | 遗留: 请用户重开 `spike.html`，点粘贴框后按 Ctrl+V 复测 R4；R1/R6 结果仍待回报，R1 未通过前 T06 不启动
 
 - [2026-10-15] 更正 T01（R4 定案 PASS） | agent: qoder:sess-1015a | commit: "T01: R4 confirmed PASS via paste event in enterprise Edge" | 验收: R4 关闭；T01 仅剩 R1/R6 | 备注: 用户用改造后的粘贴框在企业 Edge 复测，`paste` 事件取到 `image/png` 22821 字节（名称 `image.png`，`hasFocus=true`），`clipboard.read` 探针同一轮也取到同一张图（权限状态 `prompt`）。前两条 R4 记录（87cb440 判 FAIL、d62b6ff 记签名、5f08c65 作废判定）至此定案：**R4 PASS，降级不启用**，笔记图片三条插入路径全保留；实现只用 `paste` 事件的 `clipboardData`，不引入 `clipboard.read()` 的焦点与权限依赖。已回填 spec 6.4、第 11 节 R4 行与 11.1 结论（R2/R3/R4/R5 成立，主路径无需降级），并解除 T25 验收项的裁剪条件 | 教训: spike 必须按目标功能真实使用的机制来测——用 A 接口的报错给 B 功能判死刑是本任务里第二次同类误判（第一次是内置浏览器与企业 Edge 的差异）；报错文案的确切成因（能力缺失 / 缺权限 / 缺焦点或缺手势）要在红卡里分档显示 | 遗留: R1、R6 待用户回报；R1 未通过前 T06 不启动
+
+- [2026-10-15] T01（定案） | agent: qoder:sess-1015a | commit: "T01: all six file:// risks verified in enterprise Edge, spike archived" | 验收: 7/7 全部勾选，任务转 done | 备注: 用户回报「R1 R6 测试通过」，至此 R1–R6 六项全部 PASS（R2/R3/R5 内置浏览器自动化实测，R1/R4/R6 企业 Edge 手动实测）。**第 11 节六条降级方案一条都不必启用**，全部转为已备不用的兜底；**T06（FsAccessAdapter）门槛解除**。`spike.html` 加归档说明后复测：页面在 `file://` 正常加载，R2/R3/R5 自动通过、R1/R4/R6 处于待手势的 pending 态、8 张卡片齐全、控制台零消息 | 遗留: R6 的写/读往返毫秒数未回传（OneDrive 伪冲突仍需日常观察，冲突弹窗保留「导出副本」兜底）；R1 每次重启后句柄权限是否仍免提示，由 T06 在真实启动流程里复验 | 教训: 与前两条 R4 记录同源——spike 要按目标功能真实使用的机制测，报错要分档显示成因
