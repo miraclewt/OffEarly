@@ -514,7 +514,7 @@ spike 结果回填本文档第 11 节并据此裁剪降级路径，然后才进�
 | workday | 工作日 | Workday |
 | workweek | 工作周 | Workweek |
 
-i18n 实现：自写约 60 行 `t()` + 插值；`type MsgKey = NestedKeyOf<typeof zh>`，`en.json` 用 `Record<MsgKey, string>` 约束，缺翻译编译期报错；`settings.locale: 'zh' | 'en' | 'auto'`，auto 读 `navigator.language.startsWith('zh')`；切换即时重渲染（locale 在 VaultStore，非模块级常量）；日期/星期/月份名走 dayjs locale（内联 zh-cn + en）。**边界规则：`t()` 只用于 UI 文案，绝不用于数据**（任务标题、topic 名、笔记内容原样显示）。
+i18n 实现：自写约 60 行 `t()` + 插值；`type MsgKey = NestedKeyOf<typeof zh>`，`en.ts` 用 `Record<MsgKey, string>` 约束，缺翻译编译期报错（T04 已以删键负例实测：`TS2741`）；`settings.locale: 'zh' | 'en' | 'auto'`，auto 读 `navigator.language.startsWith('zh')`；切换即时重渲染（locale 在 VaultStore，非模块级常量；只有**解析结果**变化才通知订阅者，避免库内其他改动白刷视图）；日期/星期/月份名走 dayjs locale（内联 zh-cn + en）。**边界规则：`t()` 只用于 UI 文案，绝不用于数据**（任务标题、topic 名、笔记内容原样显示）。
 
 ## 附录 B · 效果图清单
 

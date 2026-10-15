@@ -83,7 +83,7 @@ tests/**                         与 src 镜像
 ### Phase 1 · 工程基座
 - [x] **T02** Vite + TS + singlefile(iife) 构建管线与空壳产物 → done (2026-10-15, qoder:sess-1015a, commit: "T02: build pipeline")
 - [x] **T03** 领域类型 + Zod Schema + 迁移管线 → done (2026-10-15, qoder:sess-1015a, commit: "T03: domain types + zod schema + migration pipeline")
-- [ ] **T04** i18n 基座（zh/en 消息表 + t() + locale 切换） → pending
+- [x] **T04** i18n 基座（zh/en 消息表 + t() + locale 切换） → done (2026-10-15, qoder:sess-1015a, commit: "T04: i18n base with typed message keys and locale switching")
 - [ ] **T05** IconSprite 线性图标集 + 禁 emoji lint → pending
 
 ### Phase 2 · 持久化基座
@@ -204,12 +204,18 @@ tests/**                         与 src 镜像
 **产出：** `src/locales/zh.ts` `src/locales/en.ts` `src/locales/i18n.ts` `tests/locales/i18n.test.ts`
 
 **验收标准：**
-- [ ] `t(key, params?)` 支持 `{name}` 插值；key 类型为 `NestedKeyOf<typeof zh>`
-- [ ] `en.ts` 类型为 `Record<MsgKey, string>`，缺翻译编译期报错（以故意缺 key 的负例验证后移除）
-- [ ] `resolveLocale('auto')` 在 `navigator.language` 为 zh* 时返回 zh，否则 en；显式设置优先
-- [ ] locale 存于 VaultStore（非模块常量），切换后订阅组件重渲染（组件测试验证文案变化）
-- [ ] 消息表含 spec 附录 A 全部术语（四状态、topic、milestone、dependency、criticalPath、baseline、vault、workday、workweek）
-- [ ] 单测全绿并提交
+- [x] `t(key, params?)` 支持 `{name}` 插值；key 类型为 `NestedKeyOf<typeof zh>`（`interpolate` 三条单测 + 编译期断言 `Equal<MsgKey, 附录A 十二个叶子键>`，证明不产出 `status` 这类分支键）
+- [x] `en.ts` 类型为 `Record<MsgKey, string>`，缺翻译编译期报错（负例实测：删掉 `workweek` → `error TS2741: Property 'workweek' is missing … but required in type 'Record<"baseline" | … | "workweek", string>'`，`tsc` exit 1；补回后 exit 0）
+- [x] `resolveLocale('auto')` 在 `navigator.language` 为 zh* 时返回 zh，否则 en；显式设置优先（zh-CN/zh-TW/zh-HK/zh → zh；en-US/de-DE/ja-JP → en；`('zh','en-US')→zh`；省略第二参时读 `navigator.language`）
+- [x] locale 存于 VaultStore（非模块常量），切换后订阅组件重渲染（`LocaleSource` 接口注入，T10 的 VaultStore 即为实现；组件测试用 `useSyncExternalStore` 断言「评审中」→「In Review」且 `data-locale` 同步变化）
+- [x] 消息表含 spec 附录 A 全部术语（12 条 `[key, 中文, English]` 逐字双向断言；另断言 `Object.keys(en)` 与附录 A 键集合完全相等，多一条也算失败）
+- [x] 单测全绿并提交
+
+**实测证据：** `npx tsc --noEmit` exit 0；`npm run test` → `Test Files 2 passed (2) / Tests 34 passed (34)`（本任务 15 条 + T03 19 条）；`npm run build` 产物仍为单文件 `dist/OffEarly.html` 220522 字节（与 T03 相同——`src/locales/*` 尚未被应用代码引用，接线在 T15+）。
+
+**变更提议（越界清单）**：为满足「组件测试验证文案变化」这条验收，新增三个 devDependencies：jsdom 30.1.3、@testing-library/react 16.3.0、@testing-library/dom 10.4.1；环境切换用测试文件顶部的 `// @vitest-environment jsdom` docblock 实现，因此**没有**改 T02 的 `vite.config.ts`，只动了 `package.json` / `package-lock.json`。
+
+**实施注记（T04 发现）**：照 spec 字面，zh 是嵌套表、en 是扁平的 `Record<MsgKey, string>`，两者结构不同，故 i18n 内部把 zh 拉平成同一张扁平表再统一查表（`flatten`，8 行）。`createI18n` 只在**解析结果真的变了**时才通知订阅者——`auto` 与显式 `'en'` 可能同为英文，VaultStore 的任何改动都不该白刷视图。插值抽成 `interpolate` 导出是为了单测：附录 A 全是单词、没有带占位符的句式，不为测试而新增消息键。
 
 **预估：** 0.5d
 
@@ -766,3 +772,5 @@ tests/**                         与 src 镜像
 - [2026-10-15] 更正 T01（R4 定案 PASS） | agent: qoder:sess-1015a | commit: "T01: R4 confirmed PASS via paste event in enterprise Edge" | 验收: R4 关闭；T01 仅剩 R1/R6 | 备注: 用户用改造后的粘贴框在企业 Edge 复测，`paste` 事件取到 `image/png` 22821 字节（名称 `image.png`，`hasFocus=true`），`clipboard.read` 探针同一轮也取到同一张图（权限状态 `prompt`）。前两条 R4 记录（87cb440 判 FAIL、d62b6ff 记签名、5f08c65 作废判定）至此定案：**R4 PASS，降级不启用**，笔记图片三条插入路径全保留；实现只用 `paste` 事件的 `clipboardData`，不引入 `clipboard.read()` 的焦点与权限依赖。已回填 spec 6.4、第 11 节 R4 行与 11.1 结论（R2/R3/R4/R5 成立，主路径无需降级），并解除 T25 验收项的裁剪条件 | 教训: spike 必须按目标功能真实使用的机制来测——用 A 接口的报错给 B 功能判死刑是本任务里第二次同类误判（第一次是内置浏览器与企业 Edge 的差异）；报错文案的确切成因（能力缺失 / 缺权限 / 缺焦点或缺手势）要在红卡里分档显示 | 遗留: R1、R6 待用户回报；R1 未通过前 T06 不启动
 
 - [2026-10-15] T01（定案） | agent: qoder:sess-1015a | commit: "T01: all six file:// risks verified in enterprise Edge, spike archived" | 验收: 7/7 全部勾选，任务转 done | 备注: 用户回报「R1 R6 测试通过」，至此 R1–R6 六项全部 PASS（R2/R3/R5 内置浏览器自动化实测，R1/R4/R6 企业 Edge 手动实测）。**第 11 节六条降级方案一条都不必启用**，全部转为已备不用的兜底；**T06（FsAccessAdapter）门槛解除**。`spike.html` 加归档说明后复测：页面在 `file://` 正常加载，R2/R3/R5 自动通过、R1/R4/R6 处于待手势的 pending 态、8 张卡片齐全、控制台零消息 | 遗留: R6 的写/读往返毫秒数未回传（OneDrive 伪冲突仍需日常观察，冲突弹窗保留「导出副本」兜底）；R1 每次重启后句柄权限是否仍免提示，由 T06 在真实启动流程里复验 | 教训: 与前两条 R4 记录同源——spike 要按目标功能真实使用的机制测，报错要分档显示成因
+
+- [2026-10-15] T04 | agent: qoder:sess-1015a | commit: "T04: i18n base with typed message keys and locale switching" | 验收: 全部通过（6/6） | 备注: `npx tsc --noEmit` exit 0；`npm run test` 34/34 绿（本任务 15 条）；`npm run build` 仍为单文件 220522 字节，与 T03 一致——`src/locales/*` 暂未被应用代码引用，接线在 T15+。负例已实跑：从 `en.ts` 删去 `workweek` 得 `TS2741`（exit 1），补回后 exit 0，故「缺翻译编译期报错」不是推断而是测量。组件重渲染按验收要求做成真测试（jsdom + `useSyncExternalStore`，「评审中」→「In Review」且 `data-locale` 同步） | 越界改动: 新增 devDeps jsdom 30.1.3 / @testing-library/react 16.3.0 / @testing-library/dom 10.4.1，`package.json` 随之变动；环境用测试文件顶部 `// @vitest-environment jsdom` 指定，未触碰 T02 的 `vite.config.ts` | 遗留: dayjs locale（日期/星期/月份名）不在本任务产出内，归 T11 排期引擎与 T19 甘特图表头使用
