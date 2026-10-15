@@ -325,7 +325,7 @@ interface Filter {
 - Markdown 快捷语法：`# `、`- `、`1. `、`> `、`[] `、`` ` `` —— Obsidian 习惯
 - 双向链接最小落地：输入 `[[` 弹任务/里程碑标题搜索，插入 `[[任务标题]]`；渲染时解析为可点击跳转，同名多任务列候选
 - **图片三条插入路径**（粘贴截图 / 拖入文件 / 工具栏选择）统一走：
-  <!-- 粘贴只用 paste 事件的 clipboardData（编辑器原生路径，不需权限）；不依赖 navigator.clipboard.read()——它要求文档持系统前台焦点并申请 clipboard-read 权限。R4 复测若发现 paste 事件里 clipboardData 缺失，则裁掉本条 -->
+  <!-- 粘贴只用 paste 事件的 clipboardData（R4 已在企业 Edge 实测通过：取到 image/png 22821 字节）；不依赖 navigator.clipboard.read()——它额外要求文档持系统前台焦点与 clipboard-read 权限，本功能用不上 -->
 
 ```
 File → AssetStore.put(file) → 写 assets/<nanoid>.<ext>
@@ -474,11 +474,11 @@ spike 结果回填本文档第 11 节并据此裁剪降级路径，然后才进�
 | R1 | 待人工验证 | API 存在已确认；目录选择与子文件读写需用户手势，待企业 Edge 实测 |
 | R2 | **PASS** | IndexedDB 在 `file://` 可读写；句柄结构化克隆往返由 R1 授权后自动复检 |
 | R3 | **PASS** | SVG→data URI→Canvas→PNG 成功（5981 字节），画布未被 taint |
-| R4 | **非决定性，待复测**（企业 Edge） | 红卡原文 `NotAllowedError: Failed to execute 'read' on 'Clipboard': Document is not focused.`——是**前台焦点判定**而非能力缺失：`clipboard.read()` 要求文档持有系统焦点，截图工具抢焦点即报此错。spike 已改造为以**粘贴框的 `paste` 事件**为准（富文本编辑器实际走这条路径，不需要 clipboard 权限），按钮降级为 `clipboard.read` 探针且失焦报错标注「非决定性」。内置浏览器复测三条分支：图片→PASS（回报 type/size/name）、仅文本→PENDING 并提示复制图片、探针失焦→非决定性且不下拉结论；控制台零消息 |
+| R4 | **PASS**（企业 Edge 复测） | 粘贴框 `paste` 事件取到 File：`image/png`、22821 字节、名称 `image.png`、`hasFocus=true`；`clipboard.read` 探针在同一状态下也取到同一张图（权限状态 `prompt`）。首轮报的 `NotAllowedError: ... Document is not focused.` 是 spike 采集方式缺陷（改用需要前台焦点与权限的 API 去测一个并不依赖它的功能），非环境能力缺失。**结论：笔记图片三条插入路径全保留**，实现只依赖 `paste` 事件的 `clipboardData`，不使用 `clipboard.read()`（见 6.4） |
 | R5 | **PASS** | 5000 任务：stringify 18.1ms、parse 8.1ms、2691 KB，远低于 200ms 阈值 |
 | R6 | 待人工验证 | 依赖 R1 句柄做读写往返计时；同步盘延迟需人工观察 |
 
-**结论**：R2 / R3 / R5 成立，架构主路径（数据文件夹 + 句柄持久化 + PNG 导出 + 全量序列化）**无需启用降级**。R4 首轮判定为 FAIL 是 spike 自身的采集方式缺陷（用 `clipboard.read()` 探针并要求前台焦点），已改为 `paste` 事件判定，待企业 Edge 复测后再定三条图片插入路径是否全保留。内置浏览器与企业 Edge 的 `file://` 策略可能存在差异，因此 R1 未在企业 Edge 复验前不进入 T06（FsAccessAdapter）。
+**结论**：R2 / R3 / R4 / R5 成立，架构主路径（数据文件夹 + 句柄持久化 + PNG 导出 + 笔记图片粘贴 + 全量序列化）**无需启用降级**。R4 首轮的 FAIL 是 spike 自身的采集方式缺陷（用需要前台焦点与权限的 `clipboard.read()` 去测一个走 `paste` 事件的功能），改用粘贴框判定后在企业 Edge 复测通过。内置浏览器与企业 Edge 的 `file://` 策略可能存在差异，因此 R1 未在企业 Edge 复验前不进入 T06（FsAccessAdapter）。
 
 ---
 
