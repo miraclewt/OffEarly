@@ -123,7 +123,7 @@ tests/**                         与 src 镜像
 ### Phase 3 · 领域层
 - [x] **T10** lexorank + VaultStore + CommandBus（undo/redo） → done (2026-10-15, workbuddy:sess-1015g, commit: "T10: lexorank + VaultStore + CommandBus with undo/redo and app shell wiring")
 - [ ] **T11** ScheduleEngine（工作日历工期计算） → pending
-- [ ] **T12** DependencyGraph（邻接 / 环 / 关键路径 / 阻塞链） → pending
+- [x] **T12** DependencyGraph（邻接 / 环 / 关键路径 / 阻塞链） → done (2026-10-15, workbuddy:sess-1015g, commit: "T12: DependencyGraph with Tarjan cycle detection and CPM critical path")
 - [ ] **T13** TopicTree + QueryEngine（组合筛选 / 依赖跳数 / 全文） → pending
 
 ### Phase 4 · 看板与详情
@@ -449,12 +449,28 @@ tests/**                         与 src 镜像
 **产出：** `src/domain/dependencyGraph.ts` `tests/domain/dependencyGraph.test.ts`
 
 **验收标准：**
-- [ ] 从 links 派生 `from→to` 与 `to→from` 双向 Map；`blocks(id)/blockedBy(id)` 正确
-- [ ] `isBlocked(id)` = 存在 status≠done 的前置（FS 语义）
-- [ ] `cycles()` 用 Tarjan 返回所有强连通分量中 size>1 的环；无环返回空
-- [ ] `criticalPath()` 对 DAG 拓扑排序 + 最长路径（工期为权）返回任务 id 集合；含环时返回 null
-- [ ] `upstream(id, n)/downstream(id, n)` N 跳遍历不重复访问、n=0 仅自身
-- [ ] 单测含：线性链、菱形、环、双环、跨 topic 依赖；全绿并提交
+- [x] 从 links 派生 `from→to` 与 `to→from` 双向 Map；`blocks(id)/blockedBy(id)` 正确 —— 返回对象暴露只读 `successors` / `predecessors` 两张邻接表（同向重复边按 `from\u0000to` 键去重），`blocks(id)=from=id 的 to`、`blockedBy(id)=to=id 的 from`；未知 id 返回空数组不抛错
+- [x] `isBlocked(id)` = 存在 status≠done 的前置（FS 语义）—— 只看直接前置、不看传递闭包；类型/lag 不参与阻塞判定（spec 5.3 只要求「存在未完成前置」）；前置 id 在 tasks 中缺失时保守判为被阻塞（悬空依赖不静默忽略）
+- [x] `cycles()` 用 Tarjan 返回所有强连通分量中 size>1 的环；无环返回空 —— **迭代式 Tarjan**（显式栈，避免 5000 任务递归爆栈）；单测覆盖无环/单环/双环（两个互不相交分量）/环树混合
+- [x] `criticalPath()` 对 DAG 拓扑排序 + 最长路径（工期为权）返回任务 id 集合；含环时返回 null —— Kahn 拓扑排序 + 节点权网络 CPM：前向 ES/EF、后向 LF/LS，返回**总浮动=0**的关键集（并行动工期的多条最长路径全部计入，与甘特图 `criticalIds` 高亮语义一致）；`cycles()` 非空即返回 null
+- [x] `upstream(id, n)/downstream(id, n)` N 跳遍历不重复访问、n=0 仅自身 —— BFS 逐层扩展 + `visited` 去重，含起点；跳数超过深度返回全部可达节点；负跳数按 0 处理；环上不无限循环
+- [x] 单测含：线性链、菱形、环、双环、跨 topic 依赖；全绿并提交 —— 24 条单测（本任务），先 RED 后 GREEN
+
+**实测证据：** `npm test` → `Test Files 11 passed (11) / Tests 155 passed (155)`（本任务 24 条 + 既有 131 条）；`npx tsc --noEmit` exit 0；`npm run lint:emoji` 干净；`npm run build` → 单文件 `dist/OffEarly.html` 325663 字节，`<script src` 0 / `<link href` 0 / `type="module"` 0 / `(src|href)="http(s)://` 0（T02 单文件不变式复测通过）。首轮 20/24，红的是关键路径后向传播：我在节点权模型里误用 `LF(后继)` 而非 `LS(后继)=LF(后继)−w(后继)`，使前置浮动全部虚高；改为逐条以 `LF(s) − w(s)` 取最小值后 24/24 绿（该 bug 被「线性链全部关键」「菱形取长分支」两条用例同时抓住）。
+
+**实施注记（T12 发现）：**
+- **纯函数边界。** 只 `import type` T03 的 `types.ts`，零 React / 零 DOM / 零 I/O；`Date.parse` 仅做 UTC 日期算术（非 I/O）。工厂 `createDependencyGraph(links, tasks, options?)` 返回方法对象，契合 spec 第 3 节 API 契约（`blocks/blockedBy/cycles/criticalPath`）。
+- **工期权重用端口注入，不用 ScheduleEngine。** T12 依赖已放宽到 T03，T11 尚未落地，故 `criticalPath` 的权重走可选 `options.duration`，默认实现为「含端点的自然日跨度 `due−start+1`，缺/非法日期记 1」。T19 落地时注入 ScheduleEngine 的工作日工期即可切成工作日口径，本模块无需改动（沿用 T04/T08「接口注入、后由实现方接管」的既定手法）。
+- **关键集语义选「零总浮动」而非「单条最长路径」。** 验收项写「返回任务 id 集合」，菱形两条等长最长路径时单条路径的结果取决于 tie-break，不稳定；零浮动集天然涵盖全部关键任务，正是甘特图要高亮的那一批。已用「工期并列菱形→四节点全关键」与「工期不等菱形→仅长分支关键」两条用例把语义钉死。
+- **自环按环处理。** 严格按「size>1」会漏掉 `A→A`；而自环同样使 DAG 前提失效、必须让 `criticalPath` 降级。故 `cycles()` 对 size=1 但存在自环的节点以 `[id]` 形式返回——这是 size>1 规则的唯一扩展，已单测锁定并在此记录。
+- **迭代实现。** Tarjan 与 Kahn 均用显式栈/队列，不用递归，避免大库（spike 的 5000 任务样本）爆栈；`cycles()` 结果做惰性 memo（闭包缓存），重复调用不再重算。
+
+**变更提议（越界清单）：** 无。本任务只改产出清单内的 `src/domain/dependencyGraph.ts` 与 `tests/domain/dependencyGraph.test.ts`（tests 与 src 镜像），未触碰 `src/App.tsx` / `src/locales/*` / `src/views/*` 及其他任务文件；`npm install` 产生的 `package-lock.json` 纯 `peer` 标记差异已还原、未纳入提交。
+
+**遗留：**
+- `criticalPath` 的默认工期是自然日口径；工作日口径（跳节假日/补班）需 T19 注入 ScheduleEngine 的 `duration(task)`。
+- 悬空链接（`from`/`to` 指向不存在任务）按「未完成前置」保守阻塞、并在关键路径里以工期 1 的占位节点参与；数据一致性校验/提示不在本模块范围（归 T17 依赖编辑器的成环与非法引用提示）。
+- 本模块尚未被应用代码引用，产物体积不变，接线归 T13（QueryEngine 依赖跳数复用 `upstream/downstream`）与 T19（`buildGanttModel` 复用 `criticalPath/cycles`）。
 
 **预估：** 1.5d
 
@@ -877,3 +893,5 @@ tests/**                         与 src 镜像
 - [2026-10-15] T08 | agent: workbuddy:sess-1015f | commit: "T08: autosave controller with dirty tracking, debounce, Ctrl+S and three-state save indicator"| 验收: 全部通过（5/5） | 备注: 交付 `createAutosave`（dirty 标记 / debounce 1200ms / Ctrl+S 立即保存 / 三态 saved-dirty-error / retry）+ `SaveIndicator` 指示器组件。`npm run test` 131/131 绿（本任务 24 条：autosave 19 + SaveIndicator 5，先 RED 后 GREEN——首轮 18/19，唯一红的是「写盘途中的编辑」，属测试构造缺陷：`chain.then` 把 doFlush 推到微任务，`fs.edit` 抢在写盘前跑完，改用 `io.waitEntered()` 等到真的进了 save 再构造并发编辑）；`npx tsc --noEmit` exit 0（首轮报 TS6196 未用导入，删除后干净）；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 325651 字节，`<script src`/`<link`/`type="module"`/`http(s)://` 资源引用四项均为 0（T02 不变式复测通过） | 依赖偏离: T08 依赖列了 T10，而 T10 仍 pending，未等待即开工——依 T04「接口注入、T10 的 VaultStore 即实现」的既定先例，autosave 只依赖最小端口 `AutosaveStore { subscribe, getVault, markSaved }`，不 import `domain/store`；T10 落地时让 VaultStore 实现该端口并调 `start()` 即可。**此条与《状态同步协议》第 1、4 条（依赖未 done 不得开工）相悖，请用户裁决：若要求严格串行，T08 应改回 pending 并在 T10 之后重做一次接线验收** | 越界改动: ① 新增 `src/views/SaveIndicator.tsx` + `tests/views/SaveIndicator.test.tsx`（产出清单漏了视图，而验收项 4 要求组件测试）；② locales 新增 `save.*` 4 键；③ 刻意**未**改 `src/App.tsx`（顶栏挂载点需要活着的 VaultStore） | 并发: 提交前工作树只有本任务新增的 3 个文件与 locales/task.md 改动，无其他 agent 的未提交产物 | 遗留: 顶栏挂载与 Ctrl+S 全局按键绑定归 T10/T15；保存流程目前无真正的写前快照（`snapshotter` 端口已就位、无人注入，等 T09）
 
 - [2026-10-15] T10 | agent: workbuddy:sess-1015g | commit: "T10: lexorank + VaultStore + CommandBus with undo/redo and app shell wiring" | 验收: 全部通过（5/5） | 备注: 交付 `lexorank.mid`（62 进制分数串，词典序比较；有界走真中点、开区间走紧邻的上下一个键）+ `createVaultStore`（zustand 5.0.15 vanilla + subscribeWithSelector，immutable，结构化满足 T04 LocaleSource 与 T08 AutosaveStore）+ `createCommandBus`（apply/undo/redo + 5 个命令工厂，Command = Mutation & { inverse: Mutation }）。`npm run test` 183/183 绿（本任务 46 条：lexorank 13 + store 13 + commandBus 20；另在 App 追加 6 条外壳用例，先 RED 后 GREEN）；`npx tsc --noEmit` exit 0（首轮唯一报错是 `useStore` 与 `VaultStore.subscribe` 签名不兼容，把 subscribe 放宽成 zustand 的 `(state, prevState) => void` 即消）；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 330024 字节，四项外链不变式（`<script src`/`<link`/`type="module"`/`http(s)://`）复测全 0；额外用 jsdom 真跑产物内联 bundle 冒烟：`#root` 有内容、首屏「连接数据文件夹」、侧栏品牌在位、顶栏占位存在、零脚本错误 | 依赖: T03 ✓（唯一依赖，全部就绪）| 越界改动: ① 改 `src/App.tsx` + `tests/App.test.tsx`（收口 T04/T07/T08 三条明确指向 T10 的遗留：ready 相改由 VaultStore 承载、locale 源换接 Store、顶栏挂 SaveIndicator、window 上绑 Ctrl+S）；② 新增 `tests/domain/store.test.tsx`（验收项 2 要求组件测试，store 用例无产出位）；③ 新增 runtime 依赖 `zustand` 5.0.15 精确锁版（spec 技术栈与模块清单都标注 VaultStore 用 Zustand）；④ App 新增可选 prop `onSession`（测试拿会话驱动链路，T15 换 Context 时替换）| 并发: 提交前工作树无其他 agent 的未提交产物；`zustand` 的依赖行与 lockfile 由本任务一次性加入（T05 记录里提到的 `zustand` 行是当时另一 agent 写入后又回退的，本次才是真落地）| 前序遗留闭合: **T08 的依赖偏离就此解除** —— App 现在用真 VaultStore 实例化 autosave 并 start()，Ctrl+S 落盘/revision 递增/失败重试都有了外壳级用例；T04 的 LocaleSource 与 T07 的「换接 Store」均已落地 | 遗留: 顶栏撤销/重做按钮与视图切换归 T15（`commandBus` 尚未被 App 实例化，暂被 tree-shake）；`createCommandBus` 未缓存「一 Store 一 bus」，调用方需自行保证；`useI18n` 对 source 的订阅没有 teardown（T04 的 `createI18n` 未返回拆卸手段，每会话最多漏一个监听器）；任务 order 由调用方（T13 拖拽）用 `mid` 生成
+
+- [2026-10-15] T12 | agent: workbuddy:sess-1015g | commit: "T12: DependencyGraph with Tarjan cycle detection and CPM critical path" | 验收: 全部通过（6/6） | 备注: 交付依赖图纯函数模块 `createDependencyGraph(links, tasks, options?)`——只 `import type` T03 的 `types.ts`，零 React / 零 DOM / 零 I/O；返回对象含只读 `successors`/`predecessors` 双向邻接表与 `blocks/blockedBy/isBlocked/cycles/hasCycle/criticalPath/upstream/downstream`。`npm run test` 155/155 绿（本任务 24 条：邻接 3 + isBlocked 3 + cycles 5 + criticalPath 8 + 跳数遍历 5，先 RED 后 GREEN——首轮 20/24，红的是关键路径后向传播：节点权模型里误用 `LF(后继)` 而非 `LS(后继)=LF(后继)−w(后继)`，前置浮动全部虚高，改为逐条 `LF(s)−w(s)` 取最小后全绿，被「线性链全部关键」「菱形取长分支」两条用例同时抓住）；`npx tsc --noEmit` exit 0（首轮报 4 处 `ReadonlyMap` vs `Map` 签名不匹配，改 `neighbours` 入参为 `ReadonlyMap` 后干净）；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 325663 字节，`<script src`/`<link href`/`type="module"`/`(src\|href)="http(s)://` 四项均为 0（T02 不变式复测通过） | 设计要点: Tarjan 与 Kahn 均**迭代实现**（显式栈/队列，避免 5000 任务爆栈）；`cycles()` 惰性 memo；关键集取**总浮动=0**（涵并行等长的多条最长路径，对齐甘特图 `criticalIds` 高亮）而非单条最长路径；自环按环处理（size=1 但 `A→A` 以 `[id]` 返回，是 size>1 规则的唯一扩展，否则 `criticalPath` 会漏降级）；悬空前置保守判阻塞。工期权重走 `options.duration` 端口注入、默认自然日跨度 `due−start+1`，**不引 ScheduleEngine**（T11 未 done，依赖已放宽至 T03） | 越界改动: **无**——只改 `src/domain/dependencyGraph.ts` + `tests/domain/dependencyGraph.test.ts`；未碰 `src/App.tsx`/`src/locales/*`/`src/views/*` 及其他任务文件；`npm install` 产生的 `package-lock.json` 纯 `peer` 标记差异已还原、未纳入提交 | 并发: 提交前工作树仅本任务两个新文件 + `task.md`，无其他 agent 未提交产物 | 遗留: 关键路径默认自然日口径，工作日口径需 T19 注入 ScheduleEngine 的 `duration`；悬空链接的校验/提示归 T17；本模块尚未被应用代码引用，接线归 T13（跳数筛选复用 `upstream/downstream`）与 T19（`buildGanttModel` 复用 `criticalPath/cycles`）
