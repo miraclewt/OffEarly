@@ -1,8 +1,9 @@
-# TaskDone 架构设计
+# OffEarly（早下班）架构设计
 
 | 项 | 值 |
 |---|---|
-| 文档版本 | v1.0 |
+| 产品名 | OffEarly（中文：早下班） |
+| 文档版本 | v1.1 |
 | 日期 | 2026-10-15 |
 | 状态 | 待评审 |
 | 交付边界 | 仅架构设计文档（不含实现） |
@@ -12,7 +13,7 @@
 
 ## 0. 摘要与硬约束
 
-TaskDone 是一个**个人本地**的任务管理与项目进度追踪工具，集成 Jira 的依赖与筛选、Planner 的轻量看板、Obsidian 的本地文件与 Markdown、MS Project 的甘特图与排期引擎的核心优势。面向企业内网环境：**不联网、不登录、不装包**。
+OffEarly（早下班）是一个**个人本地**的任务管理与项目进度追踪工具，集成 Jira 的依赖与筛选、Planner 的轻量看板、Obsidian 的本地文件与 Markdown、MS Project 的甘特图与排期引擎的核心优势。面向企业内网环境：**不联网、不登录、不装包**。
 
 | # | 硬约束 | 来源 |
 |---|---|---|
@@ -337,6 +338,22 @@ File → AssetStore.put(file) → 写 assets/<nanoid>.<ext>
 - 信息密度：卡片 6 项、详情抽屉 5 分区、看板列头 3 项，均为上限
 - 效果图见 `docs/design/`：`01-board-layout.png`（看板整体）、`02-gantt-detail.png`（甘特图 + 详情抽屉）、`03-card-variants-compare.png`（卡片四方案对比）、`04-card-closeup-recommended.png`（C 方案特写含 hover/逾期态）
 
+### 品牌与图标资产
+
+- 产品名 **OffEarly**（中文：早下班）；tagline「把事做完，早点下班。/ Finish well. Leave early.」
+- 品牌标记概念：5 点时钟 + 从表盘右侧缺口穿出的离场箭头（"到点就走"），1.8px 描边、深靛 `#4F46E5`，与 UI 线性图标同一语言
+
+| 资产 | 用途 |
+|---|---|
+| `brand/logo-mark.svg` | 彩色线性标，单一事实源；任意尺寸由此缩放 |
+| `brand/logo-mark-mono.svg` | 单色标（`currentColor`）；favicon、打印、单色上下文 |
+| `brand/logo-lockup.svg` | 标 + OffEarly 字标 + 早下班；侧栏 wordmark、文档页眉 |
+| `brand/app-icon-1024.png` | 应用图标：桌面快捷方式、PWA manifest、系统"打开方式"图标 |
+
+- favicon 以 `logo-mark-mono.svg` 的 data URI 内联进单 HTML，保证零外部请求
+- 192/512/48/32/16 等光栅尺寸在构建期由 SVG / 1024 源导出，**不入库**
+- 可执行物命名 `OffEarly.html`；数据文件夹与 `vault.json` 命名不变
+
 ---
 
 ## 8. 持久化、自动保存、备份与冲突
@@ -402,7 +419,7 @@ save():
 - 无 sourcemap 进产物（外挂保存）
 - 产物目标 < 1.6 MB；CI 校验产物中不含任何 `http(s)://` 资源引用（保证零网络依赖）
 - `APP_VERSION` 内嵌于 HTML（git tag）；`schemaVersion` 独立演进，向后兼容 N-1
-- 交付物：`TaskDone.html`（唯一可执行物）+ `docs/`（设计文档与一页纸用户手册）+ 可选 `example.vault/` 示例库（含示例 topic/任务/里程碑/图片）
+- 交付物：`OffEarly.html`（唯一可执行物）+ `docs/`（设计文档与一页纸用户手册）+ 可选 `example.vault/` 示例库（含示例 topic/任务/里程碑/图片）
 
 ---
 
@@ -475,4 +492,4 @@ i18n 实现：自写约 60 行 `t()` + 插值；`type MsgKey = NestedKeyOf<typeo
 | `docs/design/03-card-variants-compare.png` | 卡片话题标识四方案同屏对比（A 左色条 / B 顶线 / C 色点+话题名 / D 柔和底色） |
 | `docs/design/04-card-closeup-recommended.png` | C 方案卡片特写，含 hover 态与逾期态 |
 
-> 注：`01-board-layout.png` 生成于状态收敛决策之前，图中为五列；最终实现以第 6.1 节的固定四列（To Do / In Progress / In Review / Done）为准，归档不作为列。
+> 注：`01-board-layout.png` 与 `02-gantt-detail.png` 已按 OffEarly 品牌、固定四列与 C 方案卡片重生成；`03` / `04` 不含字标，不受更名影响。效果图中的文案与像素细节以第 6、7 节文字规范为准。

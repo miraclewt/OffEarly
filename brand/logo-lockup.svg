@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 164 32" width="164" height="32" fill="none">
+  <g transform="translate(4,4) scale(1.3333)" stroke="#4F46E5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17.34 14.96 A7 7 0 1 1 17.34 9.04"/>
+    <path d="M11 12 V7.5"/>
+    <path d="M11 12 L12.75 15.03"/>
+    <path d="M19 12 H22.5"/>
+    <path d="M20.6 10.1 L22.5 12 L20.6 13.9"/>
+  </g>
+  <text x="44" y="21.5" font-family="-apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="17" font-weight="600" fill="#111827">OffEarly</text>
+  <text x="122" y="21.5" font-family="-apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="12" fill="#6B7280">早下班</text>
+</svg>
