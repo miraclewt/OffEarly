@@ -2,21 +2,46 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { useStore } from 'zustand'
 
+import { createCommandBus } from './domain/commandBus'
+import type { Command, CommandBus } from './domain/commandBus'
+import { createQueryEngine, createEmptyFilter } from './domain/queryEngine'
 import { createVaultStore } from './domain/store'
 import type { VaultStore } from './domain/store'
-import type { Vault } from './domain/types'
+import type { Filter, Vault } from './domain/types'
 import { createI18n } from './locales/i18n'
-import type { I18n, LocaleSource, MsgKey } from './locales/i18n'
+import type { I18n, LocaleSource, MsgKey, TranslateParams } from './locales/i18n'
 import { createAutosave } from './persistence/autosave'
 import type { Autosave } from './persistence/autosave'
 import { connectDir } from './persistence/fsAdapter'
 import { handleStore, verifyPermission } from './persistence/handleStore'
 import type { VaultDirHandle } from './persistence/handleStore'
-import { createVaultRepository } from './persistence/vaultRepository'
-import type { VaultRepository } from './persistence/vaultRepository'
+import {
+  createConflictGuard,
+  createRevisionWatcher,
+  createSelfHealingLoader,
+  createVaultRepository,
+  guardCommandBus,
+  readOnlyMessage,
+  ReadOnlyError,
+} from './persistence/vaultRepository'
+import type {
+  ConflictGuard,
+  ConflictReport,
+  ReadOnlyGuard,
+  RevisionWatcher,
+  SafeModeSnapshotRef,
+  SelfHealingLoader,
+  VaultRepository,
+} from './persistence/vaultRepository'
 import { VaultValidationError } from './domain/schema'
+import { ConflictDialog } from './views/ConflictDialog'
+import type { ConflictLabels } from './views/ConflictDialog'
+import { GanttView } from './views/GanttView'
 import { Icon, IconSprite } from './views/IconSprite'
+import { SafeModeBanner } from './views/SafeModeBanner'
+import type { SafeModeLabels } from './views/SafeModeBanner'
 import { SaveIndicator } from './views/SaveIndicator'
+import { TopicSidebar } from './views/TopicSidebar'
 
 const INDIGO = '#4F46E5'
 const BORDER = '#E5E7EB'
@@ -76,11 +101,117 @@ export function startupPorts(): StartupPorts {
 /** 库打开前的 locale：按浏览器语言解析；打开后换接 VaultStore（见 useI18n）。 */
 const BOOT_LOCALE: LocaleSource = { getLocale: () => 'auto', subscribe: () => () => {} }
 
-/** 打开一个库拿到的三件套。 */
+/**
+ * 打开一个库拿到的全套控制面。
+ *
+ * T14/T20/T27/T29 的组件都是「可挂载」的，接线统一收口在这里：
+ * Store 仍是唯一状态源，落盘面/冲突闸门/自愈加载器/轮询都挂在同一份 Store 上。
+ */
 export interface Session {
   store: VaultStore
   repository: VaultRepository
   autosave: Autosave
+  /** T10 的撤销/重做队列，外面包了 T29 的只读闸门。 */
+  bus: CommandBus
+  /** T29：启动自愈 + 只读安全模式。 */
+  loader: SelfHealingLoader
+  /** T27：写盘前的 revision 冲突闸门。 */
+  conflictGuard: ConflictGuard
+  /** T27：30s 轮询磁盘 revision。 */
+  watcher: RevisionWatcher
+  /** 与 loader 共享同一个只读开关。 */
+  readOnly: ReadOnlyGuard
+}
+
+/** 会话向外汇报的三类事件（组件只负责显示，决定权留在接线层）。 */
+interface SessionHooks {
+  onConflict(report: ConflictReport): void
+  onRemoteChange(): void
+  onWriteRejected(message: string): void
+}
+
+/**
+ * 冲突时**不落盘**，但要保住 autosave 的 dirty 态：
+ * 抛出哨兵错误让 autosave 停在「未保存」而不是谎报成功，弹窗随后接管。
+ */
+class ConflictPendingError extends Error {
+  constructor() {
+    super('conflict pending')
+    this.name = 'ConflictPendingError'
+  }
+}
+
+/**
+ * 打开一个库 = 建 Store + 落盘面 + 自动保存 + 冲突闸门 + 只读闸门。
+ * Store 从此是唯一状态源（T10）。
+ */
+function openSession(
+  dir: VaultDirHandle,
+  repository: VaultRepository,
+  loader: SelfHealingLoader,
+  vault: Vault,
+  hooks: SessionHooks,
+): Session {
+  const store = createVaultStore(vault)
+  const conflictGuard = createConflictGuard(dir, repository)
+
+  // T10 的命令队列 + T29 的只读闸门：只读时 apply/undo/redo 抛 ReadOnlyError 并回调提示。
+  // guardCommandBus 只覆盖写入口，undoDepth/subscribe/clear 仍透传真实队列。
+  const rawBus = createCommandBus(store)
+  const guarded = guardCommandBus<Command>(rawBus, loader.readOnly, hooks.onWriteRejected)
+  const bus: CommandBus = {
+    apply: (command) => {
+      guarded.apply(command)
+    },
+    undo: () => guarded.undo(),
+    redo: () => guarded.redo(),
+    canUndo: () => guarded.canUndo?.() ?? false,
+    canRedo: () => guarded.canRedo?.() ?? false,
+    undoDepth: () => rawBus.undoDepth(),
+    redoDepth: () => rawBus.redoDepth(),
+    subscribe: (listener) => rawBus.subscribe(listener),
+    clear: () => {
+      rawBus.clear()
+    },
+  }
+
+  const autosave = createAutosave({
+    store,
+    // autosave 必须挂在同一个 store 上，否则它盯的是另一份内存，永远等不到变更。
+    // sink 依次过两道闸门：只读（T29）→ 冲突（T27）。
+    sink: {
+      async save(next) {
+        if (loader.readOnly.isReadOnly()) {
+          throw new ReadOnlyError(readOnlyMessage(loader.readOnly.reason()))
+        }
+        const report = await conflictGuard.saveGuarded(next)
+        if (report !== null) {
+          hooks.onConflict(report)
+          throw new ConflictPendingError()
+        }
+      },
+    },
+  })
+
+  // T27 的 30s 轮询：磁盘变且本地不脏 → 静默重载；本地脏 → 顶栏提示，等保存时再问。
+  const watcher = createRevisionWatcher({
+    peekRevision: () => repository.peekRevision(),
+    getMemoryRevision: () => store.getVault().revision,
+    isDirty: () => autosave.isDirty(),
+    reload: async () => {
+      const disk = await repository.load()
+      if (disk === null) return
+      // 重载前后停一次：否则 setVault 会被 autosave 当成用户编辑而立刻回写
+      autosave.stop()
+      store.setVault(disk)
+      autosave.start()
+    },
+    notify: () => {
+      hooks.onRemoteChange()
+    },
+  })
+
+  return { store, repository, autosave, bus, loader, conflictGuard, watcher, readOnly: loader.readOnly }
 }
 
 type Phase =
@@ -90,8 +221,14 @@ type Phase =
   | { kind: 'busy'; dir: VaultDirHandle }
   | { kind: 'empty-dir'; dir: VaultDirHandle }
   | ({ kind: 'ready'; dir: VaultDirHandle } & Session)
+  | ({ kind: 'readonly'; dir: VaultDirHandle; reason: string; snapshot: SafeModeSnapshotRef | null } & Session)
   | { kind: 'safe-mode'; dir: VaultDirHandle; reason: string }
   | { kind: 'failed'; reason: string }
+
+/** 会话 + 目录 → ready 相位（自愈恢复成功后从 readonly 回到可写）。 */
+function asReady(dir: VaultDirHandle, session: Session): Phase {
+  return { kind: 'ready', dir, ...session }
+}
 
 /** 启动/冲突检测读到的失败统一成一行可读原因；磁盘内容此时一律不写。 */
 function loadFailureReason(e: unknown): string {
@@ -103,20 +240,6 @@ function loadFailureReason(e: unknown): string {
 
 function isAbort(e: unknown): boolean {
   return e instanceof Error && e.name === 'AbortError'
-}
-
-/** 打开一个库 = 建 Store + 落盘面 + 自动保存；Store 从此是唯一状态源（T10）。 */
-function openSession(repository: VaultRepository, vault: Vault): Session {
-  const store = createVaultStore(vault)
-  return {
-    repository,
-    store,
-    // autosave 必须挂在同一个 store 上，否则它盯的是另一份内存，永远等不到变更
-    autosave: createAutosave({
-      store,
-      sink: { save: (next) => repository.save(next) },
-    }),
-  }
 }
 
 /**
@@ -195,9 +318,21 @@ function StartupScreen(props: {
   )
 }
 
-function EmptyBoard(props: { store: VaultStore; t: (key: MsgKey) => string }) {
-  const { store, t } = props
+/**
+ * 看板占位（T15 BoardView 未落地）：骨架、列标题与计数已在，
+ * 且**与甘特共用同一份 filter**（spec §6.2）——只是今天筛选恒为空筛选。
+ * T15 落地后整体替换为 src/views/BoardView.tsx。
+ */
+function EmptyBoard(props: { store: VaultStore; filter: Filter; t: (key: MsgKey) => string }) {
+  const { store, filter, t } = props
   const vault = useStore(store, (state) => state.vault)
+
+  const counts = useMemo(() => {
+    const engine = createQueryEngine(vault.topics, vault.tasks, vault.links)
+    const visible = engine.query(filter)
+    return new Map(vault.settings.boardColumns.map((col) => [col, visible.filter((task) => task.status === col).length]))
+  }, [vault, filter])
+
   return (
     <div
       data-testid="board"
@@ -219,7 +354,7 @@ function EmptyBoard(props: { store: VaultStore; t: (key: MsgKey) => string }) {
         >
           <header style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: TEXT }}>{t(`status.${col}`)}</span>
-            <span style={{ fontSize: 12, color: MUTED }}>0</span>
+            <span style={{ fontSize: 12, color: MUTED }}>{counts.get(col) ?? 0}</span>
           </header>
           <div style={{ flex: 1, display: 'grid', placeItems: 'center' }}>
             <span style={{ fontSize: 12, color: MUTED }}>{t('board.emptyColumn')}</span>
@@ -230,33 +365,105 @@ function EmptyBoard(props: { store: VaultStore; t: (key: MsgKey) => string }) {
   )
 }
 
+/**
+ * 视图宿主：vault 与 filter 只在这里派生一次，看板与甘特共用（spec §6.2）。
+ * 右侧详情抽屉（T17）尚未实现，故只留挂载位。
+ */
+function Workspace(props: {
+  store: VaultStore
+  view: 'board' | 'gantt'
+  t: (key: MsgKey, params?: TranslateParams) => string
+}) {
+  const { store, view, t } = props
+  const vault = useStore(store, (state) => state.vault)
+  // spec §6.2：看板与甘特共用同一份筛选结果，切视图不丢条件
+  const filter = useMemo<Filter>(() => vault.settings.lastFilter ?? createEmptyFilter(), [vault.settings.lastFilter])
+
+  return (
+    <div style={{ display: 'flex', height: '100%', minWidth: 0, minHeight: 0 }}>
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+        {view === 'gantt' ? (
+          <GanttView vault={vault} filter={filter} scale={vault.settings.ganttScale} t={t} />
+        ) : (
+          <EmptyBoard store={store} filter={filter} t={t} />
+        )}
+      </div>
+      {/* 详情抽屉宿主（T17 落地后在此挂 TaskDrawer） */}
+      <div data-testid="drawer-host" style={{ flex: '0 0 auto', minWidth: 0 }} />
+    </div>
+  )
+}
+
 export function App(props: { ports?: StartupPorts; onSession?: (session: Session) => void }) {
   const ports = props.ports ?? startupPorts()
   const [phase, setPhase] = useState<Phase>({ kind: 'booting' })
+  const [view, setView] = useState<'board' | 'gantt'>('board')
+  const [conflict, setConflict] = useState<ConflictReport | null>(null)
+  const [notice, setNotice] = useState<Notice | null>(null)
+
+  /** 会话事件出口：组件只显示，决定权留在这一层。 */
+  const hooks = useMemo<SessionHooks>(
+    () => ({
+      onConflict: (report) => {
+        setConflict(report)
+      },
+      onRemoteChange: () => {
+        setNotice({ key: 'shell.remoteUpdated' })
+      },
+      onWriteRejected: (message) => {
+        setNotice({ text: message })
+      },
+    }),
+    [],
+  )
 
   /** 会话建好的一次性外送口：宿主与测试由此拿到 Store/落盘面/自动保存。 */
-  function makeSession(repository: VaultRepository, vault: Vault): Session {
-    const session = openSession(repository, vault)
+  function makeSession(
+    dir: VaultDirHandle,
+    repository: VaultRepository,
+    loader: SelfHealingLoader,
+    vault: Vault,
+  ): Session {
+    const session = openSession(dir, repository, loader, vault, hooks)
     props.onSession?.(session)
     return session
   }
 
-  // 打开成功才记住句柄：空目录、损坏的库都不该污染下次启动
+  /**
+   * 打开目录：T29 的自愈加载器替换裸 repository.load()——
+   * 磁盘坏掉时先试最近快照（readonly），再也没有才进 safemode；两条路都不写盘。
+   */
   function openDir(dir: VaultDirHandle): Promise<void> {
     setPhase({ kind: 'busy', dir })
     const repository = ports.openRepository(dir)
-    return repository
+    const loader = createSelfHealingLoader(dir, repository)
+    return loader
       .load()
-      .then((vault) => (vault === null ? null : ports.storeDir(dir).then(() => vault)))
-      .then((vault) => {
-        if (vault === null) {
+      .then((outcome) => {
+        if (outcome.status === 'empty') {
           setPhase({ kind: 'empty-dir', dir })
           return
         }
-        setPhase({ kind: 'ready', dir, ...makeSession(repository, vault) })
+        if (outcome.status === 'healthy' && outcome.vault !== null) {
+          // 只有健康打开才记住句柄：空目录、损坏的库都不该污染下次启动
+          return ports.storeDir(dir).then(() => {
+            setPhase({ kind: 'ready', dir, ...makeSession(dir, repository, loader, outcome.vault as Vault) })
+          })
+        }
+        if (outcome.status === 'readonly' && outcome.vault !== null) {
+          setPhase({
+            kind: 'readonly',
+            dir,
+            reason: outcome.reason ?? '',
+            snapshot: outcome.snapshot,
+            ...makeSession(dir, repository, loader, outcome.vault),
+          })
+          return
+        }
+        setPhase({ kind: 'safe-mode', dir, reason: outcome.reason ?? '' })
       })
       .catch((e: unknown) => {
-        setPhase({ kind: 'safe-mode', dir, reason: loadFailureReason(e) })
+        setPhase({ kind: 'failed', reason: loadFailureReason(e) })
       })
   }
 
@@ -282,7 +489,9 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
     }
   }, [ports])
 
-  // 自动保存跟着会话起停；start 幂等，重复挂载也安全
+  const session = phase.kind === 'ready' || phase.kind === 'readonly' ? phase : null
+
+  // 自动保存跟着会话起停；只读安全模式下不起——那是「一个字节都不许写」的相位
   const autosave = phase.kind === 'ready' ? phase.autosave : null
   useEffect(() => {
     if (autosave === null) return
@@ -291,6 +500,16 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
       autosave.stop()
     }
   }, [autosave])
+
+  // T27 的磁盘轮询也只在可写会话里跑
+  useEffect(() => {
+    if (autosave === null || session === null) return
+    const watcher = session.watcher
+    watcher.start()
+    return () => {
+      watcher.stop()
+    }
+  }, [autosave, session])
 
   // Ctrl+S / Cmd+S 立即落盘（spec 8.2）
   useEffect(() => {
@@ -327,19 +546,91 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
 
   function handleCreate(dir: VaultDirHandle) {
     const repository = ports.openRepository(dir)
+    const loader = createSelfHealingLoader(dir, repository)
     void repository
       .create()
       .then(async (vault) => {
         await ports.storeDir(dir)
-        setPhase({ kind: 'ready', dir, ...makeSession(repository, vault) })
+        setPhase({ kind: 'ready', dir, ...makeSession(dir, repository, loader, vault) })
       })
       .catch((e: unknown) => {
         setPhase({ kind: 'failed', reason: loadFailureReason(e) })
       })
   }
 
-  const i18n = useI18n(phase.kind === 'ready' ? phase.store : BOOT_LOCALE)
+  /** 冲突三选：解决完一律把 autosave 停一次再起，让它以新基线重新计数（脏态归零）。 */
+  function resolveConflict(choice: 'mine' | 'disk' | 'export') {
+    if (session === null || conflict === null) return
+    const local = session.store.getVault()
+    const reset = (vault: Vault | null): void => {
+      session.autosave.stop()
+      if (vault !== null) session.store.setVault(vault)
+      session.autosave.start()
+    }
+    void (async () => {
+      try {
+        if (choice === 'mine') {
+          const { revision } = await session.conflictGuard.keepMine(local)
+          // 磁盘已经是本地内容了：把 Store 的 revision 对齐，避免下一次保存又被判成冲突
+          session.store.markSaved(revision, new Date().toISOString())
+          reset(null)
+          setNotice({ key: 'conflict.resolved' })
+        } else if (choice === 'disk') {
+          const result = await session.conflictGuard.takeDisk(local)
+          reset(result.vault)
+          setNotice({ key: 'conflict.resolved' })
+        } else {
+          const result = await session.conflictGuard.exportMine(local)
+          reset(result.vault)
+          setNotice({ key: 'shell.exported', params: { name: result.filename } })
+        }
+      } catch (e: unknown) {
+        // 失败就保持冲突未决：弹窗自己会显示错误，用户可再选
+        setNotice({ text: loadFailureReason(e) })
+        return
+      }
+      setConflict(null)
+    })()
+  }
+
+  const i18n = useI18n(session === null ? BOOT_LOCALE : session.store)
   const t = i18n.t
+
+  const conflictLabels: Partial<ConflictLabels> = {
+    title: t('conflict.title'),
+    hint: t('conflict.hint'),
+    droppedWarning: t('conflict.droppedWarning'),
+    keepMine: t('conflict.keepMine'),
+    takeDisk: t('conflict.takeDisk'),
+    exportCopy: t('conflict.exportCopy'),
+    keepMineHint: t('conflict.keepMineHint'),
+    takeDiskHint: t('conflict.takeDiskHint'),
+    exportCopyHint: t('conflict.exportCopyHint'),
+    busy: t('conflict.busy'),
+    failed: t('conflict.failed'),
+    resolved: t('conflict.resolved'),
+  }
+
+  const safeModeLabels: Partial<SafeModeLabels> = {
+    title: t('safemode.title'),
+    hint: t('safemode.hint'),
+    snapshotLine: t('safemode.snapshotLine'),
+    noSnapshot: t('safemode.noSnapshot'),
+    restore: t('safemode.restore'),
+    restoreHint: t('safemode.restoreHint'),
+    chooseOther: t('safemode.chooseOther'),
+    chooseOtherHint: t('safemode.chooseOtherHint'),
+    exportCurrent: t('safemode.exportCurrent'),
+    exportCurrentHint: t('safemode.exportCurrentHint'),
+    busy: t('safemode.busy'),
+    failed: t('safemode.failed'),
+    resolved: t('safemode.resolved'),
+  }
+
+  /** 底部四个面板（T16/T18/T28）都还没实现：接成占位提示，不引用不存在的组件。 */
+  const panelPlaceholder = (label: MsgKey) => () => {
+    setNotice({ key: 'shell.panelPending', params: { name: t(label) } })
+  }
 
   let main: ReactNode
   switch (phase.kind) {
@@ -383,21 +674,12 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
       )
       break
     case 'ready':
-      main = <EmptyBoard store={phase.store} t={t} />
+    case 'readonly':
+      main = <Workspace store={phase.store} view={view} t={t} />
       break
     case 'safe-mode':
-      main = (
-        <div style={{ display: 'grid', placeItems: 'center', height: '100%' }}>
-          <div data-testid="safe-mode" style={{ ...CARD, borderColor: '#F59E0B' }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: TEXT }}>{t('startup.safeModeTitle')}</div>
-            <div style={{ fontSize: 12, color: MUTED, marginTop: 8, lineHeight: 1.7 }}>
-              {t('startup.safeModeHint')}
-            </div>
-            <div style={{ fontSize: 12, color: '#B45309', marginTop: 8 }}>{phase.reason}</div>
-            {/* T29 在此补完整横幅：[恢复此快照] [选择其他备份] [导出当前] */}
-          </div>
-        </div>
-      )
+      // 自愈也没能救回来：这里只提供横幅（vault 不可用，故无内容可展示）
+      main = <div data-testid="safe-mode" style={{ height: '100%' }} />
       break
     case 'failed':
       main = (
@@ -412,10 +694,57 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
       break
   }
 
+  const safeMode =
+    phase.kind === 'readonly'
+      ? { reason: phase.reason, snapshot: phase.snapshot }
+      : phase.kind === 'safe-mode'
+        ? { reason: phase.reason, snapshot: null }
+        : null
+
+  /** 横幅三个出口：恢复走 loader，导出走 loader；「选择其他备份」是 T28 的活，先占位。 */
+  const banner = (): ReactNode => {
+    if (safeMode === null) return null
+    const active = phase.kind === 'readonly' ? phase : null
+    if (active === null) {
+      return (
+        <SafeModeBanner
+          reason={safeMode.reason}
+          snapshot={null}
+          labels={safeModeLabels}
+          onRestore={() => {}}
+          onChooseOther={panelPlaceholder('sidebar.backup')}
+          onExportCurrent={() => {}}
+        />
+      )
+    }
+    return (
+      <SafeModeBanner
+        reason={safeMode.reason}
+        snapshot={safeMode.snapshot}
+        labels={safeModeLabels}
+        onRestore={async () => {
+          const target = safeMode.snapshot
+          if (target === null) return
+          // restoreSnapshot 内部先给当前文件留底再覆盖，并解除只读
+          const { vault } = await active.loader.restoreSnapshot(target.id)
+          active.autosave.stop()
+          active.store.setVault(vault)
+          setPhase(asReady(active.dir, active))
+        }}
+        onChooseOther={panelPlaceholder('sidebar.backup')}
+        onExportCurrent={async () => {
+          const { filename } = await active.loader.exportCurrent(active.store.getVault())
+          setNotice({ key: 'shell.exported', params: { name: filename } })
+        }}
+      />
+    )
+  }
+
   return (
     <div
       style={{
         display: 'flex',
+        flexDirection: 'column',
         height: '100vh',
         margin: 0,
         background: '#FAFAFA',
@@ -425,43 +754,108 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
       }}
     >
       <IconSprite />
-      <aside
-        style={{
-          width: 220,
-          flex: '0 0 220px',
-          background: '#F3F4F6',
-          borderRight: `1px solid ${BORDER}`,
-          padding: 16,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <LogoMark />
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 600 }}>OffEarly</div>
-            <div style={{ fontSize: 11, color: MUTED }}>早下班</div>
-          </div>
-        </div>
-      </aside>
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        {/* 顶栏：T15 在此补撤销/重做与视图切换，本任务先落保存指示 */}
-        <header
-          data-testid="topbar"
+      {banner()}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+        <aside
           style={{
+            width: 220,
+            flex: '0 0 220px',
+            background: '#F3F4F6',
+            borderRight: `1px solid ${BORDER}`,
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'flex-end',
-            gap: 12,
-            height: 40,
-            flex: '0 0 40px',
-            padding: '0 16px',
-            background: '#FFFFFF',
-            borderBottom: `1px solid ${BORDER}`,
+            flexDirection: 'column',
+            minHeight: 0,
           }}
         >
-          {phase.kind === 'ready' ? <SaveIndicator autosave={phase.autosave} t={t} /> : null}
-        </header>
-        <main style={{ flex: 1, minWidth: 0, minHeight: 0 }}>{main}</main>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 16 }}>
+            <LogoMark />
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 600 }}>OffEarly</div>
+              <div style={{ fontSize: 11, color: MUTED }}>早下班</div>
+            </div>
+          </div>
+          {session === null ? null : (
+            <TopicSidebar
+              store={session.store}
+              bus={session.bus}
+              t={t}
+              onOpenMilestones={panelPlaceholder('sidebar.milestones')}
+              onOpenFilters={panelPlaceholder('sidebar.filters')}
+              onOpenBackup={panelPlaceholder('sidebar.backup')}
+              onOpenSettings={panelPlaceholder('sidebar.settings')}
+              style={{ flex: 1, minHeight: 0 }}
+            />
+          )}
+        </aside>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+          <header
+            data-testid="topbar"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: 12,
+              height: 40,
+              flex: '0 0 40px',
+              padding: '0 16px',
+              background: '#FFFFFF',
+              borderBottom: `1px solid ${BORDER}`,
+            }}
+          >
+            {/* 视图切换与顶栏提示；撤销/重做按钮随 T15 的卡片交互一起挂 */}
+            {session === null ? null : (
+              <div role="group" style={{ display: 'flex', gap: 4, marginRight: 'auto' }}>
+                {(['board', 'gantt'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    data-testid={`view-${mode}`}
+                    aria-pressed={view === mode}
+                    onClick={() => {
+                      setView(mode)
+                    }}
+                    style={{
+                      padding: '3px 10px',
+                      fontSize: 12,
+                      color: view === mode ? '#FFFFFF' : TEXT,
+                      background: view === mode ? INDIGO : 'transparent',
+                      border: `1px solid ${view === mode ? INDIGO : BORDER}`,
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {mode === 'board' ? t('shell.viewBoard') : t('shell.viewGantt')}
+                  </button>
+                ))}
+              </div>
+            )}
+            {notice === null ? null : (
+              <span data-testid="shell-notice" style={{ fontSize: 12, color: '#B45309' }}>
+                {'text' in notice ? notice.text : t(notice.key, notice.params)}
+              </span>
+            )}
+            {phase.kind === 'ready' ? <SaveIndicator autosave={phase.autosave} t={t} /> : null}
+          </header>
+          <main style={{ flex: 1, minWidth: 0, minHeight: 0 }}>{main}</main>
+        </div>
       </div>
+      {conflict === null ? null : (
+        <ConflictDialog
+          report={conflict}
+          labels={conflictLabels}
+          onKeepMine={() => {
+            resolveConflict('mine')
+          }}
+          onTakeDisk={() => {
+            resolveConflict('disk')
+          }}
+          onExportCopy={() => {
+            resolveConflict('export')
+          }}
+        />
+      )}
     </div>
   )
 }
+
+type Notice = { key: MsgKey; params?: TranslateParams } | { text: string }

@@ -83,6 +83,45 @@ export const zh = {
     crossTopicMilestone: '跨话题里程碑',
     empty: '暂无已排期任务',
   },
+
+  // 集成车道追加：应用外壳 + 冲突/安全模式文案（尾部追加，不改动既有键）
+  shell: {
+    viewBoard: '看板',
+    viewGantt: '甘特',
+    remoteUpdated: '另一端已更新磁盘版本，保存时会询问',
+    panelPending: '{name} 面板尚未实现',
+    drawerHost: '详情抽屉',
+    exported: '已导出 {name}',
+  },
+  conflict: {
+    title: '文件已被另一端修改',
+    hint: '磁盘上的 vault.json 版本比当前内存版本更新，请选择如何处理。',
+    droppedWarning: '选择「以磁盘为准」会丢掉本地 {n} 条未同步的任务。',
+    keepMine: '以我为准',
+    takeDisk: '以磁盘为准',
+    exportCopy: '导出我的副本',
+    keepMineHint: '磁盘旧版会先备份到 .backup/，之后可回滚',
+    takeDiskHint: '放弃本地未保存的改动',
+    exportCopyHint: '先存下我的版本再载入磁盘版，便于手动合并',
+    busy: '正在处理…',
+    failed: '处理失败',
+    resolved: '已处理，正在载入…',
+  },
+  safemode: {
+    title: '只读安全模式',
+    hint: 'vault.json 无法解析或校验未通过，已停止写入以保护数据。当前显示的是最近可用的快照。',
+    snapshotLine: '当前快照：{id}（{count} 个任务）',
+    noSnapshot: '当前没有可用快照，请选择其他备份',
+    restore: '恢复此快照',
+    restoreHint: '覆盖 vault.json（当前文件会先备份到 .backup/）',
+    chooseOther: '选择其他备份',
+    chooseOtherHint: '从 .backup/ 里挑一份载入',
+    exportCurrent: '导出当前',
+    exportCurrentHint: '把正在看的内容另存为独立文件',
+    busy: '正在处理…',
+    failed: '处理失败',
+    resolved: '已处理，正在载入…',
+  },
 } as const
 
 export type MsgKey = NestedKeyOf<typeof zh>
