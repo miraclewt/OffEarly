@@ -135,7 +135,7 @@ tests/**                         与 src 镜像
 
 ### Phase 5 · 甘特图
 - [x] **T19** ganttModel（buildGanttModel 纯函数） → done (2026-10-15, workbuddy:sess-1015h, commit: "T19: buildGanttModel with column geometry, topic grouping, dependency arrows and cycle-safe critical path")
-- [ ] **T20** GanttView 渲染（虚拟化 / 刻度 / 今日线 / 里程碑 / 基线） → pending
+- [x] **T20** GanttView 渲染（虚拟化 / 刻度 / 今日线 / 里程碑 / 基线） → done (2026-10-15, deepseek:sess-1015j, commit: "T20: GanttView with SVG projection, row/column virtualization, dual-scale zoom, milestone lane and baseline overlay")
 - [ ] **T21** 依赖箭头 + 关键路径高亮 + hover 依赖高亮 → pending
 - [ ] **T22** 未排期侧栏 + 甘特图与筛选联动 → pending
 - [ ] **T23** GanttExporter（PNG / SVG / CSV） → pending
@@ -642,12 +642,12 @@ tests/**                         与 src 镜像
 **产出：** `src/views/GanttView.tsx` `src/views/GanttCanvas.tsx` `src/views/GanttTable.tsx` `src/controllers/ganttViewport.ts` `tests/views/GanttView.test.tsx`
 
 **验收标准：**
-- [ ] SVG 渲染 rows/arrows/今日线；行高 32；仅渲染视口 ±10 行与可见列（1000 任务样本 DOM 节点数受控，测试断言）
-- [ ] 日/周刻度切换按钮 + Ctrl+滚轮与 +/- 缩放，两刻度各自保留缩放状态
-- [ ] 任务条圆角矩形（topic 色浅底 + 深色进度内条）；里程碑菱形；跨 topic 里程碑在顶部独立轨道
-- [ ] 基线开关：开启时条下方细灰条（baseline start→due）
-- [ ] 左侧任务表（任务/开始/结束/进度）与画布 scrollTop 同步；周末/节假日列浅灰底
-- [ ] 组件测试覆盖刻度切换与虚拟化断言；提交
+- [x] SVG 渲染 rows/arrows/今日线；行高 32；仅渲染视口 ±10 行与可见列（1000 任务样本 DOM 节点数受控，测试断言）
+- [x] 日/周刻度切换按钮 + Ctrl+滚轮与 +/- 缩放，两刻度各自保留缩放状态
+- [x] 任务条圆角矩形（topic 色浅底 + 深色进度内条）；里程碑菱形；跨 topic 里程碑在顶部独立轨道
+- [x] 基线开关：开启时条下方细灰条（baseline start→due）
+- [x] 左侧任务表（任务/开始/结束/进度）与画布 scrollTop 同步；周末/节假日列浅灰底
+- [x] 组件测试覆盖刻度切换与虚拟化断言；提交
 
 **预估：** 2d
 
@@ -932,3 +932,4 @@ tests/**                         与 src 镜像
 
 - [2026-10-15] T19 | agent: workbuddy:sess-1015h | commit: "T19: buildGanttModel with column geometry, topic grouping, dependency arrows and cycle-safe critical path" | 验收: 全部通过（6/6） | 备注: 交付 `buildGanttModel(vault, filter, scale, viewport)` 与 `GANTT_ROW_HEIGHT`（32）`colorOfTopic`。几何全部在领域层算完——列 `x/width`、条 `x/y/width/progressWidth`、基线细灰条、里程碑菱形、箭头折线拐点与现成的 `path` 字符串；视图只投影不做计算（spec 5.1）。依赖只向下：import T12 `createDependencyGraph`、T11 `createScheduleEngine/toDateKey`、T13 `createQueryEngine/createTopicTree`，零 React / 零 DOM / 零 I/O。`npm test` 319/319 绿（本任务 17 条，先 RED 后 GREEN——首轮 15/17，两条红都是我的期望算错：周一起点算成 `09-29` 实为 `09-28`；跨话题里程碑在话题筛选下仍出现，是我漏看了自己的 `inScope(null)===true` 规则）；`npx tsc --noEmit` exit 0（一次过，无返工）；`npm run lint:emoji` 干净；`npm run build` 单文件 330036 字节，四项外链不变式复测全 0——**体积与 T13 后持平**，因本模块尚未被应用代码引用、被 tree-shake 掉，接线归 T20 | 口径裁决（本任务自行确定，已写进代码与测试标题）: ① `viewport` 定义为 `{ today?, range?: {start?, end?}, paddingDays? }`——`range` 显式给出时原样使用、不给 padding；缺省或单侧缺省时按「已排期任务的 [最早 start, 最晚 due] ∪ 里程碑日期」派生并两端各留 3 天；无任何排期数据时退化为 `today..today` 单列；② `criticalIds` 与 `blockedOnly` 同口径，**建立在全库 `vault.links/tasks` 的图上、不随筛选收缩**（关键路径是项目属性，不是视图属性），故按 topic 筛选时行内任务仍带正确的高亮；③ 跨话题里程碑（`topicId === null`）**不受话题筛选影响**，恒在轨道上；④ week 刻度下「列」仍是天（宽 14），第二级表头按周合并——这样今日线与虚拟化按天对齐，两种刻度共用同一套列索引，符合 spec 5.4「两种刻度各自保留缩放状态」的隐含前提；⑤ `GanttModel` 在 spec 5.1 的字段之外补了 `cycles`（验收 5 要求）与 `width`/`rowHeight`（几何归领域层） | 缺口闭合: ① T12 遗留「关键路径默认自然日口径，工作日口径需 T19 注入 ScheduleEngine」——已注入 `duration: engine.duration(task) ?? 1`，接上 T11 的裁决口径；② T11 遗留「本模块尚未被应用代码引用」的接线链条推进到 T20；③ T13 遗留「`options.duration` 端口已就位但需 T19 注入」——已注入 | 越界改动: **无**。只改产出清单两文件（`src/domain/ganttModel.ts`、`tests/domain/ganttModel.test.ts`）+ `task.md`；未碰 `src/App.tsx`、`src/locales/*`、`src/views/*`；无新依赖，`package-lock.json` 未动 | 遗留: ① 本模块尚未被应用代码引用，接线归 T20（渲染）、T22（未排期侧栏用 `unscheduled`）、T23（导出复用同一模型）、T30（视觉校对读 `columns[].isToday` 等）；② 箭头只处理 FS 语义的四种 `DependencyType` 中的连线走向，**SS/FF/SF 的端点选择尚未区分**（当前一律「前置右端 → 后置左端」），T21 做箭头层时需按 type 分支并补 hover 高亮；③ 行虚拟化（视口 ±10 行）属渲染层，模型一次性给全量 `rows`，大库下的切片归 T20；④ `leftPanel` 固定表所需的「任务/开始/结束/进度」直接取 `row.task`，无需模型加字段；⑤ spec 5.1 的 `GanttModel` 接口未收录 `cycles`/`width`/`rowHeight`，建议集成车道补文档（属文字变更）
 
+- [2026-10-15] T20 | agent: deepseek:sess-1015j | commit: "T20: GanttView with SVG projection, row/column virtualization, dual-scale zoom, milestone lane and baseline overlay" | 验收: 全部通过（6/6） | 备注: 交付 `src/views/GanttView.tsx`（宿主：刻度按钮 / 缩放 / 基线开关 / 行窗口 → 投影模型）、`src/views/GanttCanvas.tsx`（SVG 投影 + 独立箭头层 `GanttArrowsLayer`）、`src/views/GanttTable.tsx`（左侧任务表 任务/开始/结束/进度）、`src/controllers/ganttViewport.ts`（刻度 / 缩放档位 / 基线 / 滚动 + 行·列·表头·箭头四层裁剪窗口）。**渲染层零几何计算**：列 `x`、条 `x/width/progressWidth`、基线 `y`、里程碑中心、箭头 `path`、今日线 `x` 全部直接取 `buildGanttModel` 的结果，视图只做 `x × zoom` 的投影与行下标重排。`npm test` 339/339 绿（本任务 20 条，先 RED 后 GREEN——首轮 19/20，唯一红的是我把「进度内条不设 fill-opacity（缺省即不透明）」错断言成 `1`，实测属性为 `null`）；`npx tsc --noEmit` exit 0；`npm run lint:emoji` 干净。虚拟化实测（1000 任务 + 50 条依赖 + 181 天跨度）：渲染 19 行（上界 31 = 视口 10 行 + 1 + ±10 余量）、31 列（上界 41）、箭头数 ≤ 行上界，整棵子树 346 个 DOM 节点（断言 < 450 且 < 模型行数 1003）；滚动到 1600px 后窗口整体下移且仍受控 | 口径裁决（已写进代码注释与测试标题）: ① **缩放实现为 x 轴投影倍率**（离散档位 0.5/0.75/1/1.25/1.5/2/3/4，默认 1），不动领域层列宽 32/14：SVG 形状按 `x×zoom`、`width×zoom` 展开，箭头层整组 `scale(zoom 1)` 包住模型给的 `path` 原样绑定（配 `vector-effect="non-scaling-stroke"` 保 1px 细线），「列宽由领域层决定」这条不变式未被破坏；② 两刻度各自保留档位（`zoomIndex: { day, week }`），切刻度只换列宽、不重置对方；③ **跨 topic 里程碑（`topicId === null`）提到顶部独立轨道**：`splitMilestoneLane` 把模型行分成 lane/body，body 的显示 y 按下标重新投影（`displayY = (startRow + i) × 行高`，条的纵向位移取 `displayY - row.y`），故模型行序中被抽走一行后 body 不留空洞；左侧任务表首行同步渲染该轨道行；④ 周末/节假日浅灰底用模型的 `isWorkday` 综合判定（**补班的周六不涂灰**），列矩形上同时保留 `data-weekend`/`data-holiday`/`data-workday` 三个标记，可分别断言 | 边界: 全程只读投影，无拖拽改期 / 无拖入排期（spec §12 非目标）；箭头层抽成独立子组件 + 显式 props（`arrows / zoom / offsetY / height`），T19 遗留的 SS/FF/SF 端点分支**未在渲染层修**（`path` 原样透传，`data-critical` 已按 `arrow.critical` 输出，四锚点与 hover 高亮留给 T21）；未改 `src/App.tsx`——默认导出 + 显式 props，省略 `viewport` 时内部自建控制器，最小 props 只有 `vault` + `filter`（另有 `scale/range/today/width/height/t` 可选） | 越界改动: ① `src/locales/{zh,en}.ts` **尾部追加** `gantt.*` 13 键（既有键一字未动，`en` 与 `zh` 键集合仍逐条对齐）；② `tests/views/GanttView.test.tsx` 与 src 镜像新增（产出清单内）；③ 为让「可挂载」在真实运行时成立，`GanttView` 在 `ResizeObserver` 可用时自适应容器尺寸（jsdom 无该 API 时跳过，测试用注入的 640×320 确定化）| 并发: 提交前工作树只有本任务 5 个新文件 + locales 两文件 + `task.md`；`package-lock.json` 零差异（`npm install` 后已核对）；`src/domain/*`、`src/views/TopicSidebar.tsx` 及其他任务文件未被触碰 | 遗留: ① 甘特图尚未接进 App 的视图切换（`App.tsx` 单 owner 属集成车道）；T22 的未排期侧栏/筛选联动、T23 的导出都复用同一份 `GanttModel`，导出前的样式内联需读 `GanttCanvas` 的颜色常量；② 今日线标签已落在时间轴表头（`data-testid="gantt-today-label"`），T21 的「1px 红 + 顶部标签」可直接复用 `GANTT_TODAY_COLOR`；③ 横向滚动会触发一次整层重渲染（列与表头裁剪需要），超大库的优化方向是把 `scrollLeft` 下放为 ref 只驱动表头位移；④ 关键路径的条描边加粗尚未实现（当前条无描边），建议在条渲染内按 `criticalIds` 分支，属 T21 范围。

@@ -46,6 +46,24 @@ export const zh = {
     error: '保存失败',
     retry: '重试',
   },
+  // T20 尾部追加：甘特图渲染层文案（只增不改，既有键一律不动）
+  gantt: {
+    title: '甘特图',
+    scale: {
+      day: '日',
+      week: '周',
+    },
+    task: '任务',
+    start: '开始',
+    end: '结束',
+    progress: '进度',
+    today: '今天',
+    zoomIn: '放大',
+    zoomOut: '缩小',
+    resetZoom: '重置缩放',
+    crossTopicMilestone: '跨话题里程碑',
+    empty: '暂无已排期任务',
+  },
 } as const
 
 export type MsgKey = NestedKeyOf<typeof zh>
