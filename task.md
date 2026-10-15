@@ -6,7 +6,7 @@
 
 **Architecture:** 四层架构（views / controllers / domain / persistence），依赖只向下；所有写操作经 CommandBus；甘特图为领域层产出的 GanttModel 的只读 SVG 投影；数据落在用户选定的数据文件夹（vault.json + assets/ + .backup/）。
 
-**Tech Stack:** TypeScript 5 (strict) · React 18 · Vite 5 + vite-plugin-singlefile (format: iife) · Zustand · dnd-kit · TipTap + tiptap-markdown · dayjs · Zod · Vitest · Playwright
+**Tech Stack:** TypeScript 7 (strict) · React 19.3 · Vite 8 + vite-plugin-singlefile 2.3.3 (format: iife) · Zustand · dnd-kit · TipTap + tiptap-markdown · dayjs · Zod · Vitest · Playwright
 
 **Spec:** `docs/superpowers/specs/2026-10-15-taskdone-architecture-design.md`（v1.1）
 
@@ -66,7 +66,7 @@ tests/**                         与 src 镜像
 
 1. **开工前必读。** 读 task.md 全文 + spec 对应章节；确认目标 task 为 `pending` 且其「依赖」全部 `done`，否则不得开工。
 2. **领取即登记。** 立即把总表状态改 `in_progress` 并写 `(日期, agent)`；同一 agent 同一时间只持有一个 `in_progress`。
-3. **完成即闭环。** 逐条跑验收标准并勾选 → 总表改 `done` 写 `(日期, commit)` → 文末《完成记录》追加一条（task / agent / commit / 验收自检摘要 / 遗留问题）。三处必须一致。
+3. **完成即闭环。** 逐条跑验收标准并勾选 → 总表改 `done` 写 `(日期, agent, commit)` → 文末《完成记录》追加一条（task / agent / commit / 验收自检摘要 / 遗留问题）。三处必须一致。commit 标识写该次提交的主题行（自引用哈希不可得），真实哈希由 `git log --oneline` 提供。
 4. **阻塞即上报。** 改 `blocked` 并写原因与已尝试手段；不得静默放弃、不得跳过依赖。
 5. **原子提交。** task.md 的状态变更必须与该任务的代码变更在**同一个 commit**；禁止单独 commit 状态。
 6. **不跨任务。** 只改本任务「产出」清单内的文件；发现需改邻居任务范围，先在《完成记录》追加「变更提议」条目再动。
@@ -81,7 +81,7 @@ tests/**                         与 src 镜像
 - [ ] **T01** file:// 六项风险 spike 验证 → in_progress (2026-10-15, qoder:sess-1015a)
 
 ### Phase 1 · 工程基座
-- [ ] **T02** Vite + TS + singlefile(iife) 构建管线与空壳产物 → pending
+- [x] **T02** Vite + TS + singlefile(iife) 构建管线与空壳产物 → done (2026-10-15, qoder:sess-1015a, commit: "T02: build pipeline")
 - [ ] **T03** 领域类型 + Zod Schema + 迁移管线 → pending
 - [ ] **T04** i18n 基座（zh/en 消息表 + t() + locale 切换） → pending
 - [ ] **T05** IconSprite 线性图标集 + 禁 emoji lint → pending
@@ -160,11 +160,13 @@ tests/**                         与 src 镜像
 **产出：** `package.json` `vite.config.ts` `tsconfig.json` `src/main.tsx` `src/App.tsx`
 
 **验收标准：**
-- [ ] `npm run build` 产出单个 `dist/OffEarly.html`，内联全部 JS/CSS，无外链 `<script src>` / `<link href>`
-- [ ] 产物中 `<script>` 为 IIFE（无 `type="module"`），双击在 Edge/Chrome 打开渲染出空壳界面（含 wordmark OffEarly / 早下班）
-- [ ] tsconfig 开启 `strict`、`noUncheckedIndexedAccess`
-- [ ] 产物 grep 无 `http://` 与 `https://` 资源引用
-- [ ] 提交含构建脚本与空壳产物验证截图或说明
+- [x] `npm run build` 产出单个 `dist/OffEarly.html`，内联全部 JS/CSS，无外链 `<script src>` / `<link href>`（实测：dist 目录仅 1 个文件；`<link` 0 处、`<script src` 0 处、`(src|href)="http(s)://` 0 处、`url(http` 0 处）
+- [x] 产物中 `<script>` 为 IIFE（无 `type="module"`），双击在 Edge/Chrome 打开渲染出空壳界面（含 wordmark OffEarly / 早下班）—— 实测 `file://` 下渲染成功：`#root` 有 1 个子节点、logo 5 条 path、控制台零消息
+- [x] tsconfig 开启 `strict`、`noUncheckedIndexedAccess`（另加 `noUnusedLocals`/`noUnusedParameters`/`verbatimModuleSyntax`；`tsc --noEmit` 干净）
+- [x] 产物 grep 无 `http://` 与 `https://` 资源引用
+- [x] 提交含构建脚本与空壳产物验证截图或说明
+
+**实施注记（T02 发现）**：`vite-plugin-singlefile` 只内联、不改脚本标签，产物仍是 `<script type="module" crossorigin>` 且位于 `<head>`，在 `file://` 下不执行、且先于 `#root` 存在。`vite.config.ts` 因此追加 `finalizeSingleFile()` 插件：剥离 `type="module"`/`crossorigin` 并把 bundle 移到 `#root` 之后。降级为经典脚本的前提已实测确认：bundle 内 `import.meta` 0 处、top-level `export` 0 处、动态 `import()` 0 处。实际版本为 Vite 8.3.4 / React 19.3.1 / TypeScript 7.0.2 / vite-plugin-singlefile 2.3.3，spec 已同步至 v1.2。
 
 **预估：** 0.5d
 
@@ -744,3 +746,5 @@ tests/**                         与 src 镜像
 -->
 
 - [2026-10-15] T01 | agent: qoder:sess-1015a | commit: 进行中 | 验收: 自动化项 R2/R3/R5 全部 PASS，环境探测确认 `file://` 下 `isSecureContext=true` 且 `showDirectoryPicker`/`showOpenFilePicker`/`createWritable` 均存在 | 遗留: R1/R4/R6 需用户手势，须在真实企业 Edge 中打开 `spike.html` 点击运行；内置浏览器（Electron 43 / Chrome 150）与企业 Edge 的 `file://` 策略可能存在差异，故 R1 未复验前不启动 T06 | 备注: 实测数据已回填 spec 第 11.1 节
+
+- [2026-10-15] T02 | agent: qoder:sess-1015a | commit: "T02: build pipeline" | 验收: 全部通过 | 备注: 产物 `dist/OffEarly.html` 216KB 单文件，`file://` 下实测渲染成功且控制台零消息；发现并修复 singlefile 保留 `type="module"` 的坑（新增 `finalizeSingleFile()` 插件）；实际版本 Vite 8.3.4 / React 19.3.1 / TS 7.0.2，spec 同步至 v1.2 | 遗留: 无

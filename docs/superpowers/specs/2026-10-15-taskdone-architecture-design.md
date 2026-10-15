@@ -3,7 +3,7 @@
 | 项 | 值 |
 |---|---|
 | 产品名 | OffEarly（中文：早下班） |
-| 文档版本 | v1.1 |
+| 文档版本 | v1.2 |
 | 日期 | 2026-10-15 |
 | 状态 | 待评审 |
 | 交付边界 | 仅架构设计文档（不含实现） |
@@ -33,9 +33,9 @@ OffEarly（早下班）是一个**个人本地**的任务管理与项目进度�
 | # | 决策 | 选择 | 否决的替代 | 理由 |
 |---|---|---|---|---|
 | D1 | 运行形态 | 单 HTML 双击运行 | 便携 exe / 本地服务 | 企业管控最宽松，零依赖 |
-| D2 | 语言 | TypeScript 5（strict） | JavaScript / 其他 | 类型安全支撑 Schema 与迁移 |
-| D3 | UI 框架 | React 18 | Vue / Preact / vanilla | 生态与复杂交互（拖拽、富文本）成熟 |
-| D4 | 构建 | Vite 5 + `vite-plugin-singlefile`，`format:'iife'` | 零构建手写 / UMD 内联 | `file://` 下 ES module 被 CORS 拦截，必须单 IIFE bundle |
+| D2 | 语言 | TypeScript 7（strict） | JavaScript / 其他 | 类型安全支撑 Schema 与迁移 |
+| D3 | UI 框架 | React 19.3 | Vue / Preact / vanilla | 生态与复杂交互（拖拽、富文本）成熟 |
+| D4 | 构建 | Vite 8 + `vite-plugin-singlefile` 2.3.3，`format:'iife'` | 零构建手写 / UMD 内联 | `file://` 下 ES module 被 CORS 拦截，必须单 IIFE bundle |
 | D5 | 数据布局 | 数据文件夹：`vault.json` + `assets/` + `.backup/` | 纯单文件 base64 | 图片 base64 会使 JSON 膨胀至数十 MB，全量写盘与同步卡顿 |
 | D6 | 文件读写 | File System Access API（`showDirectoryPicker`） | 手动导入导出 | 自动落盘，体验接近本地应用 |
 | D7 | 甘特图 | 自研 SVG，只读投影 | gantt-task-react / vis-timeline / frappe-gantt | 现成 MIT 库在周/日刻度、里程碑、关键路径、基线、导出上均不达标；只读化后自研成本约 2 天 |
@@ -412,10 +412,11 @@ save():
 
 ## 9. 构建与交付
 
-- Vite 5 + TypeScript 5（strict）+ `vite-plugin-singlefile` 内联全部 JS/CSS
+- Vite 8 + TypeScript 7（strict）+ `vite-plugin-singlefile` 2.3.3 内联全部 JS/CSS
 - 两个硬约束：
   1. `build.rollupOptions.output.format: 'iife'` + `inlineDynamicImports: true` —— `file://` 下 ES module 被 CORS 拦截，必须单 IIFE bundle、零 chunk
   2. 图标全部 inline SVG sprite；CI lint 禁止 emoji 码位进入源码
+- **实测坑（T02）**：`vite-plugin-singlefile` 只做内联，不改脚本标签 —— 产物仍是 `<script type="module" crossorigin>` 且位于 `<head>`。构建管线需追加 finalize 步骤：去掉 `type="module"`/`crossorigin` 并把脚本移到 `#root` 之后，否则 `file://` 下不执行或挂载时取不到 root。前提已验证：bundle 内无 `import.meta`、无 top-level `export`、无动态 `import()`，降级为经典脚本安全
 - 无 sourcemap 进产物（外挂保存）
 - 产物目标 < 1.6 MB；CI 校验产物中不含任何 `http(s)://` 资源引用（保证零网络依赖）
 - `APP_VERSION` 内嵌于 HTML（git tag）；`schemaVersion` 独立演进，向后兼容 N-1
