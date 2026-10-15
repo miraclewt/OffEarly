@@ -9,11 +9,24 @@ export type MockWritable = {
   close(): Promise<void>;
 };
 
+export type MockBlob = {
+  text(): Promise<string>;
+};
+
+export type MockFile = {
+  text(): Promise<string>;
+  arrayBuffer(): Promise<ArrayBuffer>;
+  size: number;
+  slice(start: number, end?: number): MockBlob;
+};
+
 export type MockFileHandle = {
   kind: 'file';
   name: string;
   writable: MockWritable;
-  getFile(): Promise<{ text(): Promise<string>; arrayBuffer(): Promise<ArrayBuffer> }>;
+  /** 当前落盘内容（写入过的 chunk 优先，否则用初始内容），断言落盘结果用。 */
+  bytes(): Uint8Array;
+  getFile(): Promise<MockFile>;
   createWritable(): Promise<MockWritable>;
 };
 
@@ -43,6 +56,8 @@ export function makeFile(
   name: string,
   init: { text?: string; bytes?: Uint8Array } = {},
 ): MockFileHandle {
+  const encoder = new TextEncoder()
+  const decoder = new TextDecoder()
   const writable: MockWritable = {
     chunks: [],
     closed: false,
@@ -53,19 +68,38 @@ export function makeFile(
       this.closed = true;
     },
   };
+  function content(): Uint8Array {
+    if (writable.chunks.length > 0) {
+      const parts = writable.chunks.map((c) =>
+        typeof c === 'string' ? encoder.encode(c) : (c as Uint8Array),
+      );
+      const total = parts.reduce((n, p) => n + p.length, 0);
+      const out = new Uint8Array(total);
+      let offset = 0;
+      for (const p of parts) {
+        out.set(p, offset);
+        offset += p.length;
+      }
+      return out;
+    }
+    if (init.text !== undefined) return encoder.encode(init.text);
+    return init.bytes ?? new Uint8Array();
+  }
   return {
     kind: 'file',
     name,
     writable,
+    bytes: () => content(),
     async getFile() {
-      const texts = writable.chunks.filter((c): c is string => typeof c === 'string');
-      const lastBytes = [...writable.chunks]
-        .reverse()
-        .find((c) => c instanceof Uint8Array) as Uint8Array | undefined;
+      const data = content();
       return {
-        text: async () => (texts.length > 0 ? texts.join('') : (init.text ?? '')),
-        arrayBuffer: async () =>
-          (lastBytes ?? init.bytes ?? new Uint8Array()).slice().buffer,
+        text: async () => decoder.decode(data),
+        arrayBuffer: async () => data.slice().buffer,
+        size: data.length,
+        slice: (start: number, end?: number) => {
+          const part = data.slice(start, end);
+          return { text: async () => decoder.decode(part) };
+        },
       };
     },
     async createWritable() {

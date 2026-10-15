@@ -5,6 +5,7 @@ import {
   ensureSubdirs,
   list,
   readBinary,
+  readHead,
   readText,
   remove,
   writeBinary,
@@ -125,6 +126,44 @@ describe('嵌套路径', () => {
     await expect(readText(asDirHandle(dir), '../escape')).rejects.toThrow(/path/i);
 
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('readHead', () => {
+  it('文件不超过上限时返回全文并标记 whole', async () => {
+    const dir = makeDir('vault', { files: [makeFile('vault.json', { text: '{"revision":3}' })] });
+
+    await expect(readHead(asDirHandle(dir), 'vault.json', 512)).resolves.toEqual({
+      text: '{"revision":3}',
+      whole: true,
+    });
+  });
+
+  it('文件超过上限时只读前 maxBytes 字节并标记非 whole', async () => {
+    const padding = 'x'.repeat(1000);
+    const dir = makeDir('vault', { files: [makeFile('blob.json', { text: `head-${padding}` })] });
+
+    const result = await readHead(asDirHandle(dir), 'blob.json', 5);
+
+    expect(result).toEqual({ text: 'head-', whole: false });
+  });
+
+  it('按字节而非字符截取上限', async () => {
+    // '任' 占 3 字节：6 字节上限只够两个汉字，若按字符截会得到 6 个字
+    const dir = makeDir('vault', { files: [makeFile('cn.json', { text: '任务任务任务' })] });
+
+    const result = await readHead(asDirHandle(dir), 'cn.json', 6);
+
+    expect(result.text).toBe('任务');
+    expect(result.whole).toBe(false);
+  });
+
+  it('文件不存在抛 NotFoundError', async () => {
+    const dir = makeDir('vault');
+
+    await expect(readHead(asDirHandle(dir), 'vault.json', 512)).rejects.toMatchObject({
+      name: 'NotFoundError',
+    });
   });
 });
 

@@ -88,7 +88,7 @@ tests/**                         与 src 镜像
 
 ### Phase 2 · 持久化基座
 - [x] **T06** FsAccessAdapter + handleStore（目录连接 / 权限恢复 / 降级） → done (2026-10-15, qoder:sess-1015d, commit: "T06: FsAccessAdapter + handleStore with IndexedDB persistence and R2 fallback")
-- [ ] **T07** VaultRepository + 启动流程首屏 → pending
+- [x] **T07** VaultRepository + 启动流程首屏 → done (2026-10-15, qoder:sess-1015e, commit: "T07: VaultRepository + startup flow first screen with safe mode")
 - [ ] **T08** Autosave controller（dirty / debounce / Ctrl+S / 保存指示） → pending
 - [ ] **T09** SnapshotStore（自动与手动快照 / 保留策略 / 恢复） → pending
 
@@ -271,11 +271,29 @@ tests/**                         与 src 镜像
 **产出：** `src/persistence/vaultRepository.ts` `src/App.tsx`(启动流程) `tests/persistence/vaultRepository.test.ts`
 
 **验收标准：**
-- [ ] `load()` 读 vault.json → Zod 校验 → 迁移 → 返回 Vault；文件不存在返回 null
-- [ ] 空目录启动显示「在此创建新库？」确认；确认后初始化 vault.json（vaultId=nanoid、revision=0、schemaVersion=1）
-- [ ] 含 vault.json 的目录启动直接进入应用并渲染空看板
-- [ ] `peekRevision()` 只读返回磁盘 revision，不加载全量
-- [ ] 校验失败不写盘、进入只读安全模式占位（T29 完成横幅）；单测覆盖三路径；提交
+- [x] `load()` 读 vault.json → Zod 校验 → 迁移 → 返回 Vault；文件不存在返回 null
+- [x] 空目录启动显示「在此创建新库？」确认；确认后初始化 vault.json（vaultId=nanoid、revision=0、schemaVersion=1）
+- [x] 含 vault.json 的目录启动直接进入应用并渲染空看板
+- [x] `peekRevision()` 只读返回磁盘 revision，不加载全量
+- [x] 校验失败不写盘、进入只读安全模式占位（T29 完成横幅）；单测覆盖三路径；提交
+
+**实测证据：** `npx tsc --noEmit` exit 0；`npm run test` 107/107 绿（本任务 27 条：repository 17 + App 启动 10，先 RED 后 GREEN）；`npm run lint:emoji` 干净；`npm run build` 产出单文件 `dist/OffEarly.html` 325.5 kB（`<script src` 0 / `<link href` 0 / 外链 0；5 处 `http(s)://` 匹配全是 React 内部错误文案模板与 W3C 命名空间标识符，非资源引用）；产物在真实浏览器 `file://` 下冒烟：首屏渲染「连接数据文件夹 + 选择文件夹」、侧栏 wordmark 正常、控制台零消息。
+
+**实施注记（T07 发现）：**
+- `peekRevision` 的「不加载全量」用 `fsAdapter.readHead`（新原语，T06 文件的追加，见变更提议）只取前 4096 字节正则提 `"revision":N`；能这么做的前提是 `save()` 自己控制键序（revision 固定在第四位），键序被用户手改/外部格式化打乱时退回全量解析兜底（有专门用例）。
+- `create()` 调 `ensureSubdirs`（assets/ + .backup/）后写盘；**已有 vault.json 时拒绝覆盖**——空目录询问与防覆盖是同一安全面的两面。
+- 错误统一：JSON 语法坏、Zod 结构非法、schemaVersion 过高三类失败在 `load()` 内统一抛 `VaultValidationError`（带 issues 明细），App 只认这一种错误进安全模式；安全模式下不写盘由 App 测试断言「原文件字节不变」落在 mock 文件系统上，不是 spy 次数。
+- App 的 `StartupPorts` 注入六 seam（loadStoredDir/storeDir/hasWritePermission/requestWritePermission/pickDir/openRepository），默认实现接 T06 的 handleStore/verifyPermission/connectDir；组件测试因此全链路走真 repository + mock FS。
+- 句柄「打开成功才记住」：空目录、损坏库都不写 IndexedDB，下次启动仍走选择路径，避免污染。
+- 空看板占位按 `vault.settings.boardColumns` 渲染（当前固定四列），列头走 `t('status.*')`；`IconSprite` 已在 App 根挂载（T05 遗留接线），`data-testid="board"` 留给 T15。
+- locale：库打开前按 `navigator.language` 解析，打开后随 `vault.settings.locale`；T10 的 VaultStore 落地后此 useI18n 换接 Store 的 LocaleSource。
+- `appVersion` 写入 `'OffEarly 0.1.0'` 字符串常量（与 package.json version 对齐），未引构建期注入——体积约束下不值得为它加 define 管线，T31 校验时如需要再统一。
+
+**变更提议（越界清单，均经用户确认，已实施）：**
+1. `src/locales/zh.ts` / `en.ts` 新增 `startup.*`（13 键）与 `board.emptyColumn`：附录 A 锁的是 12 条术语译名，启动屏 UI 文案无处可放；`tests/locales/i18n.test.ts` 的「en 键集合与附录 A 完全相等」改为超集断言（12 条术语逐字存在、分支键 `status` 不可查），编译期 `Record<MsgKey,string>` 约束不变；spec 附录 A 下补「锁定范围」注记（文档仍 v1.3）。
+2. `src/persistence/fsAdapter.ts` 追加 `readHead(dir, path, maxBytes)` 原语（`tests/persistence/fsAdapter.test.ts` +4 用例）：fsAdapter 是「全项目唯一接触 File System API 的层」，peekRevision 的头读必须经它，不能破分层。
+3. `tests/persistence/mockFs.ts` 的 `getFile()` 返回值补齐 `size`/`slice`（真实 `File extends Blob` 的能力），并把内容模型统一为字节拼接（string chunk 按 UTF-8 编码后拼接，比之前「text 拼接 + 取最后一个字节 chunk」更贴近真实 createWritable 语义）；另暴露 `bytes()` 供落盘断言。T06 既有用例全部保持绿，无行为回退。
+4. `package.json` / `package-lock.json` 新增 runtime 依赖 `nanoid 6.0.2`（ESM-only，Vite IIFE 打包实测通过）：验收项字面要求 `vaultId=nanoid`，T25 附件 id 复用。
 
 **预估：** 1d
 
@@ -784,3 +802,5 @@ tests/**                         与 src 镜像
 - [2026-10-15] T05 | agent: qoder:sess-1015c | commit: "T05: inline SVG icon sprite + no-emoji lint" | 验收: 全部通过（5/5） | 备注: 32 个 `<symbol>`（验收清单 31 个全覆盖，另加 `chevron-right` 给 T14 话题树），描边属性集中在 symbol 上（`<use>` 的 shadow 内容只继承使用处上下文，挂 sprite 根无效），颜色走 currentColor；`npm run lint:emoji` 默认扫 `src` + `src/locales`，命中输出 `文件:行:列 U+码位` 并 exit 1，已作为 `build` 前置；负例实跑（临时 `src/__emoji-probe.ts` → exit 1，删除后 exit 0）。图标质量按「可测量」处理：真实 Chromium `file://` 下 32 个 symbol 的 `getBBox()` 全落在 0.4–23.6 安全区，并用 Path2D+canvas 栅格化成字符图逐个目检，据此放大 `list-task` 复选框与 `dependency` 节点圆、加宽 `filter` 下管。`npx tsc --noEmit` exit 0；`npm run test` 76/76 绿（本任务 15 条）；`npm run build` 仍为单文件 220.54 kB | 越界改动: 新增 `tests/views/IconSprite.test.tsx`、`tests/scripts/noEmoji.test.ts`（依「tests 与 src 镜像」+ TDD 约束）；`package.json` 只加 `lint:emoji` 与 `build` 前置两行，`package-lock.json` 未动 | 并发: 提交时工作树有另一 agent 的 T06 未提交产物（`src/persistence/*`、`tests/persistence/*`），本次只 stage T05 的四个新文件 + `package.json` + `task.md`，未纳入对方文件；对方曾写入的 `zustand` 依赖行与 T10 `in_progress` 行已由其自行回退，故不在本 commit 内 | 遗留: sprite 挂载点未接线（`src/App.tsx` 不在本任务产出清单，归 T07 启动流程一次性挂 `<IconSprite />`）；效果预览留在未跟踪的 `.tmp-preview/preview.html`（双击可看 16/24/48px 与深色底三轮），后续 agent 请勿 commit 该目录；禁 emoji lint 目前只覆盖 `src`，`tests`/`docs`/`spike.html` 不在扫描范围，T31 的 verify 若要吃全量需显式传目标
 
 - [2026-10-15] T06 | agent: qoder:sess-1015d | commit: "T06: FsAccessAdapter + handleStore with IndexedDB persistence and R2 fallback" | 验收: 全部通过（5/5） | 备注: `fsAdapter` 六原语 + `connectDir`/`ensureSubdirs`；所有写路径统一 `createWritable() → write → close()`（close 即 flush，单测断言 close 被调用）；`remove` 命中 `NotFoundError` 返回 false 而非抛错；路径解析拒绝含 `..` 的段，越界在读之前就挡掉（测试用 spy 断言句柄完全未被触碰）。`handleStore` 把 backend 抽成 `{get,set,remove}` 注入点，IndexedDB 实现走 `offearly/handles` 单键存储；降级做成三层兜底（backend 抛错 → save=false/load=null/clear=false；存的是脏数据 → load=null；环境无 `indexedDB` 全局 → load=null），全程不抛错，T07 启动流程只需判 `load()===null` 即走重选目录。`verifyPermission(handle, requestIfDenied)` 先 `queryPermission`，未授权且允许交互时才 `requestPermission` 一次，用户拒绝则 false，请求参数固定 `{mode:'readwrite'}` | 验证: `npx tsc --noEmit` exit 0；`npm run test` 76/76 绿（本任务 27 条，先 RED 后 GREEN）；`npm run build` 单文件 220.54 kB，与 T05 持平——persistence 层尚未被应用代码引用，接线归 T07 | 越界改动: 新增 `tests/persistence/mockFs.ts`（手写 mock 句柄，依「tests 与 src 镜像」+ TDD 约束）；TS lib.dom 未声明 `FileSystemDirectoryHandle.queryPermission/requestPermission`（Chromium 实际有），故在 `handleStore` 内补齐 `VaultDirHandle` 交叉类型，未改 tsconfig | 并发: 等 T05 提交（1b822c3）落地后才提交，本次只 stage `src/persistence/*`、`tests/persistence/*`、`task.md`；`.tmp-preview/`（T05 预览目录）保持未跟踪、未纳入 | 遗留: 真实启动流程里「重启后句柄权限是否仍免提示」需 T07 在目标企业 Edge 复验（spike R1 的待办移交至此）；`list()` 只回名字数组、不区分文件/目录，若 T09 保留策略需要类型信息再扩展；mock 覆盖不到真实 IndexedDB 的结构化克隆，首次落盘需在 T07 冒烟
+
+- [2026-10-15] T07 | agent: qoder:sess-1015e | commit: "T07: VaultRepository + startup flow first screen with safe mode" | 验收: 全部通过（5/5） | 备注: 交付 `vaultRepository`（load/save/peekRevision/create）+ App 启动状态机（booting/need-dir/need-permission/busy/empty-dir/ready/safe-mode/failed 八相）。`npx tsc --noEmit` exit 0；`npm run test` 107/107 绿（本任务 27 条，repository 17 + App 10，先 RED 后 GREEN）；`npm run lint:emoji` 干净；`npm run build` 单文件 325.5 kB；产物真实浏览器 `file://` 冒烟：首屏「连接数据文件夹」渲染、控制台零消息。peekRevision 经新原语 `readHead` 只取文件头 4096 字节提 revision（save 自控键序为前提，键序被打乱时全量解析兜底）；「校验失败不写盘」由 App 测试断言原文件字节不变落在 mock FS 上。句柄打开成功才存 IndexedDB，空目录/坏库不污染下次启动；`create()` 对已存在 vault.json 拒绝覆盖 | 越界改动: ① locales 新增 `startup.*`/`board.emptyColumn` 14 键 + T04 键集合断言放宽为超集（用户已确认，spec 附录 A 补「锁定范围」注记，仍 v1.3）；② fsAdapter 追加 `readHead`（+4 用例）；③ mockFs `getFile` 补 `size`/`slice`、内容模型改字节拼接、暴露 `bytes()`；④ runtime 依赖 nanoid 6.0.2 | 并发: 工作树共享期间 `src/persistence/vaultRepository.ts` 与 `tests/persistence/vaultRepository.test.ts` 一度被未知进程删除（写入后、提交前），已重写恢复并即刻提交，后续 agent 若发现未提交产物丢失请优先怀疑并发清理并尽快落盘提交 | 遗留: 安全模式横幅的三按钮（恢复此快照/选择其他备份/导出当前）是 T29 的范围，本任务只交付占位卡（`data-testid="safe-mode"`）；「重启后句柄权限是否免提示」仍需在企业 Edge 真机复验（承接 T06 遗留）；App 的 locale 源在 T10 落地后应换接 VaultStore 的 LocaleSource

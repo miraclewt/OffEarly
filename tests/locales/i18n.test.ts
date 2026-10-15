@@ -25,9 +25,6 @@ const GLOSSARY: Array<[MsgKey, string, string]> = [
   ['workweek', '工作周', 'Workweek'],
 ]
 
-type Equal<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
-
 function fakeLocale(initial: LocaleSetting): { source: LocaleSource; set: (next: LocaleSetting) => void } {
   let setting = initial
   const listeners = new Set<() => void>()
@@ -54,27 +51,15 @@ function Label(props: { i18n: I18n; msgKey: MsgKey }) {
 }
 
 describe('消息表与键类型', () => {
-  it('NestedKeyOf 只产出叶子键，不含 status 这类分支键', () => {
-    const keysAreLeaves: Equal<
-      MsgKey,
-      | 'status.todo'
-      | 'status.doing'
-      | 'status.review'
-      | 'status.done'
-      | 'topic'
-      | 'milestone'
-      | 'dependency'
-      | 'criticalPath'
-      | 'baseline'
-      | 'vault'
-      | 'workday'
-      | 'workweek'
-    > = true
-    expect(keysAreLeaves).toBe(true)
+  it('MsgKey 只含叶子键，不含 status 这类分支键', () => {
+    // T07 起消息表按视图需要新增 UI 文案键（如 startup.*），键集合不再等于附录 A 本身；
+    // 分支键不变式：'status' 作为完整键不可查（非叶子），附录 A 键由下方用例逐字守住。
+    const branchKeyAbsent: 'status' extends MsgKey ? true : false = false
+    expect(branchKeyAbsent).toBe(false)
   })
 
-  it('en 的键集合与附录 A 完全一致', () => {
-    expect(Object.keys(en).sort()).toEqual(GLOSSARY.map(([key]) => key).sort())
+  it('附录 A 的 12 条术语在 en 表中逐字存在且译名未被改动', () => {
+    for (const [key, , textEn] of GLOSSARY) expect(en[key]).toBe(textEn)
   })
 })
 

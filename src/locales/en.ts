@@ -14,4 +14,24 @@ export const en: Record<MsgKey, string> = {
   vault: 'Vault',
   workday: 'Workday',
   workweek: 'Workweek',
+  'startup.connectTitle': 'Connect data folder',
+  'startup.connectHint':
+    'All OffEarly data lives in a folder you choose: vault.json is your vault, assets/ holds images, .backup/ holds snapshots.',
+  'startup.connectButton': 'Choose folder',
+  'startup.permissionTitle': 'Permission needed',
+  'startup.permissionHint':
+    'The browser remembers your data folder, but write access needs one click to confirm.',
+  'startup.permissionButton': 'Grant access and continue',
+  'startup.createTitle': 'Create a new vault here?',
+  'startup.createHint':
+    'This folder has no vault.json yet. Confirm to initialize an empty vault in it.',
+  'startup.createConfirm': 'Create vault',
+  'startup.createCancel': 'Choose another folder',
+  'startup.busy': 'Reading vault…',
+  'startup.errorTitle': 'Cannot open the data folder',
+  'startup.errorRetry': 'Choose again',
+  'startup.safeModeTitle': 'Read-only safe mode',
+  'startup.safeModeHint':
+    'vault.json failed validation, writes are stopped to protect your data. Restore entry comes with the backup feature.',
+  'board.emptyColumn': 'No tasks',
 }

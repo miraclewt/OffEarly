@@ -514,6 +514,8 @@ spike 结果回填本文档第 11 节并据此裁剪降级路径，然后才进�
 | workday | 工作日 | Workday |
 | workweek | 工作周 | Workweek |
 
+> **锁定范围（v1.3 澄清，T07）**：附录 A 锁定的是这 12 条**术语译名**——一条不能少、译名不能改。消息表本身按视图需要持续增长（如 T07 新增的 `startup.*`、`board.emptyColumn` 等 UI 文案键）；T04 的「键集合与附录 A 完全相等」断言已相应放宽为超集断言（12 条术语逐字存在即可），`en.ts` 的 `Record<MsgKey, string>` 约束保证新增键在中英两表同时登记。
+
 i18n 实现：自写约 60 行 `t()` + 插值；`type MsgKey = NestedKeyOf<typeof zh>`，`en.ts` 用 `Record<MsgKey, string>` 约束，缺翻译编译期报错（T04 已以删键负例实测：`TS2741`）；`settings.locale: 'zh' | 'en' | 'auto'`，auto 读 `navigator.language.startsWith('zh')`；切换即时重渲染（locale 在 VaultStore，非模块级常量；只有**解析结果**变化才通知订阅者，避免库内其他改动白刷视图）；日期/星期/月份名走 dayjs locale（内联 zh-cn + en）。**边界规则：`t()` 只用于 UI 文案，绝不用于数据**（任务标题、topic 名、笔记内容原样显示）。
 
 ## 附录 B · 效果图清单

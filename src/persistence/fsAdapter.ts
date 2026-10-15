@@ -81,6 +81,25 @@ export async function writeText(
   await writable.close();
 }
 
+/**
+ * 只读文件头部 maxBytes 字节：peekRevision 用它避免把整份 vault.json（可达数 MB）
+ * 读进内存。截断按字节进行，因此尾部可能落在多字节字符中间，调用方只做前缀匹配。
+ */
+export async function readHead(
+  dir: FileSystemDirectoryHandle,
+  path: string,
+  maxBytes: number,
+): Promise<{ text: string; whole: boolean }> {
+  const handle = await resolveFileHandle(dir, path, false);
+  const file = await handle.getFile();
+  if (file.size <= maxBytes) {
+    return { text: await file.text(), whole: true };
+  }
+  // Blob.slice 返回的仍是二进制切片，解码后即为前 maxBytes 字节的内容
+  const head = await file.slice(0, maxBytes).text();
+  return { text: head, whole: false };
+}
+
 export async function readBinary(
   dir: FileSystemDirectoryHandle,
   path: string,

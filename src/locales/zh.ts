@@ -20,6 +20,26 @@ export const zh = {
   vault: '数据库',
   workday: '工作日',
   workweek: '工作周',
+  startup: {
+    connectTitle: '连接数据文件夹',
+    connectHint: 'OffEarly 的数据全部保存在你选定的文件夹里：vault.json 是你的数据库，assets/ 存放图片，.backup/ 存放快照。',
+    connectButton: '选择文件夹',
+    permissionTitle: '需要重新授权',
+    permissionHint: '浏览器已记住你的数据文件夹，但写入权限需要一次点击确认。',
+    permissionButton: '授权并继续',
+    createTitle: '在此创建新库？',
+    createHint: '这个文件夹里还没有 vault.json。确认后会在其中初始化一个新的空数据库。',
+    createConfirm: '创建数据库',
+    createCancel: '换个文件夹',
+    busy: '正在读取数据库…',
+    errorTitle: '无法打开数据文件夹',
+    errorRetry: '重新选择',
+    safeModeTitle: '只读安全模式',
+    safeModeHint: 'vault.json 无法通过校验，已停止写入以保护数据。恢复入口随备份功能提供。',
+  },
+  board: {
+    emptyColumn: '暂无任务',
+  },
 } as const
 
 export type MsgKey = NestedKeyOf<typeof zh>

@@ -1,0 +1,160 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { App } from '../src/App'
+import type { StartupPorts } from '../src/App'
+import { createNewVault, createVaultRepository } from '../src/persistence/vaultRepository'
+import { asDirHandle, makeDir, makeFile } from './persistence/mockFs'
+import type { MockDirHandle } from './persistence/mockFs'
+import type { VaultDirHandle } from '../src/persistence/handleStore'
+
+function vaultJson(): string {
+  return JSON.stringify(createNewVault())
+}
+
+function dirWith(entries: { vault?: string; files?: string[] }): MockDirHandle {
+  const files = entries.vault === undefined ? [] : [makeFile('vault.json', { text: entries.vault })]
+  const dir = makeDir('vault', { files })
+  for (const name of entries.files ?? []) {
+    dir.dirs.set(name, makeDir(name))
+  }
+  return dir
+}
+
+/**
+ * 只替掉「目录从哪来」，load/save/校验/写盘全走真实 VaultRepository 与 mock 文件系统，
+ * 这样「不写盘」这类断言仍然落在字节上，而不是落在 spy 调用次数上。
+ */
+function ports(options: {
+  stored?: VaultDirHandle | null
+  dir?: MockDirHandle
+  hasPermission?: boolean
+  requestResult?: boolean
+}): StartupPorts {
+  const dir = asDirHandle(options.dir ?? dirWith({}))
+  return {
+    loadStoredDir: vi.fn(async () => (options.stored === undefined ? dir : options.stored)),
+    storeDir: vi.fn(async () => true),
+    hasWritePermission: vi.fn(async () => options.hasPermission ?? true),
+    requestWritePermission: vi.fn(async () => options.requestResult ?? true),
+    pickDir: vi.fn(async () => dir),
+    openRepository: vi.fn((handle: VaultDirHandle) => createVaultRepository(handle)),
+  }
+}
+
+async function renderApp(p: StartupPorts) {
+  render(<App ports={p} />)
+  return p
+}
+
+// 库打开前 locale 走 navigator.language；锁定为中文以断言启动屏中文案
+beforeEach(() => {
+  Object.defineProperty(window.navigator, 'language', { value: 'zh-CN', configurable: true })
+})
+
+afterEach(() => {
+  cleanup()
+})
+
+describe('启动流程：连接数据文件夹', () => {
+  it('没有已保存的目录句柄时，首屏要求连接数据文件夹', async () => {
+    await renderApp(ports({ stored: null }))
+
+    expect(await screen.findByText('连接数据文件夹')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '选择文件夹' })).toBeTruthy()
+  })
+
+  it('选中空目录时先问「在此创建新库？」，确认前不写盘', async () => {
+    await renderApp(ports({ stored: null }))
+    fireEvent.click(await screen.findByRole('button', { name: '选择文件夹' }))
+
+    expect(await screen.findByText('在此创建新库？')).toBeTruthy()
+    expect(screen.queryByText('待办')).toBeNull()
+  })
+
+  it('确认后初始化 vault.json 并进入应用', async () => {
+    const dir = dirWith({ files: ['assets', '.backup'] })
+    await renderApp(ports({ stored: null, dir }))
+    fireEvent.click(await screen.findByRole('button', { name: '选择文件夹' }))
+    fireEvent.click(await screen.findByRole('button', { name: '创建数据库' }))
+
+    await waitFor(() => expect(screen.getByText('待办')).toBeTruthy())
+    const written = dir.files.get('vault.json')
+    expect(written && new TextDecoder().decode(written.bytes())).toContain('"vaultId"')
+  })
+
+  it('用户取消目录选择（AbortError）时留在连接屏，不显示错误', async () => {
+    const abort = new Error('canceled')
+    abort.name = 'AbortError'
+    const p = ports({ stored: null })
+    ;(p.pickDir as ReturnType<typeof vi.fn>).mockRejectedValue(abort)
+    await renderApp(p)
+
+    fireEvent.click(await screen.findByRole('button', { name: '选择文件夹' }))
+
+    await waitFor(() => expect(p.pickDir).toHaveBeenCalled())
+    expect(await screen.findByText('连接数据文件夹')).toBeTruthy()
+    expect(screen.queryByText('无法打开数据文件夹')).toBeNull()
+  })
+})
+
+describe('启动流程：已记住的目录句柄', () => {
+  it('有权限时不再要求选择文件夹，含 vault.json 的目录直接进入空看板', async () => {
+    const dir = dirWith({ vault: vaultJson() })
+    await renderApp(ports({ dir }))
+
+    await waitFor(() => expect(screen.getByText('待办')).toBeTruthy())
+    expect(screen.queryByText('连接数据文件夹')).toBeNull()
+    expect(screen.getAllByText('0')).toHaveLength(4)
+  })
+
+  it('已存在但无写权限时，一次点击授权后进入', async () => {
+    const dir = dirWith({ vault: vaultJson() })
+    await renderApp(ports({ stored: asDirHandle(dir), hasPermission: false }))
+
+    fireEvent.click(await screen.findByRole('button', { name: '授权并继续' }))
+
+    await waitFor(() => expect(screen.getByText('待办')).toBeTruthy())
+  })
+
+  it('授权被拒时停在授权屏，不进入应用', async () => {
+    const dir = dirWith({ vault: vaultJson() })
+    await renderApp(ports({ stored: asDirHandle(dir), hasPermission: false, requestResult: false }))
+
+    fireEvent.click(await screen.findByRole('button', { name: '授权并继续' }))
+
+    await waitFor(() => expect(screen.queryByText('待办')).toBeNull())
+    expect(screen.getByRole('button', { name: '授权并继续' })).toBeTruthy()
+  })
+})
+
+describe('启动流程：损坏的库进入只读安全模式', () => {
+  it('vault.json 语法坏时给出安全模式占位，且不写盘', async () => {
+    const original = '{"schemaVersion":1,"vaultId":"abc"'
+    const dir = dirWith({ vault: original })
+    await renderApp(ports({ dir }))
+
+    expect(await screen.findByText('只读安全模式')).toBeTruthy()
+    expect(screen.queryByText('待办')).toBeNull()
+    const file = dir.files.get('vault.json')
+    expect(file && new TextDecoder().decode(file.bytes())).toBe(original)
+  })
+
+  it('vault.json 结构非法时同样只读，不覆盖原文件', async () => {
+    const original = JSON.stringify({ schemaVersion: 1, vaultId: 'abc' })
+    const dir = dirWith({ vault: original })
+    await renderApp(ports({ dir }))
+
+    expect(await screen.findByText('只读安全模式')).toBeTruthy()
+    const file = dir.files.get('vault.json')
+    expect(file && new TextDecoder().decode(file.bytes())).toBe(original)
+  })
+
+  it('schemaVersion 高于本版本时提示升级 OffEarly', async () => {
+    const dir = dirWith({ vault: JSON.stringify({ ...JSON.parse(vaultJson()), schemaVersion: 2 }) })
+    await renderApp(ports({ dir }))
+
+    expect(await screen.findByText(/请升级 OffEarly/)).toBeTruthy()
+  })
+})
