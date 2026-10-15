@@ -40,6 +40,12 @@ export const zh = {
   board: {
     emptyColumn: '暂无任务',
   },
+  save: {
+    saved: '已保存',
+    dirty: '未保存',
+    error: '保存失败',
+    retry: '重试',
+  },
 } as const
 
 export type MsgKey = NestedKeyOf<typeof zh>

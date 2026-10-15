@@ -34,4 +34,8 @@ export const en: Record<MsgKey, string> = {
   'startup.safeModeHint':
     'vault.json failed validation, writes are stopped to protect your data. Restore entry comes with the backup feature.',
   'board.emptyColumn': 'No tasks',
+  'save.saved': 'Saved',
+  'save.dirty': 'Unsaved',
+  'save.error': 'Save failed',
+  'save.retry': 'Retry',
 }

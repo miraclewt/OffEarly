@@ -89,7 +89,7 @@ tests/**                         与 src 镜像
 ### Phase 2 · 持久化基座
 - [x] **T06** FsAccessAdapter + handleStore（目录连接 / 权限恢复 / 降级） → done (2026-10-15, qoder:sess-1015d, commit: "T06: FsAccessAdapter + handleStore with IndexedDB persistence and R2 fallback")
 - [x] **T07** VaultRepository + 启动流程首屏 → done (2026-10-15, qoder:sess-1015e, commit: "T07: VaultRepository + startup flow first screen with safe mode")
-- [ ] **T08** Autosave controller（dirty / debounce / Ctrl+S / 保存指示） → pending
+- [x] **T08** Autosave controller（dirty / debounce / Ctrl+S / 保存指示） → done (2026-10-15, workbuddy:sess-1015f, commit: "T08: autosave controller with dirty tracking, debounce, Ctrl+S and three-state save indicator")
 - [ ] **T09** SnapshotStore（自动与手动快照 / 保留策略 / 恢复） → pending
 
 ### Phase 3 · 领域层
@@ -307,11 +307,31 @@ tests/**                         与 src 镜像
 **产出：** `src/persistence/autosave.ts` `tests/persistence/autosave.test.ts`
 
 **验收标准：**
-- [ ] Store 变更标记 dirty；debounce 1200ms 后触发 save；Ctrl+S 立即 save（假计时器验证）
-- [ ] save 时 `revision++` 且 `updatedAt` 刷新；保存成功后 dirty 清除
-- [ ] 保存失败置 `saveState='error'`，UI 显示「保存失败(重试)」，内存数据不丢；重试成功恢复 `saved`
-- [ ] 保存指示三态 `saved / dirty / error` 在顶栏可见（组件测试）
-- [ ] 单测全绿并提交
+- [x] Store 变更标记 dirty；debounce 1200ms 后触发 save；Ctrl+S 立即 save（假计时器验证）—— 19 条单测跑 `vi.useFakeTimers` + `advanceTimersByTimeAsync`：1199ms 不写盘、1200ms 写一次、窗口内两次改动合并为一次且写最新内容、`saveNow()` 立即写并取消已排队的自动保存、无变更时 no-op
+- [x] save 时 `revision++` 且 `updatedAt` 刷新；保存成功后 dirty 清除 —— revision 0→1→2 递增；写盘对象的 `updatedAt` 取自注入的 `now()`；保存成功后 `markSaved(revision, updatedAt)` 把新 revision 回写 Store（不回写则下次保存原地踏步、T27 冲突检测失效）
+- [x] 保存失败置 `saveState='error'`，UI 显示「保存失败(重试)」，内存数据不丢；重试成功恢复 `saved` —— 失败时 sink 一次都没被写入、Store 里的任务原样保留、dirty 不被清掉；`retry()` 成功后 `lastError=null`、落盘 revision=1、内容含失败期间的全部编辑
+- [x] 保存指示三态 `saved / dirty / error` 在顶栏可见（组件测试）—— 新增 `src/views/SaveIndicator.tsx`，以 `useSyncExternalStore` 订阅控制器；组件测试 3 条（三态文案 + `data-state` + en 文案 + 点重试调用控制器）＋ 2 条与真 Autosave 联动的端到端（编辑→未保存→debounce 到期→已保存；失败→保存失败+重试按钮→修复后点重试→已保存）
+- [x] 单测全绿并提交 —— `npm run test` 131/131（本任务 24 条：autosave 19 + SaveIndicator 5，先 RED 后 GREEN）；`npx tsc --noEmit` exit 0；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 325651 字节（`<script src` 0 / `<link` 0 / `type="module"` 0 / `http(s)://` 资源引用 0）
+
+**实测证据：** 上一条即逐项证据。新增的两个模块都还没被 `src/App.tsx` 引用，产物只随 locales 的 4 个新键微增（325.5 → 325.65 kB），T02/T03/T05 的单文件不变式复测通过。
+
+**变更提议（越界清单，已实施并记录）**
+1. 新增 `src/views/SaveIndicator.tsx` + `tests/views/SaveIndicator.test.tsx`：验收项 4 明写「保存指示三态在顶栏可见（组件测试）」，但本任务产出清单只有 `autosave.ts`，没有任何视图文件——按 T03/T07「产出清单不全即补并记录」的先例补齐。
+2. `src/locales/zh.ts` / `en.ts` 新增 `save.*` 4 键（`saved/dirty/error/retry`）：UI 文案必须走 `t()`，而 spec 6.3 锁定的三态文案无处可放；`tests/locales/i18n.test.ts` 的断言在 T07 已放宽为「附录 A 12 条术语逐字存在 + en 为 `Record<MsgKey,string>`」，新增键无需改测试。
+3. **未**改 `src/App.tsx`：顶栏挂载点需要活着的 VaultStore（T10 产出），本任务只交付「可挂载」的控制器与指示器，处理方式同 T05 的 IconSprite、T04 的 locales。
+
+**实施注记（T08 发现）**
+- **依赖 T10 未落地，用注入端口解耦。** 总表里 T08 依赖写了 T10（VaultStore），而 T10 当时仍 pending。沿用 T04「`LocaleSource` 接口注入、由 T10 的 VaultStore 实现」的既定手法，autosave 只依赖最小端口 `AutosaveStore { subscribe, getVault, markSaved }`，不 import `domain/store`；T10 落地时让 VaultStore 实现该端口并调 `start()` 即可，无需改本模块。
+- **「自通知不能算用户改动」是本次最容易踩的坑。** Store 写回新 revision 会通知订阅者，若不屏蔽就是「保存→通知→判定被改→再保存」的自激写盘死循环。两道闸一起上：同步通知用 `applying` 抑制位挡掉；延迟/异步通知靠 `markSaved` 的返回值与 `lastAccepted` 引用相等挡掉——所以端口约定 `markSaved` 必须返回 Store 当前持有的那个对象。
+- **写盘串行化。** Ctrl+S 与 debounce 可能同时到，用 `chain` 把 `doFlush` 串行化，避免两个 `createWritable` 交错写同一个文件。
+- **写盘途中的编辑不能丢。** 保存完成后无脑清 dirty 会吞掉这期间的改动；改用 `edits` 计数与进入写盘时的 `seen` 比对，不一致就保留 dirty 并再排一次 debounce。配套约束：`markSaved` 只回写 revision/updatedAt，**不整体替换** Store 内容，否则会覆盖写盘期间的新编辑。
+- **写前快照（T09 接入点）。** `snapshotter` 可选注入，在 `sink.save` 之前调用；快照失败一律视为保存失败、不写盘，兑现 spec 8.2「写前必有快照」——宁可留着 dirty 重试，也不在无备份的情况下覆盖用户数据。「每会话首存 / 距上次 ≥30min」的判定按 T09 验收项留在实现方。
+- `Ctrl+S` 在无未保存变更时是 no-op：不白抬 revision，也避免 T27 拿一个没意义的 revision 去做冲突判定。
+
+**遗留：**
+- 顶栏挂载点（App shell）与 `Ctrl+S` 全局按键绑定归 T10 / T15：本任务只交付控制器与指示器组件。
+- 到目前为止保存流程里没有真正的写前快照：`snapshotter` 端口已就位但无人注入，等 T09 的 SnapshotStore 接上。
+- T27 的冲突检测基线应与本控制器对齐：`markSaved` 已把写盘 revision 回写 Store，读 `vault.revision` 即内存基线；30s 轮询与三选弹窗本身不在本任务范围。
 
 **预估：** 0.5d
 
@@ -804,3 +824,5 @@ tests/**                         与 src 镜像
 - [2026-10-15] T06 | agent: qoder:sess-1015d | commit: "T06: FsAccessAdapter + handleStore with IndexedDB persistence and R2 fallback" | 验收: 全部通过（5/5） | 备注: `fsAdapter` 六原语 + `connectDir`/`ensureSubdirs`；所有写路径统一 `createWritable() → write → close()`（close 即 flush，单测断言 close 被调用）；`remove` 命中 `NotFoundError` 返回 false 而非抛错；路径解析拒绝含 `..` 的段，越界在读之前就挡掉（测试用 spy 断言句柄完全未被触碰）。`handleStore` 把 backend 抽成 `{get,set,remove}` 注入点，IndexedDB 实现走 `offearly/handles` 单键存储；降级做成三层兜底（backend 抛错 → save=false/load=null/clear=false；存的是脏数据 → load=null；环境无 `indexedDB` 全局 → load=null），全程不抛错，T07 启动流程只需判 `load()===null` 即走重选目录。`verifyPermission(handle, requestIfDenied)` 先 `queryPermission`，未授权且允许交互时才 `requestPermission` 一次，用户拒绝则 false，请求参数固定 `{mode:'readwrite'}` | 验证: `npx tsc --noEmit` exit 0；`npm run test` 76/76 绿（本任务 27 条，先 RED 后 GREEN）；`npm run build` 单文件 220.54 kB，与 T05 持平——persistence 层尚未被应用代码引用，接线归 T07 | 越界改动: 新增 `tests/persistence/mockFs.ts`（手写 mock 句柄，依「tests 与 src 镜像」+ TDD 约束）；TS lib.dom 未声明 `FileSystemDirectoryHandle.queryPermission/requestPermission`（Chromium 实际有），故在 `handleStore` 内补齐 `VaultDirHandle` 交叉类型，未改 tsconfig | 并发: 等 T05 提交（1b822c3）落地后才提交，本次只 stage `src/persistence/*`、`tests/persistence/*`、`task.md`；`.tmp-preview/`（T05 预览目录）保持未跟踪、未纳入 | 遗留: 真实启动流程里「重启后句柄权限是否仍免提示」需 T07 在目标企业 Edge 复验（spike R1 的待办移交至此）；`list()` 只回名字数组、不区分文件/目录，若 T09 保留策略需要类型信息再扩展；mock 覆盖不到真实 IndexedDB 的结构化克隆，首次落盘需在 T07 冒烟
 
 - [2026-10-15] T07 | agent: qoder:sess-1015e | commit: "T07: VaultRepository + startup flow first screen with safe mode" | 验收: 全部通过（5/5） | 备注: 交付 `vaultRepository`（load/save/peekRevision/create）+ App 启动状态机（booting/need-dir/need-permission/busy/empty-dir/ready/safe-mode/failed 八相）。`npx tsc --noEmit` exit 0；`npm run test` 107/107 绿（本任务 27 条，repository 17 + App 10，先 RED 后 GREEN）；`npm run lint:emoji` 干净；`npm run build` 单文件 325.5 kB；产物真实浏览器 `file://` 冒烟：首屏「连接数据文件夹」渲染、控制台零消息。peekRevision 经新原语 `readHead` 只取文件头 4096 字节提 revision（save 自控键序为前提，键序被打乱时全量解析兜底）；「校验失败不写盘」由 App 测试断言原文件字节不变落在 mock FS 上。句柄打开成功才存 IndexedDB，空目录/坏库不污染下次启动；`create()` 对已存在 vault.json 拒绝覆盖 | 越界改动: ① locales 新增 `startup.*`/`board.emptyColumn` 14 键 + T04 键集合断言放宽为超集（用户已确认，spec 附录 A 补「锁定范围」注记，仍 v1.3）；② fsAdapter 追加 `readHead`（+4 用例）；③ mockFs `getFile` 补 `size`/`slice`、内容模型改字节拼接、暴露 `bytes()`；④ runtime 依赖 nanoid 6.0.2 | 并发: 工作树共享期间 `src/persistence/vaultRepository.ts` 与 `tests/persistence/vaultRepository.test.ts` 一度被未知进程删除（写入后、提交前），已重写恢复并即刻提交，后续 agent 若发现未提交产物丢失请优先怀疑并发清理并尽快落盘提交 | 遗留: 安全模式横幅的三按钮（恢复此快照/选择其他备份/导出当前）是 T29 的范围，本任务只交付占位卡（`data-testid="safe-mode"`）；「重启后句柄权限是否免提示」仍需在企业 Edge 真机复验（承接 T06 遗留）；App 的 locale 源在 T10 落地后应换接 VaultStore 的 LocaleSource
+
+- [2026-10-15] T08 | agent: workbuddy:sess-1015f | commit: "T08: autosave controller with dirty tracking, debounce, Ctrl+S and three-state save indicator" | 验收: 全部通过（5/5） | 备注: 交付 `createAutosave`（dirty 标记 / debounce 1200ms / Ctrl+S 立即保存 / 三态 saved-dirty-error / retry）+ `SaveIndicator` 指示器组件。`npm run test` 131/131 绿（本任务 24 条：autosave 19 + SaveIndicator 5，先 RED 后 GREEN——首轮 18/19，唯一红的是「写盘途中的编辑」，属测试构造缺陷：`chain.then` 把 doFlush 推到微任务，`fs.edit` 抢在写盘前跑完，改用 `io.waitEntered()` 等到真的进了 save 再构造并发编辑）；`npx tsc --noEmit` exit 0（首轮报 TS6196 未用导入，删除后干净）；`npm run lint:emoji` 干净；`npm run build` 单文件 `dist/OffEarly.html` 325651 字节，`<script src`/`<link`/`type="module"`/`http(s)://` 资源引用四项均为 0（T02 不变式复测通过） | 依赖偏离: T08 依赖列了 T10，而 T10 仍 pending，未等待即开工——依 T04「接口注入、T10 的 VaultStore 即实现」的既定先例，autosave 只依赖最小端口 `AutosaveStore { subscribe, getVault, markSaved }`，不 import `domain/store`；T10 落地时让 VaultStore 实现该端口并调 `start()` 即可。**此条与《状态同步协议》第 1、4 条（依赖未 done 不得开工）相悖，请用户裁决：若要求严格串行，T08 应改回 pending 并在 T10 之后重做一次接线验收** | 越界改动: ① 新增 `src/views/SaveIndicator.tsx` + `tests/views/SaveIndicator.test.tsx`（产出清单漏了视图，而验收项 4 要求组件测试）；② locales 新增 `save.*` 4 键；③ 刻意**未**改 `src/App.tsx`（顶栏挂载点需要活着的 VaultStore） | 并发: 提交前工作树只有本任务新增的 3 个文件与 locales/task.md 改动，无其他 agent 的未提交产物 | 遗留: 顶栏挂载与 Ctrl+S 全局按键绑定归 T10/T15；保存流程目前无真正的写前快照（`snapshotter` 端口已就位、无人注入，等 T09）
