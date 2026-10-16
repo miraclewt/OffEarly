@@ -265,6 +265,32 @@ export const zh = {
     matchCount: '命中 {n} 条',
     flags: '条件开关',
   },
+
+  // T24 尾部追加：笔记编辑器（只增不改，既有键一律不动）
+  noteEditor: {
+    toolbar: '笔记工具栏',
+    content: '笔记内容',
+    bold: '粗体',
+    italic: '斜体',
+    strike: '删除线',
+    inlineCode: '行内代码',
+    codeBlock: '代码块',
+    heading2: '二级标题',
+    heading3: '三级标题',
+    bulletList: '无序列表',
+    orderedList: '有序列表',
+    taskList: '任务列表',
+    quote: '引用',
+    link: '链接',
+    linkPrompt: '输入链接地址',
+    table: '表格',
+    image: '图片',
+    divider: '分隔线',
+    linkSearch: '搜索任务或里程碑',
+    linkEmpty: '没有匹配的标题',
+    kindTask: '任务',
+    kindMilestone: '里程碑',
+  },
 } as const
 
 export type MsgKey = NestedKeyOf<typeof zh>

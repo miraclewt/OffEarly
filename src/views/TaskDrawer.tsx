@@ -31,6 +31,8 @@ import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { DependencyEditor } from './DependencyEditor'
 import { Icon } from './IconSprite'
 import { isValidDateKey } from './MilestonePanel'
+import { NoteEditor } from './NoteEditor'
+import type { NoteLinkTarget } from './NoteEditor'
 import { SaveIndicator } from './SaveIndicator'
 import type { SaveIndicatorSource } from './SaveIndicator'
 
@@ -40,10 +42,8 @@ const SECONDARY = 'var(--oe-text-secondary)'
 const MUTED = 'var(--oe-text-muted)'
 const FAINT = 'var(--oe-text-faint)'
 const SURFACE = 'var(--oe-surface)'
-const FILL = 'var(--oe-fill)'
 const INDIGO = 'var(--oe-accent)'
 const DANGER = 'var(--oe-overdue)'
-const RADIUS_CARD = 'var(--oe-radius-card)'
 
 /** 覆盖式抽屉宽度（spec 6.3「右侧滑出约 400px」）。 */
 const DRAWER_WIDTH = 400
@@ -121,6 +121,8 @@ export interface TaskDrawerProps {
   autosave?: SaveIndicatorSource
   /** 注入 id 生成（依赖新建用），便于测试确定化。 */
   newId?: () => string
+  /** 笔记里 `[[标题]]` 的点击跳转（T24）；matches 为同名候选，接线归集成窗口。 */
+  onNavigateNoteLink?: (title: string, matches: readonly NoteLinkTarget[]) => void
   style?: CSSProperties
 }
 
@@ -254,6 +256,18 @@ export function TaskDrawer(props: TaskDrawerProps) {
     walk(tree.roots(), 0)
     return out
   }, [tree])
+
+  /**
+   * T24：笔记 `[[双链]]` 的候选池 = 全库任务标题 + 里程碑标题（同名多任务会有多条同 title 候选）。
+   * 只读派生，不落盘。
+   */
+  const noteLinkTargets = useMemo<NoteLinkTarget[]>(
+    () => [
+      ...vault.tasks.map((item) => ({ id: item.id, kind: 'task' as const, title: item.title })),
+      ...vault.milestones.map((item) => ({ id: item.id, kind: 'milestone' as const, title: item.title })),
+    ],
+    [vault.tasks, vault.milestones],
+  )
 
   /**
    * 键盘处理读最新值的 ref：effect 只在 open 变化时重挂监听，
@@ -591,25 +605,18 @@ export function TaskDrawer(props: TaskDrawerProps) {
           <DependencyEditor store={store} bus={bus} taskId={task.id} t={t} newId={props.newId} />
         </section>
 
-        {/* ⑤ 笔记占位：T24 NoteEditor 落地前只留位置，不 import 尚不存在的组件 */}
+        {/* ⑤ 笔记（T24 NoteEditor）：编辑 debounce 后经 patchTaskCommand 落库 → 进撤销栈；
+            key=task.id 让换任务即重挂，避免 debounce 把 A 的内容写进 B。 */}
         <section data-testid="drawer-notes-section" style={SECTION}>
           <SectionHeader icon={<Icon name="note" size={14} />} title={t('drawer.sectionNotes')} />
-          <div
-            data-testid="drawer-note-placeholder"
-            style={{
-              padding: '16px 12px',
-              fontSize: 11,
-              lineHeight: 1.7,
-              color: MUTED,
-              textAlign: 'center',
-              background: FILL,
-              border: `1px dashed ${BORDER}`,
-              borderRadius: RADIUS_CARD,
-            }}
-          >
-            {t('drawer.notePlaceholder')}
-            <div style={{ marginTop: 2, color: FAINT }}>{t('drawer.noteHint')}</div>
-          </div>
+          <NoteEditor
+            key={task.id}
+            value={task.note}
+            linkTargets={noteLinkTargets}
+            onCommit={(markdown) => patchTask({ note: markdown })}
+            onNavigate={props.onNavigateNoteLink}
+            t={t}
+          />
         </section>
       </div>
     )

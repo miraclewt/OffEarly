@@ -41,6 +41,10 @@ const URL_ALLOWLIST = new Map([
   ['www.w3.org', 'SVG / XML 命名空间常量'],
   ['json-schema.org', 'JSON Schema $schema 标识'],
   ['react.dev', 'React 报错文档链接（仅字符串）'],
+  // T24 变更提议追加：TipTap / ProseMirror 进包后新增的两条报错文案常量（均只在异常分支里拼字符串，
+  // 运行时不会发起请求）。白名单仍然只认「库内字符串常量」，真外链照旧会被这条检查拦下。
+  ['prosemirror.net', 'ProseMirror 报错文案里的文档链接（仅字符串）'],
+  ['github.com', 'marked 报错文案里的 issue 提交链接（仅字符串）'],
 ])
 
 const results = []
