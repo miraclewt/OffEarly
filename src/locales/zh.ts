@@ -123,6 +123,15 @@ export const zh = {
     resolved: '已处理，正在载入…',
   },
 
+  // T22 追加：甘特图未排期侧栏（只增不改，既有键一律不动）
+  ganttUnscheduled: {
+    title: '未排期',
+    count: '{n} 项',
+    empty: '所有任务都已排期',
+    collapse: '收起未排期面板',
+    expand: '展开未排期面板',
+  },
+
   // T23 尾部追加：甘特图导出（PNG / SVG / CSV；只增不改，既有键一律不动）
   ganttExport: {
     button: '导出',

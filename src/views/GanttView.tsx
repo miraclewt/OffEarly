@@ -8,6 +8,9 @@
 // 不读 store、不改 App.tsx。省略 viewport 时内部自建一个，因此 `<GanttView vault={vault} filter={filter} />` 直接可用。
 //
 // 只读边界（spec 12 非目标）：不做拖拽改期、不做拖入排期；日期在 TaskDrawer 改。
+// T22：未排期侧栏挂在画布右侧（spec 5.4）——数据一律取 buildGanttModel 的 unscheduled
+// （与 rows 同源、随 filter 收缩），视图层不重算排期/查询；点击只经 onOpenTask(taskId)
+// 外送，TaskDrawer 的接线归集成窗口（App.tsx 已有 drawer 受控状态与看板先例）。
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react'
@@ -23,8 +26,8 @@ import {
   zoomFactorAt,
 } from '../controllers/ganttViewport'
 import type { GanttViewportController } from '../controllers/ganttViewport'
-import { buildGanttModel } from '../domain/ganttModel'
-import type { Filter, GanttScale, Vault } from '../domain/types'
+import { buildGanttModel, colorOfTopic } from '../domain/ganttModel'
+import type { Filter, GanttScale, Task, Topic, Vault } from '../domain/types'
 import { createI18n } from '../locales/i18n'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { exportGanttChart, probePngSupport } from './GanttExporter'
@@ -38,6 +41,12 @@ const TEXT = 'var(--oe-text)'
 const TEXT_MUTED = 'var(--oe-text-muted)'
 const INDIGO = 'var(--oe-accent)'
 const TOOLBAR_HEIGHT = 36
+
+/** T22 未排期侧栏：展开宽度 / 收起宽度；行高与画布行（model.rowHeight = 32）协调。 */
+const UNSCHEDULED_PANEL_WIDTH = 224
+const UNSCHEDULED_PANEL_COLLAPSED_WIDTH = 36
+/** topicId 为 null（跨话题/话题已删）时的中性色点，与 TaskCard 的 FAINT 同档。 */
+const NEUTRAL_DOT_COLOR = 'var(--oe-text-faint)'
 
 const BODY_FONT = 'var(--oe-font)'
 
@@ -76,6 +85,8 @@ export interface GanttViewProps {
   /** 画布可视宽度（不含左侧任务表）；省略时用控制器内的值。 */
   width?: number
   t?: (key: MsgKey, params?: TranslateParams) => string
+  /** 点击未排期任务（T22 补排期入口）→ 拉起任务详情抽屉；接线归集成窗口。 */
+  onOpenTask?: (taskId: string) => void
   style?: CSSProperties
 }
 
@@ -90,6 +101,12 @@ export function GanttView(props: GanttViewProps) {
 
   const rootRef = useRef<HTMLDivElement | null>(null)
 
+  // T22：未排期侧栏折叠状态。本地 state 即可（不要求持久化）；默认展开，
+  // 让「补排期」入口始终可见（spec 5.4：未排期任务不能从进度视图消失）。
+  // 面板始终占位（展开 / 收起两种宽度），故画布可视宽度要相应扣减。
+  const [unscheduledOpen, setUnscheduledOpen] = useState(true)
+  const unscheduledPanelWidth = unscheduledOpen ? UNSCHEDULED_PANEL_WIDTH : UNSCHEDULED_PANEL_COLLAPSED_WIDTH
+
   useEffect(() => {
     viewport.setViewportSize({ width: props.width, height: props.height })
   }, [viewport, props.width, props.height])
@@ -102,7 +119,7 @@ export function GanttView(props: GanttViewProps) {
       const box = entries[0]?.contentRect
       if (box === undefined || box.width <= 0) return
       viewport.setViewportSize({
-        width: Math.max(0, box.width - GANTT_TABLE_WIDTH),
+        width: Math.max(0, box.width - GANTT_TABLE_WIDTH - unscheduledPanelWidth),
         height: Math.max(0, box.height - TOOLBAR_HEIGHT),
       })
     })
@@ -110,7 +127,7 @@ export function GanttView(props: GanttViewProps) {
     return () => {
       observer.disconnect()
     }
-  }, [viewport])
+  }, [viewport, unscheduledPanelWidth])
 
   // T21：「关键路径」开关，默认开。计算在领域层（criticalPath）已完成，这里只做投影与开关——
   // 关闭时不加粗、不展示计算结果。状态留在本组件（基线开关在 viewport 控制器里，两者刻意分开：
@@ -232,6 +249,19 @@ export function GanttView(props: GanttViewProps) {
     },
     [viewport],
   )
+
+  // T22：点击未排期任务只外送 taskId（补排期在 TaskDrawer 里做，接线归集成窗口）。
+  // 未传 onOpenTask 时静默 no-op——组件仍可独立挂载。
+  const handleUnscheduledSelect = useCallback(
+    (taskId: string) => {
+      props.onOpenTask?.(taskId)
+    },
+    [props.onOpenTask],
+  )
+
+  const handleUnscheduledToggle = useCallback(() => {
+    setUnscheduledOpen((open) => !open)
+  }, [])
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
     if (event.key === '+' || event.key === '=') {
@@ -512,7 +542,156 @@ export function GanttView(props: GanttViewProps) {
           onScroll={handleScroll}
           onZoomWheel={handleZoomWheel}
         />
+
+        {/* T22：未排期侧栏（spec 5.4）——挂在画布右侧，数据取 model.unscheduled（与 rows 同源、随 filter 收缩） */}
+        <GanttUnscheduledPanel
+          tasks={model.unscheduled}
+          topics={vault.topics}
+          open={unscheduledOpen}
+          rowHeight={rowHeight}
+          onToggle={handleUnscheduledToggle}
+          onSelect={handleUnscheduledSelect}
+          t={t}
+        />
       </div>
+    </div>
+  )
+}
+
+interface GanttUnscheduledPanelProps {
+  tasks: readonly Task[]
+  topics: readonly Topic[]
+  open: boolean
+  rowHeight: number
+  onToggle: () => void
+  onSelect: (taskId: string) => void
+  t: (key: MsgKey, params?: TranslateParams) => string
+}
+
+/**
+ * T22 · 未排期侧栏：列出「start / due 缺一」的任务，点一行去 TaskDrawer 补日期。
+ * 数据只来自 GanttModel.unscheduled——本组件不重算排期，也不做筛选；补完日期后模型重算，
+ * 任务自然从侧栏消失、进 rows（T22-4 的测试固化了这条同源关系）。
+ * 折叠状态由宿主持有（受控），组件只渲染与回调。
+ */
+function GanttUnscheduledPanel(props: GanttUnscheduledPanelProps): ReactElement {
+  const { tasks, topics, open, rowHeight, onToggle, onSelect, t } = props
+  return (
+    <div
+      data-testid="gantt-unscheduled-panel"
+      data-open={open ? 'true' : 'false'}
+      style={{
+        flex: `0 0 ${open ? UNSCHEDULED_PANEL_WIDTH : UNSCHEDULED_PANEL_COLLAPSED_WIDTH}px`,
+        width: open ? UNSCHEDULED_PANEL_WIDTH : UNSCHEDULED_PANEL_COLLAPSED_WIDTH,
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+        boxSizing: 'border-box',
+        borderLeft: `1px solid ${BORDER}`,
+        background: 'var(--oe-surface)',
+        color: TEXT,
+        fontFamily: BODY_FONT,
+      }}
+    >
+      <button
+        type="button"
+        data-testid="gantt-unscheduled-toggle"
+        aria-expanded={open}
+        aria-label={open ? t('ganttUnscheduled.collapse') : t('ganttUnscheduled.expand')}
+        onClick={onToggle}
+        style={{
+          flex: `0 0 ${TOOLBAR_HEIGHT}px`,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          width: '100%',
+          height: TOOLBAR_HEIGHT,
+          padding: open ? '0 10px' : 0,
+          justifyContent: open ? 'flex-start' : 'center',
+          boxSizing: 'border-box',
+          fontSize: 12,
+          color: TEXT,
+          background: 'transparent',
+          border: 'none',
+          borderBottom: `1px solid ${BORDER}`,
+          cursor: 'pointer',
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            display: 'inline-flex',
+            transform: open ? 'rotate(90deg)' : 'none',
+            transition: 'transform 120ms ease',
+          }}
+        >
+          <Icon name="chevron-right" />
+        </span>
+        {open ? <span>{t('ganttUnscheduled.title')}</span> : null}
+        {open ? (
+          <span
+            data-testid="gantt-unscheduled-count"
+            style={{ marginLeft: 'auto', color: TEXT_MUTED, fontSize: 11 }}
+          >
+            {t('ganttUnscheduled.count', { n: tasks.length })}
+          </span>
+        ) : null}
+      </button>
+
+      {open ? (
+        tasks.length === 0 ? (
+          <div
+            data-testid="gantt-unscheduled-empty"
+            style={{ padding: '12px 10px', fontSize: 11, lineHeight: 1.5, color: TEXT_MUTED }}
+          >
+            {t('ganttUnscheduled.empty')}
+          </div>
+        ) : (
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            {tasks.map((task) => {
+              const color = colorOfTopic(topics, task.topicId) ?? NEUTRAL_DOT_COLOR
+              return (
+                <div
+                  key={task.id}
+                  data-gantt-unscheduled={task.id}
+                  data-testid={`gantt-unscheduled-${task.id}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onSelect(task.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      onSelect(task.id)
+                    }
+                  }}
+                  style={{
+                    height: rowHeight,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '0 10px',
+                    boxSizing: 'border-box',
+                    fontSize: 12,
+                    color: TEXT,
+                    borderBottom: `1px solid ${BORDER}`,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span
+                    data-testid={`gantt-unscheduled-dot-${task.id}`}
+                    data-color={color}
+                    aria-hidden="true"
+                    style={{ flex: '0 0 8px', width: 8, height: 8, borderRadius: '50%', background: color }}
+                  />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {task.title}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )
+      ) : null}
     </div>
   )
 }

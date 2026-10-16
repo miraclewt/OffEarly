@@ -104,6 +104,13 @@ export const en: Record<MsgKey, string> = {
   'safemode.failed': 'Failed',
   'safemode.resolved': 'Resolved, loading…',
 
+  // T22 addition: Gantt unscheduled sidebar copy (additive only, existing keys untouched)
+  'ganttUnscheduled.title': 'Unscheduled',
+  'ganttUnscheduled.count': '{n}',
+  'ganttUnscheduled.empty': 'All tasks are scheduled',
+  'ganttUnscheduled.collapse': 'Collapse unscheduled panel',
+  'ganttUnscheduled.expand': 'Expand unscheduled panel',
+
   // T23 tail-append: Gantt export (PNG / SVG / CSV; key set must match zh.ts exactly)
   'ganttExport.button': 'Export',
   'ganttExport.format': 'Format',
