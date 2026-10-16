@@ -39,7 +39,9 @@ import { ConflictDialog } from './views/ConflictDialog'
 import type { ConflictLabels } from './views/ConflictDialog'
 import { BoardView } from './views/BoardView'
 import { GanttView } from './views/GanttView'
+import { FilterBar } from './views/FilterBar'
 import { MilestonePanel } from './views/MilestonePanel'
+import { TaskDrawer } from './views/TaskDrawer'
 import { Icon, IconSprite } from './views/IconSprite'
 import { SafeModeBanner } from './views/SafeModeBanner'
 import type { SafeModeLabels } from './views/SafeModeBanner'
@@ -327,7 +329,7 @@ function StartupScreen(props: {
 /**
  * 视图宿主：vault 与 filter 只在这里派生一次，看板与甘特共用（spec §6.2）。
  * 看板走 T15 的 BoardView（根元素自带 data-testid="board"，E2E 依赖它）；
- * 甘特走 T20/T21 的 GanttView。右侧详情抽屉（T17）尚未实现，故只留挂载位。
+ * 甘特走 T20/T21 的 GanttView。详情抽屉（T17）在 App 顶层挂载（fixed），此处只留挂载位。
  */
 function Workspace(props: {
   store: VaultStore
@@ -337,8 +339,10 @@ function Workspace(props: {
   bus: CommandBus
   /** 甘特菱形（data-gantt-milestone）点击 → 拉起里程碑面板（T18 选中契约的落点）。 */
   onOpenMilestone?: (milestoneId: string) => void
+  /** 看板卡片 / 甘特条（data-gantt-bar）点击 → 拉起任务详情抽屉（T17 选中契约的落点）。 */
+  onOpenTask?: (taskId: string) => void
 }) {
-  const { store, view, t, bus, onOpenMilestone } = props
+  const { store, view, t, bus, onOpenMilestone, onOpenTask } = props
   const vault = useStore(store, (state) => state.vault)
   // spec §6.2：看板与甘特共用同一份筛选结果，切视图不丢条件
   const filter = useMemo<Filter>(() => vault.settings.lastFilter ?? createEmptyFilter(), [vault.settings.lastFilter])
@@ -347,25 +351,34 @@ function Workspace(props: {
     <div style={{ display: 'flex', height: '100%', minWidth: 0, minHeight: 0 }}>
       <div
         style={{ flex: 1, minWidth: 0, minHeight: 0 }}
-        // T18 的菱形选中契约只交付了 data-gantt-milestone 标记 + props 契约，
-        // GanttCanvas 的 MilestoneDiamond 无自带 onClick——这里用事件委托捕获点击，
-        // 把里程碑 id 外送给 App 拉起同一个 MilestonePanel（零侵入 GanttView/GanttCanvas）。
+        // T18/T17 的选中契约只交付了 data-gantt-milestone / data-gantt-bar 标记 + props 契约，
+        // GanttCanvas 的菱形与任务条都无自带 onClick——这里用事件委托捕获点击，
+        // 把 id 外送给 App 拉起里程碑面板 / 任务抽屉（零侵入 GanttView/GanttCanvas）。
         onClick={(event) => {
-          if (onOpenMilestone === undefined) return
-          const hit = (event.target as Element | null)?.closest('[data-gantt-milestone]')
-          if (hit !== null && hit !== undefined) {
-            const id = hit.getAttribute('data-gantt-milestone')
-            if (id !== null) onOpenMilestone(id)
+          const el = event.target as Element | null
+          if (el === null) return
+          const diamond = el.closest('[data-gantt-milestone]')
+          if (diamond !== null && onOpenMilestone !== undefined) {
+            const id = diamond.getAttribute('data-gantt-milestone')
+            if (id !== null) {
+              onOpenMilestone(id)
+              return
+            }
+          }
+          const bar = el.closest('[data-gantt-bar]')
+          if (bar !== null && onOpenTask !== undefined) {
+            const id = bar.getAttribute('data-gantt-bar')
+            if (id !== null) onOpenTask(id)
           }
         }}
       >
         {view === 'gantt' ? (
           <GanttView vault={vault} filter={filter} scale={vault.settings.ganttScale} t={t} />
         ) : (
-          <BoardView vault={vault} filter={filter} bus={bus} t={t} />
+          <BoardView vault={vault} filter={filter} bus={bus} t={t} onOpenTask={onOpenTask} />
         )}
       </div>
-      {/* 详情抽屉宿主（T17 落地后在此挂 TaskDrawer） */}
+      {/* 详情抽屉宿主（T17 已接线；TaskDrawer 为 fixed 抽屉，在 App 顶层挂载） */}
       <div data-testid="drawer-host" style={{ flex: '0 0 auto', minWidth: 0 }} />
     </div>
   )
@@ -383,6 +396,11 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
   // 里程碑面板（T18）：受控开合 + 选中态。侧栏入口与甘特菱形点击共用同一面板。
   const [milestoneOpen, setMilestoneOpen] = useState(false)
   const [milestoneSelectedId, setMilestoneSelectedId] = useState<string | null>(null)
+  // T17 详情抽屉：受控开合 + 选中任务 id。BoardView 卡片与甘特条点击共用同一入口。
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null)
+  // T16 筛选面板：受控开合（侧栏「筛选器」入口拉起）。
+  const [filterOpen, setFilterOpen] = useState(false)
 
   /** 会话事件出口：组件只显示，决定权留在这一层。 */
   const hooks = useMemo<SessionHooks>(
@@ -612,7 +630,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
     resolved: t('safemode.resolved'),
   }
 
-  /** 底部面板：里程碑（T18）已接真面板；筛选器(T16)/备份(T28)/设置 仍占位，不引用不存在的组件。 */
+  /** 底部面板：里程碑(T18)、筛选器(T16)已接真面板；备份(T28)/设置 仍占位，不引用不存在的组件。 */
   const panelPlaceholder = (label: MsgKey) => () => {
     setNotice({ key: 'shell.panelPending', params: { name: t(label) } })
   }
@@ -669,6 +687,10 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           onOpenMilestone={(id) => {
             setMilestoneSelectedId(id)
             setMilestoneOpen(true)
+          }}
+          onOpenTask={(id) => {
+            setDrawerTaskId(id)
+            setDrawerOpen(true)
           }}
         />
       )
@@ -779,7 +801,9 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
                 setMilestoneSelectedId(null)
                 setMilestoneOpen(true)
               }}
-              onOpenFilters={panelPlaceholder('sidebar.filters')}
+              onOpenFilters={() => {
+                setFilterOpen(true)
+              }}
               onOpenBackup={panelPlaceholder('sidebar.backup')}
               onOpenSettings={panelPlaceholder('sidebar.settings')}
               style={{ flex: 1, minHeight: 0 }}
@@ -847,6 +871,20 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           selectedId={milestoneSelectedId}
           onSelect={(milestone) => setMilestoneSelectedId(milestone?.id ?? null)}
         />
+      )}
+      {session === null ? null : (
+        <TaskDrawer
+          store={session.store}
+          bus={session.bus}
+          t={t}
+          open={drawerOpen}
+          onOpenChange={setDrawerOpen}
+          taskId={drawerTaskId}
+          onSelect={(task) => setDrawerTaskId(task?.id ?? null)}
+        />
+      )}
+      {session === null ? null : (
+        <FilterBar store={session.store} bus={session.bus} t={t} open={filterOpen} onOpenChange={setFilterOpen} />
       )}
       {conflict === null ? null : (
         <ConflictDialog

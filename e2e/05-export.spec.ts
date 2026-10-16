@@ -1,11 +1,9 @@
 /**
  * T32 · 导出与安全模式
  *
- * 交付物是 file:// 单文件，**没有下载目录可写**——所以「导出」在本项目里的形态是
- * 「写进用户的数据文件夹」，而不是浏览器下载。这里按真实行为断言。
- *
- * 图表导出（PNG / SVG / CSV）属 T23，尚未实现，故保留 fixme 占位而不是删掉用例——
- * 删掉会让「没测」看起来像「测过了」。
+ * 交付物是 file:// 单文件。「导出当前」（vault 副本）的形态是「写进用户的数据文件夹」；
+ * 图表导出（T23）的形态是**浏览器下载**（blob URL + a[download]，file:// 下同样可下载，
+ * Playwright 经 page.on('download') 捕获）——两者形态不同，各自按真实行为断言。
  */
 import { expect, test } from '@playwright/test'
 
@@ -83,9 +81,29 @@ test('连快照都没有时：仍停在安全模式，且明确告知没有可�
   expect(fromBase64(fs.files['vault.json'] as string)).toBe('{ broken')
 })
 
-test.fixme('图表导出：PNG / SVG / CSV 各自产生一个文件（等待 T23 GanttExporter）', async () => {
-  // 阻塞：T23 未实现，甘特图目前没有任何导出入口。
-  // 依赖落地后这里的步骤应为：打开甘特 → 点导出 → 选格式 → 断言数据文件夹里多出对应文件。
+test('图表导出：PNG / SVG / CSV 各自下载一个文件', async ({ page }) => {
+  await openAppWith(page, loadExampleVaultFs())
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-gantt').click()
+  await expect(page.getByTestId('gantt-export-button')).toBeVisible()
+
+  for (const format of ['png', 'svg', 'csv'] as const) {
+    await page.getByTestId('gantt-export-button').click()
+    const formatButton = page.getByTestId(`gantt-export-format-${format}`)
+    await expect(formatButton).toBeVisible()
+    // PNG 依赖 canvas.toBlob：环境不支持时该选项后端禁用并给出提示——降级断言而非失败。
+    if (await formatButton.isDisabled()) {
+      await expect(page.getByTestId('gantt-export-png-hint')).toBeVisible()
+      await page.getByTestId('gantt-export-cancel').click()
+      continue
+    }
+    await formatButton.click()
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByTestId('gantt-export-confirm').click(),
+    ])
+    expect(download.suggestedFilename()).toMatch(new RegExp(`\\.${format}$`))
+  }
 })
 
 test.fixme('拖拽换列与图片粘贴（等待 T15 BoardView / T24 NoteEditor）', async () => {
