@@ -122,6 +122,23 @@ export const zh = {
     failed: '处理失败',
     resolved: '已处理，正在载入…',
   },
+
+  // T15 尾部追加：看板卡片文案（C 方案六项 / 阻塞标记 / 依赖角标；只增不改，既有键一律不动）
+  card: {
+    blocked: '阻塞',
+    blockedHint: '有未完成的前置任务',
+    blockedBy: '被 {n} 阻塞',
+    noDependency: '无前置依赖',
+    hasNote: '有笔记',
+    progressRatio: '该列平均完成度',
+    kind: {
+      feature: '需求',
+      bug: '缺陷',
+      chore: '杂务',
+      research: '调研',
+      doc: '文档',
+    },
+  },
 } as const
 
 export type MsgKey = NestedKeyOf<typeof zh>
