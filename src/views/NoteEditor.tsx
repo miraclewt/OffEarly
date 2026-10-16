@@ -22,7 +22,13 @@ import {
   mergeAttributes,
   Node,
 } from '@tiptap/core'
-import { EditorContent, useEditor } from '@tiptap/react'
+import {
+  EditorContent,
+  NodeViewWrapper,
+  ReactNodeViewRenderer,
+  useEditor,
+} from '@tiptap/react'
+import type { NodeViewProps } from '@tiptap/react'
 import { CodeBlock } from '@tiptap/extension-code-block'
 import { Image } from '@tiptap/extension-image'
 import { TableKit } from '@tiptap/extension-table'
@@ -31,12 +37,22 @@ import { TaskList } from '@tiptap/extension-task-list'
 import { Markdown } from '@tiptap/markdown'
 import StarterKit from '@tiptap/starter-kit'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactElement } from 'react'
+import type {
+  ChangeEvent as ReactChangeEvent,
+  ClipboardEvent as ReactClipboardEvent,
+  CSSProperties,
+  DragEvent as ReactDragEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  ReactElement,
+} from 'react'
 
 import { createI18n } from '../locales/i18n'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
+import type { AssetRejectReason } from '../persistence/assetStore'
 import { Icon } from './IconSprite'
 import type { IconName } from './IconSprite'
+import { Lightbox } from './Lightbox'
 
 const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
@@ -52,6 +68,26 @@ const RADIUS_CARD = 'var(--oe-radius-card)'
 const DEFAULT_DEBOUNCE_MS = 400
 /** 双链候选上限（避免长笔记里弹层过长）。 */
 const LINK_MENU_LIMIT = 8
+/** 文件选择器过滤；与 AssetStore 白名单同源（真正的判定仍在 AssetStore 一处）。 */
+const IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml'
+/** 插入失败的提示停留时长。 */
+const HINT_MS = 3000
+
+/** 从剪贴板 / 拖放载荷里挑出图片文件（粗筛：只看是不是 image/*）。 */
+export function imageFilesOf(transfer: DataTransfer | null | undefined): File[] {
+  if (transfer === null || transfer === undefined) return []
+  const files = Array.from(transfer.files ?? [])
+  return files.filter((file) => typeof file.type === 'string' && file.type.startsWith('image/'))
+}
+
+/** 被拒原因 → 提示文案键（spec 6.4 的两条限制各有一句话）。 */
+const REJECT_KEY: Record<AssetRejectReason | 'failed', MsgKey> = {
+  type: 'asset.unsupported',
+  size: 'asset.tooLarge',
+  empty: 'asset.empty',
+  missing: 'asset.failed',
+  failed: 'asset.failed',
+}
 
 /**
  * SafeCodeBlock：修掉官方 codeBlock 的 markdown 读写缺陷（Tiptap 3.32 实测复现）——
@@ -141,36 +177,101 @@ const WikiLink = Node.create({
 })
 
 /**
- * NoteImage：图片节点只换 DOM 呈现，不动 markdown 读写——
- * T25 落地前不给用户看碎图，改渲染灰底 chip（内容取 alt / 文件名，都是数据不是文案，不涉 i18n）。
+ * 图片节点与宿主之间的三条接缝（全部可选）。
+ * 都不传时退回 T24 的形态：只渲染灰底 chip，`![](assets/<id>.<ext>)` 语法照旧往返。
  */
-const NoteImage = Image.extend({
-  renderHTML({ node }) {
-    const src = typeof node.attrs.src === 'string' ? node.attrs.src : ''
-    const alt = typeof node.attrs.alt === 'string' ? node.attrs.alt : ''
-    return [
-      'span',
-      {
-        'data-note-image': src,
-        style: [
-          'display: inline-flex',
-          'align-items: center',
-          'gap: 6px',
-          'padding: 2px 8px',
-          `border: 1px dashed ${BORDER}`,
-          `border-radius: ${RADIUS_CONTROL}`,
-          `background: ${FILL}`,
-          `color: ${MUTED}`,
-          'font-size: 11px',
-        ].join(';'),
-      },
-      alt !== '' ? alt : src,
-    ]
-  },
-})
+export interface NoteImagePort {
+  /** `assets/<id>.<ext>` → 可显示的 URL（file:// 下只能是 blob URL）；未就绪返回 null。 */
+  resolve?: (src: string) => string | null
+  /** 点击图片 → 外层开灯箱。 */
+  open?: (src: string, alt: string) => void
+  /** 宿主缓存就绪的通知：图片是异步读出来的，读到了要能重画（可选，没有则只在挂载时取一次）。 */
+  subscribe?: (listener: () => void) => () => void
+}
+
+interface NoteImageStorage {
+  port: NoteImagePort | null
+}
+
+/**
+ * NoteImageView：图片用 React 节点视图渲染，而不是 ProseMirror 的静态 renderHTML——
+ * 因为 blob URL 是**异步**来的（getFile() → createObjectURL），静态 HTML 一旦画出来就没机会改 src；
+ * 节点视图是 React 组件，能等通知重画。markdown 读写一字未动（节点视图只影响 DOM）。
+ */
+function NoteImageView({ node, extension }: NodeViewProps) {
+  const src = typeof node.attrs.src === 'string' ? node.attrs.src : ''
+  const alt = typeof node.attrs.alt === 'string' ? node.attrs.alt : ''
+  const port = (extension.storage as NoteImageStorage).port
+  const [url, setUrl] = useState<string | null>(() => port?.resolve?.(src) ?? null)
+
+  useEffect(() => {
+    const read = (): void => setUrl(port?.resolve?.(src) ?? null)
+    read()
+    if (typeof port?.subscribe !== 'function') return
+    return port.subscribe(read)
+  }, [src, port])
+
+  const label = alt !== '' ? alt : src
+
+  // 未就绪（刚打开抽屉、图片还在读）：渲染灰底 chip 而不是碎图——
+  // 内容取 alt / 路径，都是数据不是文案，不涉 i18n。
+  if (url === null) {
+    return (
+      <NodeViewWrapper as="span">
+        <span data-note-image={src} data-testid="note-image-pending" style={IMAGE_CHIP}>
+          {label}
+        </span>
+      </NodeViewWrapper>
+    )
+  }
+
+  return (
+    <NodeViewWrapper as="span">
+      <img
+        data-note-image={src}
+        data-testid="note-image"
+        src={url}
+        alt={alt}
+        onClick={() => port?.open?.(src, alt)}
+        style={IMAGE_TAG}
+      />
+    </NodeViewWrapper>
+  )
+}
+
+const IMAGE_CHIP: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '2px 8px',
+  border: `1px dashed ${BORDER}`,
+  borderRadius: RADIUS_CONTROL,
+  background: FILL,
+  color: MUTED,
+  fontSize: 11,
+}
+
+const IMAGE_TAG: CSSProperties = {
+  maxWidth: '100%',
+  height: 'auto',
+  borderRadius: RADIUS_CONTROL,
+  cursor: 'zoom-in',
+  verticalAlign: 'middle',
+}
+
+function createNoteImage(port: NoteImagePort | null) {
+  return Image.extend<object, NoteImageStorage>({
+    addStorage() {
+      return { port }
+    },
+    addNodeView() {
+      return ReactNodeViewRenderer(NoteImageView)
+    },
+  })
+}
 
 /** 笔记编辑器的扩展集（导出供单测复用，保证测试与产品走同一套 schema）。 */
-export function createNoteExtensions() {
+export function createNoteExtensions(port?: NoteImagePort) {
   return [
     StarterKit.configure({
       // 换成自补的 SafeCodeBlock（见其注释）
@@ -185,7 +286,7 @@ export function createNoteExtensions() {
     TaskList,
     TaskItem.configure({ nested: true }),
     TableKit,
-    NoteImage,
+    createNoteImage(port ?? null),
     WikiLink,
     TaskListShortcut,
   ]
@@ -215,6 +316,21 @@ export interface NoteLinkTarget {
   title: string
 }
 
+/** `insert()` 的结果：ok=false 时 reason 直接对应一条提示文案（spec 6.4 的两条限制）。 */
+export type NoteAssetInsert =
+  | { ok: true; src: string; alt?: string }
+  | { ok: false; reason: AssetRejectReason | 'failed' }
+
+/** 附件端口：编辑器不碰文件系统，落盘与显示全由宿主注入。 */
+export interface NoteAssetsPort {
+  /** 落盘（AssetStore.put）+ 记元数据；返回 note 里要写的 src。 */
+  insert: (file: File) => Promise<NoteAssetInsert>
+  /** `assets/<id>.<ext>` → blob URL；未就绪 null。 */
+  resolve: (src: string) => string | null
+  /** 缓存就绪通知（可选）：宿主异步读出图片后通知重画。 */
+  subscribe?: (listener: () => void) => () => void
+}
+
 export interface NoteEditorProps {
   /** 当前笔记（Markdown 纯文本）。 */
   value: string
@@ -226,6 +342,10 @@ export interface NoteEditorProps {
   onNavigate?: (title: string, matches: readonly NoteLinkTarget[]) => void
   /** 工具栏「图片」的落点；T25 接入。省略时按钮为无操作（形态保留）。 */
   onInsertImage?: () => void
+  /** T25：附件端口。给了它，粘贴 / 拖入 / 工具栏三条路径才真的能插图。 */
+  assets?: NoteAssetsPort
+  /** 插入被拒（超限 / 格式不允许 / 落盘失败）时外送，用于提示。 */
+  onAssetRejected?: (reason: AssetRejectReason | 'failed') => void
   /** 编辑器就绪句柄（宿主/测试用）；卸载时回送 null。 */
   onReady?: (editor: Editor | null) => void
   /** 覆盖 debounce 毫秒数（测试确定化用）。 */
@@ -285,8 +405,11 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   const [linkQuery, setLinkQuery] = useState<string | null>(null)
   const [linkIndex, setLinkIndex] = useState(0)
   const [editorReady, setEditorReady] = useState(false)
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null)
+  const [rejectReason, setRejectReason] = useState<AssetRejectReason | 'failed' | null>(null)
 
   const editorRef = useRef<Editor | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const anchorRef = useRef<number | null>(null)
   const timerRef = useRef<number | null>(null)
   /** 编辑器当前内容的权威快照（卸载补交时用，避免读到已销毁的编辑器）。 */
@@ -297,6 +420,41 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   const suppressRef = useRef(false)
   const commitRef = useRef(props.onCommit)
   commitRef.current = props.onCommit
+  const assetsRef = useRef(props.assets)
+  assetsRef.current = props.assets
+  const rejectedRef = useRef(props.onAssetRejected)
+  rejectedRef.current = props.onAssetRejected
+
+  /**
+   * 图片节点视图用的稳定接缝：扩展集只在首次渲染时建一次（useEditor deps=[]），
+   * 所以这里给一个引用恒定的对象，内部再转发到最新的 props（否则闭包会锁住旧回调）。
+   */
+  const imagePortRef = useRef<NoteImagePort | null>(null)
+  if (imagePortRef.current === null) {
+    imagePortRef.current = {
+      resolve: (src) => assetsRef.current?.resolve(src) ?? null,
+      open: (src, alt) => setLightbox({ src, alt }),
+      subscribe: (listener) => assetsRef.current?.subscribe?.(listener) ?? (() => undefined),
+    }
+  }
+  const imagePort = imagePortRef.current
+
+  /** 插入一张图：落盘（宿主）→ 拿到 src → 在光标处插图片节点（markdown 由编辑器生成）。 */
+  const insertFiles = useCallback(async (files: readonly File[]) => {
+    const assets = assetsRef.current
+    if (assets === undefined) return
+    for (const file of files) {
+      const result = await assets.insert(file)
+      if (!result.ok) {
+        setRejectReason(result.reason)
+        rejectedRef.current?.(result.reason)
+        continue
+      }
+      const instance = editorRef.current
+      if (instance === null) continue
+      instance.chain().focus().setImage({ src: result.src, alt: result.alt ?? '' }).run()
+    }
+  }, [])
 
   const emit = useCallback(() => {
     const markdown = latestRef.current
@@ -347,7 +505,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   updateRef.current = handleUpdate
 
   const editor = useEditor({
-    extensions: createNoteExtensions(),
+    extensions: createNoteExtensions(imagePort),
     content: props.value,
     contentType: 'markdown',
     // TipTap v3 默认「事务后不重渲染」；工具栏的 aria-pressed / 高亮要跟着选区与标记即时刷新，
@@ -383,6 +541,13 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
     },
     [emit],
   )
+
+  // 插入失败的提示自动消失（不阻塞编辑，也不必用户去关）
+  useEffect(() => {
+    if (rejectReason === null) return
+    const timer = window.setTimeout(() => setRejectReason(null), HINT_MS)
+    return () => window.clearTimeout(timer)
+  }, [rejectReason])
 
   // 外部值变化（撤销 / 重做 / 换任务）：非自身回声才写回编辑器
   useEffect(() => {
@@ -467,6 +632,39 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
     props.onNavigate?.(title, matches)
   }
 
+  // ── 图片三条插入路径（spec 6.4）──────────────────────────────────────────
+  // 粘贴与拖入都只从事件的 clipboardData / dataTransfer 取 File，
+  // 不用 navigator.clipboard.read()——它额外要求文档持系统前台焦点 + clipboard-read 权限（T01 R4）。
+  // 格式与体积的判定统一交给 AssetStore（唯一判定点），这里只做「是不是图片」的粗筛。
+
+  const handlePaste = (event: ReactClipboardEvent<HTMLDivElement>): void => {
+    const files = imageFilesOf(event.clipboardData)
+    if (files.length === 0) return // 文本粘贴交回浏览器默认：快捷语法、列表续行都靠它
+    event.preventDefault()
+    void insertFiles(files)
+  }
+
+  const handleDragOver = (event: ReactDragEvent<HTMLDivElement>): void => {
+    // 不 preventDefault，浏览器不会把这次拖放交给我们（默认行为是打开文件）
+    if (imageFilesOf(event.dataTransfer).length === 0) return
+    event.preventDefault()
+  }
+
+  const handleDrop = (event: ReactDragEvent<HTMLDivElement>): void => {
+    const files = imageFilesOf(event.dataTransfer)
+    if (files.length === 0) return
+    event.preventDefault()
+    void insertFiles(files)
+  }
+
+  const handleFileInput = (event: ReactChangeEvent<HTMLInputElement>): void => {
+    const files = Array.from(event.target.files ?? [])
+    // 清空 value：否则连续插同一张图时第二次不会触发 change
+    event.target.value = ''
+    if (files.length === 0) return
+    void insertFiles(files)
+  }
+
   const tools = TOOLS
   const activeIndex = candidates.length === 0 ? -1 : Math.min(linkIndex, candidates.length - 1)
 
@@ -475,6 +673,9 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
       data-testid="note-editor"
       onKeyDown={handleKeyDown}
       onClick={handleClick}
+      onPaste={handlePaste}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
       style={{
         position: 'relative',
         display: 'flex',
@@ -493,7 +694,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
           {tools.map((tool) => {
             const instance = editorRef.current
             const active = instance === null ? false : tool.isActive(instance)
-            const pending = tool.id === 'image' && props.onInsertImage === undefined
+            const pending = tool.id === 'image' && props.onInsertImage === undefined && props.assets === undefined
             return (
               <button
                 key={tool.id}
@@ -508,7 +709,10 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
                   const current = editorRef.current
                   if (current === null) return
                   if (tool.id === 'image') {
-                    props.onInsertImage?.()
+                    // 有附件端口就开文件选择器（三条路径里的「工具栏选文件」）；
+                    // 没有则退回 T24 的 onInsertImage 接缝，按钮形态不变。
+                    if (props.assets !== undefined) fileInputRef.current?.click()
+                    else props.onInsertImage?.()
                     return
                   }
                   tool.run(current, t)
@@ -521,6 +725,17 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
           })}
         </div>
       ) : null}
+
+      {/* 工具栏「图片」的落点：隐藏的原生文件选择器（零依赖，file:// 下同样可用） */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={IMAGE_ACCEPT}
+        multiple
+        data-testid="note-image-input"
+        onChange={handleFileInput}
+        style={{ display: 'none' }}
+      />
 
       <EditorContent editor={editor} />
 
@@ -550,8 +765,30 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
           )}
         </div>
       ) : null}
+
+      {rejectReason !== null ? (
+        <div data-testid="note-asset-hint" role="status" style={ASSET_HINT}>
+          {t(REJECT_KEY[rejectReason])}
+        </div>
+      ) : null}
+
+      {lightbox !== null ? (
+        <Lightbox
+          open
+          src={assetsRef.current?.resolve(lightbox.src) ?? lightbox.src}
+          alt={lightbox.alt}
+          filename={filenameOf(lightbox.src)}
+          onClose={() => setLightbox(null)}
+          t={t}
+        />
+      ) : null}
     </div>
   )
+}
+
+function filenameOf(src: string): string {
+  const tail = src.slice(src.lastIndexOf('/') + 1)
+  return tail === '' ? src : tail
 }
 
 const TOOLBAR: CSSProperties = {
@@ -626,6 +863,20 @@ const LINK_MENU_ITEM: CSSProperties = {
 
 const LINK_MENU_ITEM_ACTIVE: CSSProperties = {
   background: FILL,
+}
+
+const ASSET_HINT: CSSProperties = {
+  position: 'absolute',
+  left: 8,
+  right: 8,
+  bottom: 8,
+  zIndex: 7,
+  padding: '4px 8px',
+  fontSize: 11,
+  color: 'var(--oe-overdue)',
+  background: SURFACE,
+  border: `1px solid ${BORDER}`,
+  borderRadius: RADIUS_CONTROL,
 }
 
 const LINK_MENU_KIND: CSSProperties = {
