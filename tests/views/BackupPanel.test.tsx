@@ -5,10 +5,14 @@
 // 口径：先「扫描」出只读清单、再「确认清理」才动 gc——两层之间必须隔一次确认。
 // 组件是纯视图，gc 经 props 注入，这里用假端口验证「点了哪个、什么时候点、传给端口什么」。
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import type { Vault } from '../../src/domain/types'
+import type { SnapshotInfo } from '../../src/persistence/snapshotStore'
+import type { ExportSummary } from '../../src/persistence/backupIO'
 import type { BackupGcPort } from '../../src/controllers/backupGc'
+import type { BackupExportPort, BackupImportPort, BackupSnapshotPort } from '../../src/controllers/backupPort'
 import { BackupPanel } from '../../src/views/BackupPanel'
 
 function makePort(overrides: Partial<BackupGcPort> = {}): BackupGcPort {
@@ -125,5 +129,194 @@ describe('T26-3 · 确认清理（第二次点击才真删）', () => {
     fireEvent.click(await screen.findByTestId('backup-gc-confirm'))
     expect(await screen.findByTestId('backup-gc-error')).toBeTruthy()
     expect(screen.queryByTestId('backup-gc-status')).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T28 · 快照列表 / 恢复 / 导出库副本 / 导入（端口注入，纯视图验证「点了哪个、传了什么」）
+// ─────────────────────────────────────────────────────────────────────────────
+
+function makeSnapshotPort(overrides: Partial<BackupSnapshotPort> = {}): BackupSnapshotPort {
+  return {
+    list: vi.fn(async () => []),
+    snapshot: vi.fn(async () => snapshotInfo('vault-20261015-093012.json')),
+    restore: vi.fn(async () => snapshotInfo('vault-20261015-093012.json')),
+    ...overrides,
+  }
+}
+
+function makeExportPort(overrides: Partial<BackupExportPort> = {}): BackupExportPort {
+  return { exportCopy: vi.fn(async () => ({ files: 2, bytes: 100 }) as ExportSummary), ...overrides }
+}
+
+function makeImportPort(overrides: Partial<BackupImportPort> = {}): BackupImportPort {
+  return {
+    parse: vi.fn(() => ({ tasks: [], milestones: [], assets: [] }) as unknown as Vault),
+    fromDirectory: vi.fn(async () => null),
+    ...overrides,
+  }
+}
+
+function snapshotInfo(id: string): SnapshotInfo {
+  return { id, createdAt: '2026-10-15T09:30:12+08:00', sizeBytes: 2048, taskCount: 5 }
+}
+
+const importVault = { tasks: [{}, {}], milestones: [{}], assets: [{}, {}, {}] } as unknown as Vault
+
+function chooseVaultFile(): void {
+  const file = new File(['{"tasks":[]}'], 'vault.json', { type: 'application/json' })
+  fireEvent.change(screen.getByTestId('backup-import-file-input'), { target: { files: [file] } })
+}
+
+describe('T28-1 · 快照列表 / 立即快照', () => {
+  it('挂载即加载列表，展示时间 / 大小 / 任务数', async () => {
+    const snapshots = makeSnapshotPort({ list: vi.fn(async () => [snapshotInfo('vault-20261015-093012.json')]) })
+    setup({ snapshots })
+    const item = await screen.findByTestId('backup-snapshot-item-vault-20261015-093012.json')
+    expect(snapshots.list).toHaveBeenCalledTimes(1)
+    expect(item.textContent).toContain('2026-10-15 09:30')
+    expect(item.textContent).toContain('2.0 KB')
+    expect(item.textContent).toContain('5 个任务')
+  })
+
+  it('没有快照时显示空态', async () => {
+    setup({ snapshots: makeSnapshotPort({ list: vi.fn(async () => []) }) })
+    await waitFor(() => expect(screen.getByTestId('backup-panel').textContent).toContain('还没有快照'))
+  })
+
+  it('点「立即快照」调 snapshot()，随后刷新列表', async () => {
+    const snapshots = makeSnapshotPort({
+      list: vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([snapshotInfo('vault-1.json')]),
+      snapshot: vi.fn(async () => snapshotInfo('vault-1.json')),
+    })
+    setup({ snapshots })
+    fireEvent.click(screen.getByTestId('backup-snapshot-now'))
+    await waitFor(() => expect(snapshots.snapshot).toHaveBeenCalledTimes(1))
+    expect(await screen.findByTestId('backup-snapshot-item-vault-1.json')).toBeTruthy()
+  })
+
+  it('未注入快照端口时「立即快照」置灰', () => {
+    setup({ snapshots: undefined })
+    expect((screen.getByTestId('backup-snapshot-now') as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+describe('T28-2 · 恢复（先确认再动）', () => {
+  it('点「恢复」进入确认态，不立即调 restore', async () => {
+    const snapshots = makeSnapshotPort({ list: vi.fn(async () => [snapshotInfo('vault-1.json')]) })
+    setup({ snapshots })
+    fireEvent.click(await screen.findByTestId('backup-snapshot-restore-vault-1.json'))
+    expect(await screen.findByTestId('backup-snapshot-restore-confirm')).toBeTruthy()
+    expect(snapshots.restore).not.toHaveBeenCalled()
+  })
+
+  it('确认恢复调 restore(id)，刷新列表并触发 onRestored', async () => {
+    const snapshots = makeSnapshotPort({ list: vi.fn(async () => [snapshotInfo('vault-1.json')]) })
+    const onRestored = vi.fn()
+    setup({ snapshots, onRestored })
+    fireEvent.click(await screen.findByTestId('backup-snapshot-restore-vault-1.json'))
+    fireEvent.click(await screen.findByTestId('backup-snapshot-restore-confirm'))
+    await waitFor(() => expect(snapshots.restore).toHaveBeenCalledWith('vault-1.json'))
+    await waitFor(() => expect(onRestored).toHaveBeenCalledTimes(1))
+  })
+
+  it('取消恢复回到未确认态，不调 restore', async () => {
+    const snapshots = makeSnapshotPort({ list: vi.fn(async () => [snapshotInfo('vault-1.json')]) })
+    setup({ snapshots })
+    fireEvent.click(await screen.findByTestId('backup-snapshot-restore-vault-1.json'))
+    fireEvent.click(await screen.findByTestId('backup-snapshot-restore-cancel'))
+    await waitFor(() => expect(screen.queryByTestId('backup-snapshot-restore-confirm')).toBeNull())
+    expect(snapshots.restore).not.toHaveBeenCalled()
+  })
+})
+
+describe('T28-3 · 导出库副本', () => {
+  it('点导出调 exportCopy，展示文件数与字节', async () => {
+    const exporter = makeExportPort({ exportCopy: vi.fn(async () => ({ files: 3, bytes: 5120 })) })
+    setup({ exporter })
+    fireEvent.click(screen.getByTestId('backup-export'))
+    await waitFor(() => expect(exporter.exportCopy).toHaveBeenCalledTimes(1))
+    await screen.findByTestId('backup-export-result')
+    expect(screen.getByTestId('backup-export-result').textContent).toContain('3 个文件')
+    expect(screen.getByTestId('backup-export-result').textContent).toContain('5.0 KB')
+  })
+
+  it('导出取消（返回 null）不显示结果', async () => {
+    const exporter = makeExportPort({ exportCopy: vi.fn(async () => null) })
+    setup({ exporter })
+    fireEvent.click(screen.getByTestId('backup-export'))
+    await waitFor(() => expect(exporter.exportCopy).toHaveBeenCalledTimes(1))
+    expect(screen.queryByTestId('backup-export-result')).toBeNull()
+  })
+
+  it('未注入导出端口时按钮置灰', () => {
+    setup({ exporter: undefined })
+    expect((screen.getByTestId('backup-export') as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+describe('T28-4 · 导入（文件 / 文件夹 → 预览 → 二次确认）', () => {
+  it('选择 vault.json 文件 → parse → 展示导入预览', async () => {
+    const importer = makeImportPort({ parse: vi.fn(() => importVault) })
+    setup({ importer, onImported: vi.fn() })
+    fireEvent.click(screen.getByTestId('backup-import-file'))
+    chooseVaultFile()
+    const preview = await screen.findByTestId('backup-import-preview')
+    expect(importer.parse).toHaveBeenCalledWith('{"tasks":[]}')
+    expect(preview.textContent).toContain('2 个任务')
+    expect(preview.textContent).toContain('1 个里程碑')
+    expect(preview.textContent).toContain('3 个附件')
+  })
+
+  it('确认导入调 onImported(vault)', async () => {
+    const importer = makeImportPort({ parse: vi.fn(() => importVault) })
+    const onImported = vi.fn()
+    setup({ importer, onImported, currentTaskCount: 10 })
+    fireEvent.click(screen.getByTestId('backup-import-file'))
+    chooseVaultFile()
+    fireEvent.click(await screen.findByTestId('backup-import-confirm'))
+    expect(onImported).toHaveBeenCalledWith(importVault)
+    await screen.findByTestId('backup-import-status')
+  })
+
+  it('取消导入不调 onImported', async () => {
+    const importer = makeImportPort({ parse: vi.fn(() => importVault) })
+    const onImported = vi.fn()
+    setup({ importer, onImported })
+    fireEvent.click(screen.getByTestId('backup-import-file'))
+    chooseVaultFile()
+    fireEvent.click(await screen.findByTestId('backup-import-cancel'))
+    expect(onImported).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('backup-import-preview')).toBeNull()
+  })
+
+  it('parse 失败展示错误，不进预览', async () => {
+    const importer = makeImportPort({
+      parse: vi.fn(() => {
+        throw new Error('bad vault')
+      }),
+    })
+    setup({ importer, onImported: vi.fn() })
+    fireEvent.click(screen.getByTestId('backup-import-file'))
+    chooseVaultFile()
+    await screen.findByTestId('backup-import-error')
+    expect(screen.queryByTestId('backup-import-preview')).toBeNull()
+  })
+
+  it('从文件夹导入 → fromDirectory → parse → 预览', async () => {
+    const importer = makeImportPort({
+      fromDirectory: vi.fn(async () => '{"tasks":[]}'),
+      parse: vi.fn(() => importVault),
+    })
+    setup({ importer, onImported: vi.fn() })
+    fireEvent.click(screen.getByTestId('backup-import-dir'))
+    await waitFor(() => expect(importer.fromDirectory).toHaveBeenCalledTimes(1))
+    await screen.findByTestId('backup-import-preview')
+  })
+
+  it('未注入导入端口时按钮置灰', () => {
+    setup({ importer: undefined })
+    expect((screen.getByTestId('backup-import-file') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId('backup-import-dir') as HTMLButtonElement).disabled).toBe(true)
   })
 })

@@ -16,6 +16,7 @@ import { connectDir } from './persistence/fsAdapter'
 import { handleStore, verifyPermission } from './persistence/handleStore'
 import type { VaultDirHandle } from './persistence/handleStore'
 import { createSnapshotStore } from './persistence/snapshotStore'
+import type { SnapshotStore } from './persistence/snapshotStore'
 import {
   createConflictGuard,
   createRevisionWatcher,
@@ -45,12 +46,17 @@ import { createAssetStore } from './persistence/assetStore'
 import type { AssetStore } from './persistence/assetStore'
 import { createNoteAssetsPort } from './controllers/noteAssets'
 import type { NoteAssetsPortHandle } from './controllers/noteAssets'
+import { createBackupExportPort, createBackupImportPort } from './controllers/backupPort'
+import type { BackupExportPort, BackupImportPort } from './controllers/backupPort'
+import { createBackupGcPort } from './controllers/backupGc'
+import type { BackupGcPort } from './controllers/backupGc'
 import { TaskDrawer } from './views/TaskDrawer'
 import { Icon, IconSprite } from './views/IconSprite'
 import { SafeModeBanner } from './views/SafeModeBanner'
 import type { SafeModeLabels } from './views/SafeModeBanner'
 import { SaveIndicator } from './views/SaveIndicator'
 import { TopicSidebar } from './views/TopicSidebar'
+import { BackupPanel } from './views/BackupPanel'
 
 const INDIGO = 'var(--oe-accent)'
 const BORDER = 'var(--oe-border)'
@@ -134,6 +140,12 @@ export interface Session {
   assets: AssetStore
   /** T25：给 NoteEditor 的附件端口（落盘 + 显示 + 就绪通知）。 */
   noteAssets: NoteAssetsPortHandle
+  /** T28：快照存储（备份面板的列表 / 立即快照 / 恢复）。 */
+  snapshots: SnapshotStore
+  /** T28：导出 / 导入 / gc 三个备份端口（面板是纯视图，经它们碰文件系统）。 */
+  backupExport: BackupExportPort
+  backupImport: BackupImportPort
+  backupGc: BackupGcPort
 }
 
 /** 会话向外汇报的三类事件（组件只负责显示，决定权留在接线层）。 */
@@ -167,6 +179,8 @@ function openSession(
 ): Session {
   const store = createVaultStore(vault)
   const conflictGuard = createConflictGuard(dir, repository)
+  // T28：快照存储实例——autosave 的写前快照与备份面板共用同一份（各自独立闸门）。
+  const snapshots = createSnapshotStore(dir)
 
   // T10 的命令队列 + T29 的只读闸门：只读时 apply/undo/redo 抛 ReadOnlyError 并回调提示。
   // guardCommandBus 只覆盖写入口，undoDepth/subscribe/clear 仍透传真实队列。
@@ -192,7 +206,7 @@ function openSession(
     store,
     // spec 8.2「写前必有快照」：T09 的自动策略闸门（会话首存 1 份 / 距上次 ≥30min）
     // 挂在 sink.save 之前；快照失败按保存失败处理，绝不无备份覆盖。
-    snapshotter: createSnapshotStore(dir).autoSnapshotter(),
+    snapshotter: snapshots.autoSnapshotter(),
     // autosave 必须挂在同一个 store 上，否则它盯的是另一份内存，永远等不到变更。
     // sink 依次过两道闸门：只读（T29）→ 冲突（T27）。
     sink: {
@@ -212,6 +226,10 @@ function openSession(
   // T25：图片 sidecar 落盘面 + 编辑器附件端口（图片不经 vault.json，单独走 assets/）
   const assets = createAssetStore(dir)
   const noteAssets = createNoteAssetsPort(store, assets)
+  // T28：备份面板的三个端口——导出/导入/附件回收（面板纯视图经它们碰文件系统）。
+  const backupExport = createBackupExportPort(dir)
+  const backupImport = createBackupImportPort()
+  const backupGc = createBackupGcPort(store, assets)
 
   // T27 的 30s 轮询：磁盘变且本地不脏 → 静默重载；本地脏 → 顶栏提示，等保存时再问。
   const watcher = createRevisionWatcher({
@@ -231,7 +249,7 @@ function openSession(
     },
   })
 
-  return { store, repository, autosave, bus, loader, conflictGuard, watcher, readOnly: loader.readOnly, assets, noteAssets }
+  return { store, repository, autosave, bus, loader, conflictGuard, watcher, readOnly: loader.readOnly, assets, noteAssets, snapshots, backupExport, backupImport, backupGc }
 }
 
 type Phase =
@@ -420,6 +438,8 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null)
   // T16 筛选面板：受控开合（侧栏「筛选器」入口拉起）。
   const [filterOpen, setFilterOpen] = useState(false)
+  // T28 备份面板：受控开合（侧栏「备份」入口拉起）。
+  const [backupOpen, setBackupOpen] = useState(false)
 
   /** 会话事件出口：组件只显示，决定权留在这一层。 */
   const hooks = useMemo<SessionHooks>(
@@ -832,7 +852,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
               onOpenFilters={() => {
                 setFilterOpen(true)
               }}
-              onOpenBackup={panelPlaceholder('sidebar.backup')}
+              onOpenBackup={() => setBackupOpen(true)}
               onOpenSettings={panelPlaceholder('sidebar.settings')}
               style={{ flex: 1, minHeight: 0 }}
             />
@@ -930,6 +950,38 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
       )}
       {session === null ? null : (
         <FilterBar store={session.store} bus={session.bus} t={t} open={filterOpen} onOpenChange={setFilterOpen} />
+      )}
+      {session === null ? null : (
+        <BackupPanel
+          open={backupOpen}
+          onOpenChange={setBackupOpen}
+          gc={session.backupGc}
+          assetCount={session.store.getVault().assets.length}
+          assetTotalBytes={session.store.getVault().assets.reduce((sum, a) => sum + a.sizeBytes, 0)}
+          snapshots={session.snapshots}
+          exporter={session.backupExport}
+          importer={session.backupImport}
+          currentTaskCount={session.store.getVault().tasks.length}
+          // 导入确认：停 autosave → 覆盖内存 → 直写磁盘 → 重启 autosave（导入是明确覆盖，不走冲突弹窗）
+          onImported={(vault) => {
+            session.autosave.stop()
+            session.store.setVault(vault)
+            void session.repository
+              .save(vault)
+              .catch(() => setNotice({ text: '导入写入失败' }))
+              .finally(() => session.autosave.start())
+          }}
+          // 恢复完成：磁盘已被 SnapshotStore.restore 覆盖，重新 load 回内存
+          onRestored={() => {
+            session.autosave.stop()
+            void session.repository
+              .load()
+              .then((disk) => {
+                if (disk !== null) session.store.setVault(disk)
+              })
+              .finally(() => session.autosave.start())
+          }}
+        />
       )}
       {conflict === null ? null : (
         <ConflictDialog

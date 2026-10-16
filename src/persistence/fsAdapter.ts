@@ -146,3 +146,32 @@ export async function list(
   }
   return names;
 }
+
+/** 目录条目（带 kind），供递归复制（T28 导出库副本）区分文件与子目录。 */
+export interface FsEntry {
+  name: string;
+  kind: 'file' | 'directory';
+}
+
+export async function listEntries(
+  dir: FileSystemDirectoryHandle,
+  dirPath: string,
+): Promise<FsEntry[]> {
+  const target = dirPath === '' ? dir : await resolveDirHandle(dir, dirPath);
+  const entries: FsEntry[] = [];
+  for await (const entry of target.values()) {
+    entries.push({ name: entry.name, kind: entry.kind });
+  }
+  return entries;
+}
+
+/** 递归创建路径上的目录（存在则跳过）。供导出复制在目标侧铺出子目录树。 */
+export async function ensureDir(
+  dir: FileSystemDirectoryHandle,
+  path: string,
+): Promise<void> {
+  let cur = dir;
+  for (const name of splitPath(path)) {
+    cur = await cur.getDirectoryHandle(name, { create: true });
+  }
+}
