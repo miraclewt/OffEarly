@@ -104,6 +104,10 @@ export interface AssetStore {
   listFiles(): Promise<string[]>
   /** 删除单个文件（T26 gc 用）。 */
   removeFile(ref: string): Promise<boolean>
+  /** 未引用附件清单 + 可释放字节（只读、不删任何东西）。 */
+  gcPreview(vault: Vault): AssetGcPreview
+  /** 只删 ids 对应的磁盘文件（assets/<id>.<ext>），返回真正删掉的文件 id；表记录由调用方 removeAssets 摘除。 */
+  gc(ids: readonly string[]): Promise<string[]>
 }
 
 export function isAssetRef(src: string): boolean {
@@ -145,6 +149,73 @@ export function recordAsset(vault: Vault, asset: Asset): Vault {
   return { ...vault, assets: [...rest, asset] }
 }
 
+// ── T26 · gc：未引用附件回收 ─────────────────────────────────────────────
+//
+// 安全模型（spec 6.4 / T26）：删除引用不删文件。所以「哪些文件还能删」只能靠**反向扫描**——
+// 把 vault 里所有 note 里出现的 `assets/<id>` 引用收集成一个集合，assets 表里不在集合中的
+// 才是可回收的孤儿。gc 分两段：gcPreview 只读（给面板先展示清单），gc 才真正动磁盘，
+// 且只删「确认清单」里的 id——两层之间必须隔一次用户确认，否则误删不可逆。
+
+/** gcPreview() 里的一条「未引用附件」；filename 保留 assets 表里的原样（可能带/不带 assets/ 前缀）。 */
+export interface AssetGcCandidate {
+  id: string
+  filename: string
+  sizeBytes: number
+}
+
+export interface AssetGcPreview {
+  /** assets 表里的附件总数。 */
+  totalCount: number
+  /** 被至少一条 note 引用的附件数。 */
+  referencedCount: number
+  /** 未被任何 note 引用的附件（可回收）。 */
+  unreferenced: AssetGcCandidate[]
+  /** 可释放字节数 = 未引用附件的 sizeBytes 之和。 */
+  reclaimableBytes: number
+}
+
+/** 与 controllers/noteAssets.ts 的 noteAssetRefs 同一正则口径（T25 已定）：只认 `![](assets/…)` 图片语法。 */
+const ASSET_REF_PATTERN = /!\[[^\]]*\]\(([^)\s]+)\)/g
+
+/** 纯函数：从一段 note markdown 里解析出 `assets/<id>.<ext>` 图片引用（外链 / 子目录不算）。 */
+export function assetRefsIn(markdown: string): string[] {
+  const refs = new Set<string>()
+  for (const match of markdown.matchAll(ASSET_REF_PATTERN)) {
+    const src = match[1] ?? ''
+    if (isAssetRef(src)) refs.add(src)
+  }
+  return [...refs]
+}
+
+/**
+ * 纯函数：扫描整个 vault 所有 note（任务 + 里程碑）得到被引用附件 id 集合。
+ * 里程碑也带 note（T24），只扫 task.note 会漏掉「只被里程碑引用」的图、回收时误删——
+ * 回收是破坏性操作，安全侧宁可多认一个引用。
+ */
+export function referencedAssetIds(vault: Vault): Set<string> {
+  const ids = new Set<string>()
+  const notes: ReadonlyArray<string | undefined> = [
+    ...vault.tasks.map((task) => task.note),
+    ...vault.milestones.map((milestone) => milestone.note),
+  ]
+  for (const note of notes) {
+    if (typeof note !== 'string' || note === '') continue
+    for (const ref of assetRefsIn(note)) {
+      const id = assetIdOf(ref)
+      if (id !== null) ids.add(id)
+    }
+  }
+  return ids
+}
+
+/** 纯函数：从 assets 表摘除给定 id（gc 落表用，走 store.update）；空集 / 无命中原样返回、不做无谓的新对象。 */
+export function removeAssets(vault: Vault, ids: readonly string[]): Vault {
+  const idSet = new Set(ids)
+  if (idSet.size === 0) return vault
+  const assets = vault.assets.filter((entry) => !idSet.has(entry.id))
+  return assets.length === vault.assets.length ? vault : { ...vault, assets }
+}
+
 function defaultCreateObjectURL(blob: Blob): string {
   const impl = (URL as { createObjectURL?: (b: Blob) => string }).createObjectURL
   if (typeof impl !== 'function') {
@@ -167,6 +238,14 @@ export function createAssetStore(dir: VaultDirHandle, deps: AssetStoreDeps = {})
 
   /** Map<ref, objectURL>：key 用 note 里的相对路径，与引用一一对应。 */
   const cache = new Map<string, string>()
+
+  /** 回收单个 blob URL：revoke / removeFile / gc 共用，避免对象字面量里靠 this 引用的脆弱绑定。 */
+  function revokeLocal(ref: string): void {
+    const cached = cache.get(ref)
+    if (cached === undefined) return
+    cache.delete(ref)
+    revokeObjectURL(cached)
+  }
 
   function validate(file: AssetFileLike, bytes?: Uint8Array): AssetRejectReason | null {
     if (resolveExt(file) === '') return 'type'
@@ -222,12 +301,7 @@ export function createAssetStore(dir: VaultDirHandle, deps: AssetStoreDeps = {})
       return cache.get(ref) ?? null
     },
 
-    revoke(ref) {
-      const cached = cache.get(ref)
-      if (cached === undefined) return
-      cache.delete(ref)
-      revokeObjectURL(cached)
-    },
+    revoke: revokeLocal,
 
     dispose() {
       for (const objectURL of cache.values()) revokeObjectURL(objectURL)
@@ -240,8 +314,43 @@ export function createAssetStore(dir: VaultDirHandle, deps: AssetStoreDeps = {})
 
     async removeFile(ref) {
       const ok = await fs.remove(dir, ref)
-      if (ok) this.revoke(ref)
+      if (ok) revokeLocal(ref)
       return ok
+    },
+
+    gcPreview(vault) {
+      const referenced = referencedAssetIds(vault)
+      const unreferenced: AssetGcCandidate[] = []
+      let reclaimableBytes = 0
+      for (const asset of vault.assets) {
+        if (referenced.has(asset.id)) continue
+        unreferenced.push({ id: asset.id, filename: asset.filename, sizeBytes: asset.sizeBytes })
+        reclaimableBytes += asset.sizeBytes
+      }
+      return {
+        totalCount: vault.assets.length,
+        referencedCount: vault.assets.length - unreferenced.length,
+        unreferenced,
+        reclaimableBytes,
+      }
+    },
+
+    async gc(ids) {
+      const wanted = new Set(ids)
+      if (wanted.size === 0) return []
+      const names = await fs.list(dir, ASSET_DIR)
+      const removed: string[] = []
+      for (const id of wanted) {
+        // id → 磁盘文件名：`<id>.<ext>`。文件名来自 list()（真实条目），杜绝路径穿越。
+        const name = names.find((n) => n === id || n.startsWith(`${id}.`))
+        if (name === undefined) continue
+        const ok = await fs.remove(dir, `${ASSET_DIR}/${name}`)
+        if (ok) {
+          revokeLocal(`${ASSET_DIR}/${name}`)
+          removed.push(id)
+        }
+      }
+      return removed
     },
   }
 }
