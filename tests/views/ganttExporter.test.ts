@@ -445,4 +445,29 @@ describe('GanttView 导出入口', () => {
     expect(screen.getByTestId('gantt-export-png-hint').textContent).toContain('PNG')
     expect((screen.getByTestId('gantt-export-format-svg') as HTMLButtonElement).disabled).toBe(false)
   })
+
+  it('Esc 关闭弹层（收尾补交互）', async () => {
+    render(createElement(GanttView, { vault: makeBaselineVault(), filter, range: OCTOBER, today: TODAY, width: 640, height: 320, t }))
+    fireEvent.click(await screen.findByTestId('gantt-export-button'))
+    await screen.findByTestId('gantt-export-menu')
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByTestId('gantt-export-menu')).toBeNull())
+  })
+
+  it('点击弹层外部关闭；再点按钮仍走既有 toggle（收尾补交互）', async () => {
+    render(createElement(GanttView, { vault: makeBaselineVault(), filter, range: OCTOBER, today: TODAY, width: 640, height: 320, t }))
+    fireEvent.click(await screen.findByTestId('gantt-export-button'))
+    await screen.findByTestId('gantt-export-menu')
+
+    // 外部：甘特画布区域
+    fireEvent.mouseDown(screen.getByTestId('gantt-canvas'))
+    await waitFor(() => expect(screen.queryByTestId('gantt-export-menu')).toBeNull())
+
+    // 再点按钮重新打开（toggle 路径不受 mousedown 关闭影响）
+    fireEvent.click(screen.getByTestId('gantt-export-button'))
+    await screen.findByTestId('gantt-export-menu')
+    fireEvent.click(screen.getByTestId('gantt-export-button'))
+    await waitFor(() => expect(screen.queryByTestId('gantt-export-menu')).toBeNull())
+  })
 })

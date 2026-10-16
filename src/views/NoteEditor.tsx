@@ -594,6 +594,9 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
     if (linkQuery === null) return
     if (candidates.length === 0) {
       if (event.key === 'Escape') {
+        // 菜单开着时 Esc 只关菜单：stopPropagation 截住原生事件，
+        // 免得冒泡到抽屉在 window 上的监听、把抽屉一起关掉（T24 遗留，收尾修复）。
+        event.stopPropagation()
         setLinkQuery(null)
         anchorRef.current = null
       }
@@ -616,7 +619,9 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
       return
     }
     if (event.key === 'Escape') {
+      // 同上：截住事件，菜单与抽屉不同时关。
       event.preventDefault()
+      event.stopPropagation()
       setLinkQuery(null)
       anchorRef.current = null
     }

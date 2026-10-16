@@ -47,7 +47,7 @@ import type { AssetStore } from './persistence/assetStore'
 import { createNoteAssetsPort } from './controllers/noteAssets'
 import type { NoteAssetsPortHandle } from './controllers/noteAssets'
 import { createBackupExportPort, createBackupImportPort } from './controllers/backupPort'
-import type { BackupExportPort, BackupImportPort } from './controllers/backupPort'
+import type { BackupExportPort, BackupImportPort, BackupSnapshotPort } from './controllers/backupPort'
 import { createBackupGcPort } from './controllers/backupGc'
 import type { BackupGcPort } from './controllers/backupGc'
 import { TaskDrawer } from './views/TaskDrawer'
@@ -767,7 +767,44 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
         ? { reason: phase.reason, snapshot: null }
         : null
 
-  /** 横幅三个出口：恢复走 loader，导出走 loader；「选择其他备份」是 T28 的活，先占位。 */
+  /**
+   * T28 收尾：只读 / 安全模式相位下的「选择其他备份」端口（此前是 panelPlaceholder）。
+   * · 只读相位带完整 Session，恢复走 `loader.restoreSnapshot`（内部先留底、再解除只读）；
+   * · safe-mode 相位**没有会话**（库坏到连快照都没认出来），只能拿 dir 现场造一个快照存储
+   *   去列 .backup/，恢复后重新 `openDir` 建会话——磁盘已被覆盖，重新加载就是健康库。
+   */
+  const recoverySnapshots = (): BackupSnapshotPort | undefined => {
+    if (phase.kind === 'readonly') {
+      const active = phase
+      return {
+        list: () => active.snapshots.list(),
+        snapshot: () => active.snapshots.snapshot(),
+        async restore(id) {
+          const { vault } = await active.loader.restoreSnapshot(id)
+          active.autosave.stop()
+          active.store.setVault(vault)
+          setPhase(asReady(active.dir, active))
+          setBackupOpen(false)
+        },
+      }
+    }
+    if (phase.kind === 'safe-mode') {
+      const dir = phase.dir
+      return {
+        list: () => createSnapshotStore(dir).list(),
+        snapshot: () => createSnapshotStore(dir).snapshot(),
+        async restore(id) {
+          await createSnapshotStore(dir).restore(id)
+          setBackupOpen(false)
+          // 磁盘已恢复，重新走一遍启动流程（含记句柄 / 建会话）
+          await openDir(dir)
+        },
+      }
+    }
+    return undefined
+  }
+
+  /** 横幅三个出口：恢复走 loader，导出走 loader；「选择其他备份」开备份面板挑快照。 */
   const banner = (): ReactNode => {
     if (safeMode === null) return null
     const active = phase.kind === 'readonly' ? phase : null
@@ -778,7 +815,8 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           snapshot={null}
           labels={safeModeLabels}
           onRestore={() => {}}
-          onChooseOther={panelPlaceholder('sidebar.backup')}
+          // T28 收尾：开备份面板，从 .backup/ 里挑一份载入（safe-mode 无会话，走现场造的快照存储）
+          onChooseOther={() => setBackupOpen(true)}
           onExportCurrent={() => {}}
         />
       )
@@ -797,7 +835,8 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           active.store.setVault(vault)
           setPhase(asReady(active.dir, active))
         }}
-        onChooseOther={panelPlaceholder('sidebar.backup')}
+        // T28 收尾：同上（只读相位带会话，恢复走 loader.restoreSnapshot 并解除只读）
+        onChooseOther={() => setBackupOpen(true)}
         onExportCurrent={async () => {
           const { filename } = await active.loader.exportCurrent(active.store.getVault())
           setNotice({ key: 'shell.exported', params: { name: filename } })
@@ -805,6 +844,8 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
       />
     )
   }
+
+  const recovery = recoverySnapshots()
 
   return (
     <div
@@ -951,19 +992,21 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
       {session === null ? null : (
         <FilterBar store={session.store} bus={session.bus} t={t} open={filterOpen} onOpenChange={setFilterOpen} />
       )}
-      {session === null ? null : (
+      {session === null && recovery === undefined ? null : (
         <BackupPanel
           open={backupOpen}
           onOpenChange={setBackupOpen}
-          gc={session.backupGc}
-          assetCount={session.store.getVault().assets.length}
-          assetTotalBytes={session.store.getVault().assets.reduce((sum, a) => sum + a.sizeBytes, 0)}
-          snapshots={session.snapshots}
-          exporter={session.backupExport}
-          importer={session.backupImport}
-          currentTaskCount={session.store.getVault().tasks.length}
+          // 无会话（safe-mode）时各端口缺失，面板对应分区自动置灰，只留快照可用
+          gc={session?.backupGc}
+          assetCount={session?.store.getVault().assets.length ?? 0}
+          assetTotalBytes={session?.store.getVault().assets.reduce((sum, a) => sum + a.sizeBytes, 0) ?? 0}
+          snapshots={session?.snapshots ?? recovery}
+          exporter={session?.backupExport}
+          importer={session?.backupImport}
+          currentTaskCount={session?.store.getVault().tasks.length ?? 0}
           // 导入确认：停 autosave → 覆盖内存 → 直写磁盘 → 重启 autosave（导入是明确覆盖，不走冲突弹窗）
           onImported={(vault) => {
+            if (session === null) return
             session.autosave.stop()
             session.store.setVault(vault)
             void session.repository
@@ -973,6 +1016,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           }}
           // 恢复完成：磁盘已被 SnapshotStore.restore 覆盖，重新 load 回内存
           onRestored={() => {
+            if (session === null) return
             session.autosave.stop()
             void session.repository
               .load()

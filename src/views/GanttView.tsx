@@ -136,6 +136,28 @@ export function GanttView(props: GanttViewProps) {
 
   // T23：导出入口状态。默认「仅可见区 + PNG」；pngSupported 为 null 表示探针还在跑。
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
+
+  // T23 收尾：导出弹层的 Esc / 点击外部关闭（此前只有「取消」与再点按钮切换两条出路）。
+  // mousedown 判「不在弹层容器内」——按钮本身在容器内，再点按钮仍走既有 toggle，不受影响。
+  const exportMenuRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!exportMenuOpen) return
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setExportMenuOpen(false)
+    }
+    const onMouseDown = (event: MouseEvent): void => {
+      const target = event.target
+      if (target instanceof Node && exportMenuRef.current?.contains(target) !== true) {
+        setExportMenuOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    document.addEventListener('mousedown', onMouseDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('mousedown', onMouseDown)
+    }
+  }, [exportMenuOpen])
   const [exportFormat, setExportFormat] = useState<GanttExportFormat>('png')
   const [exportRange, setExportRange] = useState<GanttExportRange>('visible')
   const [pngSupported, setPngSupported] = useState<boolean | null>(null)
@@ -403,7 +425,7 @@ export function GanttView(props: GanttViewProps) {
         )}
 
         {/* T23：导出入口 —— 选格式（PNG / SVG / CSV）与范围（仅可见区 / 全时间跨度） */}
-        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+        <div ref={exportMenuRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <button
             type="button"
             data-testid="gantt-export-button"

@@ -173,6 +173,36 @@ describe('启动流程：损坏的库进入只读安全模式', () => {
   })
 })
 
+describe('T28 收尾：安全模式「选择其他备份」经备份面板挑快照恢复', () => {
+  it('safe-mode 无会话时也能列 .backup/、恢复后重走启动流程回到可写', async () => {
+    const snapshotText = vaultJson()
+    const dir = dirWith({ vault: '{"schemaVersion":1,"vaultId":"abc"' })
+    dir.dirs.set(
+      '.backup',
+      makeDir('.backup', {
+        files: [makeFile('vault-20261015-093012.json', { text: snapshotText })],
+      }),
+    )
+    await renderApp(ports({ dir }))
+
+    expect(await screen.findByText('只读安全模式')).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId('safe-mode-choose-other'))
+    await screen.findByTestId('backup-panel')
+    await waitFor(() =>
+      expect(screen.getByTestId('backup-snapshot-item-vault-20261015-093012.json')).toBeTruthy(),
+    )
+
+    fireEvent.click(screen.getByTestId('backup-snapshot-restore-vault-20261015-093012.json'))
+    fireEvent.click(await screen.findByTestId('backup-snapshot-restore-confirm'))
+
+    // 磁盘被快照覆盖 → 重新 openDir → 健康库 → 回到看板
+    await waitFor(() => expect(screen.getByText('待办')).toBeTruthy())
+    const file = dir.files.get('vault.json')
+    expect(file && new TextDecoder().decode(file.bytes())).toBe(snapshotText)
+  })
+})
+
 function decodeVault(dir: MockDirHandle): Vault {
   const file = dir.files.get('vault.json')
   if (file === undefined) throw new Error('vault.json 不存在')

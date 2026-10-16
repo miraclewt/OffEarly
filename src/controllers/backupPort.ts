@@ -17,8 +17,13 @@ import * as fsAdapter from '../persistence/fsAdapter'
 /** 快照端口：面板只需要这三招，restore 的「恢复前打快照」由 SnapshotStore 保证。 */
 export interface BackupSnapshotPort {
   list(): Promise<SnapshotInfo[]>
-  snapshot(): Promise<SnapshotInfo>
-  restore(id: string): Promise<SnapshotInfo>
+  /**
+   * 立即快照 / 恢复。返回值一律**不被消费**（面板只关心成功与否、随后重新 list），
+   * 故用 `unknown`：只读相位的恢复走 `loader.restoreSnapshot`，它返回的是
+   * `{ vault, safetySnapshotId }` 而非 SnapshotInfo，接口不该逼调用方造假对象。
+   */
+  snapshot(): Promise<unknown>
+  restore(id: string): Promise<unknown>
 }
 
 /** 导出端口：弹选目标目录 → 递归复制 → 返回统计；用户取消返回 null。 */

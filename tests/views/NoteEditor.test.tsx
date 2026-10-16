@@ -322,6 +322,27 @@ describe('T24-4 · [[双链]]：候选弹层、插入与点击跳转', () => {
     expect(h.view.queryByTestId('note-link-option-0')).toBeNull()
   })
 
+  it('菜单开着时 Esc 只关菜单、不冒泡到 window（收尾修复：不再连抽屉一起关）', async () => {
+    const h = setupEditor()
+    const editor = await h.editor()
+    // window 上的 keydown 监听扮演抽屉的关闭监听（TaskDrawer 在 window 上绑 Esc）
+    const drawerClose = vi.fn()
+    window.addEventListener('keydown', drawerClose)
+    try {
+      editX(editor, '见 [[')
+      await waitFor(() => expect(h.view.getByTestId('note-link-menu')).toBeTruthy())
+      fireEvent.keyDown(h.view.getByTestId('note-editor'), { key: 'Escape' })
+      await waitFor(() => expect(h.view.queryByTestId('note-link-menu')).toBeNull())
+      expect(drawerClose).not.toHaveBeenCalled()
+
+      // 菜单已关后，Esc 恢复冒泡（抽屉仍可正常关闭）
+      fireEvent.keyDown(h.view.getByTestId('note-editor'), { key: 'Escape' })
+      expect(drawerClose).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener('keydown', drawerClose)
+    }
+  })
+
   it('点击已渲染的 [[标题]] → onNavigate(标题, 同名候选)', async () => {
     const h = setupEditor({ value: '见 [[登录页]]' })
     await h.editor()
