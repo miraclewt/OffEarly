@@ -1,0 +1,13 @@
+# 构建期把 brand/logo-mark-mono.svg 逐字节内联成 favicon 的 data URI，
+# 并对照源文件做字节校验。core.autocrlf=true 的机器上 checkout 会转成 CRLF
+# （372 → 379 字节），让 main 工作树上通过的校验在 worktree 里误报 FAIL。
+# 品牌资产锁定 LF，从根上消掉这条噪音。
+*.svg text eol=lf
+
+# 位图一律按二进制处理，任何换行转换都是静默损坏。
+*.png binary
+*.ico binary
+
+# 其余文本文件归一化入库为 LF（checkout 行为仍由各机器的 core.autocrlf 决定），
+# 避免不同机器提交时把 CRLF 混进索引。
+* text=auto
