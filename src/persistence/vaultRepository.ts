@@ -73,8 +73,9 @@ function asValidationError(e: unknown): VaultValidationError {
 /**
  * 「文本 → Vault」的唯一解析语义：JSON 语法 → schemaVersion 方向 → 迁移 → Zod 校验。
  * `load()`（磁盘）与 T29 的快照恢复共用它，避免两条链路的判据漂移。
+ * T28 的导入也复用同一解析，保证「导入校验」与「启动加载」判据一致。
  */
-function parseVaultText(text: string): Vault {
+export function parseVaultText(text: string): Vault {
   let raw: unknown
   try {
     raw = JSON.parse(text)
