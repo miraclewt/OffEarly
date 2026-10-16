@@ -106,7 +106,8 @@ test('图表导出：PNG / SVG / CSV 各自下载一个文件', async ({ page })
   }
 })
 
-test.fixme('拖拽换列与图片粘贴（等待 T15 BoardView / T24 NoteEditor）', async () => {
-  // 阻塞：看板卡片视图（T15）与笔记编辑器（T24）尚未实现，
-  // 「拖拽换列」「贴图片」在 UI 上还没有可操作的对象。
+test.fixme('拖拽换列（dnd-kit 的指针序列在 file:// 下尚不稳定）', async () => {
+  // 图片粘贴部分已由 `06-note-image.spec.ts` 覆盖（T25 合入后转正），故本条只剩拖拽换列：
+  // dnd-kit 的 PointerSensor 依赖真实指针事件序列，headless 下 dragTo 的命中不稳定，
+  // 换列本身在 `tests/views/BoardView.test.tsx` 有组件级用例（24 条），此处暂不重复覆盖。
 })

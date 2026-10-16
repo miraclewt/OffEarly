@@ -32,7 +32,7 @@ import { DependencyEditor } from './DependencyEditor'
 import { Icon } from './IconSprite'
 import { isValidDateKey } from './MilestonePanel'
 import { NoteEditor } from './NoteEditor'
-import type { NoteLinkTarget } from './NoteEditor'
+import type { NoteAssetsPort, NoteLinkTarget } from './NoteEditor'
 import { SaveIndicator } from './SaveIndicator'
 import type { SaveIndicatorSource } from './SaveIndicator'
 
@@ -123,6 +123,8 @@ export interface TaskDrawerProps {
   newId?: () => string
   /** 笔记里 `[[标题]]` 的点击跳转（T24）；matches 为同名候选，接线归集成窗口。 */
   onNavigateNoteLink?: (title: string, matches: readonly NoteLinkTarget[]) => void
+  /** T25 附件端口：图片的插入 / 显示都经它（编辑器本身不碰文件系统）。 */
+  assets?: NoteAssetsPort
   style?: CSSProperties
 }
 
@@ -615,6 +617,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
             linkTargets={noteLinkTargets}
             onCommit={(markdown) => patchTask({ note: markdown })}
             onNavigate={props.onNavigateNoteLink}
+            assets={props.assets}
             t={t}
           />
         </section>

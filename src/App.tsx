@@ -41,6 +41,10 @@ import { BoardView } from './views/BoardView'
 import { GanttView } from './views/GanttView'
 import { FilterBar } from './views/FilterBar'
 import { MilestonePanel } from './views/MilestonePanel'
+import { createAssetStore } from './persistence/assetStore'
+import type { AssetStore } from './persistence/assetStore'
+import { createNoteAssetsPort } from './controllers/noteAssets'
+import type { NoteAssetsPortHandle } from './controllers/noteAssets'
 import { TaskDrawer } from './views/TaskDrawer'
 import { Icon, IconSprite } from './views/IconSprite'
 import { SafeModeBanner } from './views/SafeModeBanner'
@@ -126,6 +130,10 @@ export interface Session {
   watcher: RevisionWatcher
   /** 与 loader 共享同一个只读开关。 */
   readOnly: ReadOnlyGuard
+  /** T25：图片 sidecar 的落盘面（assets/ 与 blob URL 缓存）。 */
+  assets: AssetStore
+  /** T25：给 NoteEditor 的附件端口（落盘 + 显示 + 就绪通知）。 */
+  noteAssets: NoteAssetsPortHandle
 }
 
 /** 会话向外汇报的三类事件（组件只负责显示，决定权留在接线层）。 */
@@ -201,6 +209,10 @@ function openSession(
     },
   })
 
+  // T25：图片 sidecar 落盘面 + 编辑器附件端口（图片不经 vault.json，单独走 assets/）
+  const assets = createAssetStore(dir)
+  const noteAssets = createNoteAssetsPort(store, assets)
+
   // T27 的 30s 轮询：磁盘变且本地不脏 → 静默重载；本地脏 → 顶栏提示，等保存时再问。
   const watcher = createRevisionWatcher({
     peekRevision: () => repository.peekRevision(),
@@ -219,7 +231,7 @@ function openSession(
     },
   })
 
-  return { store, repository, autosave, bus, loader, conflictGuard, watcher, readOnly: loader.readOnly }
+  return { store, repository, autosave, bus, loader, conflictGuard, watcher, readOnly: loader.readOnly, assets, noteAssets }
 }
 
 type Phase =
@@ -518,6 +530,15 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
       watcher.stop()
     }
   }, [autosave, session])
+
+  // T25：换库 / 卸载时回收全部 blob URL（不 revoke 会一直占着内存）
+  const noteAssets = session?.noteAssets ?? null
+  useEffect(() => {
+    if (noteAssets === null) return
+    return () => {
+      noteAssets.dispose()
+    }
+  }, [noteAssets])
 
   // Ctrl+S / Cmd+S 立即落盘（spec 8.2）
   useEffect(() => {
@@ -888,6 +909,8 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           onOpenChange={setDrawerOpen}
           taskId={drawerTaskId}
           onSelect={(task) => setDrawerTaskId(task?.id ?? null)}
+          // T25：图片三条插入路径 + blob URL 显示都经这个端口（编辑器本身不碰文件系统）
+          assets={session.noteAssets}
           // T24：笔记里的 [[标题]] 点击跳转——同名多任务取第一条任务候选；
           // 只命中里程碑则开里程碑面板并选中；标题已不存在（matches 为空）时静默不动。
           onNavigateNoteLink={(_title, matches) => {
