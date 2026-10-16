@@ -139,6 +139,35 @@ export const zh = {
       doc: '文档',
     },
   },
+
+  // T18 尾部追加：里程碑面板（只增不改，既有键一律不动）
+  milestonePanel: {
+    title: '里程碑',
+    close: '关闭',
+    new: '新建里程碑',
+    count: '{n} 个里程碑',
+    crossTopicGroup: '跨话题',
+    topicGroup: '话题里程碑',
+    crossTopicBadge: '跨话题',
+    empty: '还没有里程碑。新建一个，把关键日期钉在甘特图上。',
+    edit: '编辑里程碑',
+    untitled: '未命名里程碑',
+    fieldTitle: '标题',
+    fieldDate: '日期',
+    fieldTopic: '所属话题',
+    fieldCrossTopic: '跨话题（不属于任何话题）',
+    fieldDone: '已完成',
+    fieldColor: '颜色',
+    save: '保存',
+    cancel: '取消',
+    delete: '删除',
+    deleteConfirm: '确认删除',
+    deleteHint: '删除里程碑不影响任务与依赖。',
+    invalidDate: '日期不合法',
+    doneLabel: '已完成',
+    undoneLabel: '未完成',
+    crossTopicHint: '跨话题里程碑显示在甘特图顶部独立轨道，不受话题筛选影响。',
+  },
 } as const
 
 export type MsgKey = NestedKeyOf<typeof zh>
