@@ -267,4 +267,17 @@ export const en: Record<MsgKey, string> = {
   'noteEditor.linkEmpty': 'No matching title',
   'noteEditor.kindTask': 'Task',
   'noteEditor.kindMilestone': 'Milestone',
+  // T25 尾部追加
+  'lightbox.title': 'Image preview',
+  'lightbox.close': 'Close',
+  'lightbox.zoomIn': 'Zoom in',
+  'lightbox.zoomOut': 'Zoom out',
+  'lightbox.reset': 'Actual size',
+  'lightbox.download': 'Download original',
+  'lightbox.zoomLevel': '{n}%',
+  'asset.tooLarge': 'Image exceeds 5MB, please compress it and retry',
+  'asset.unsupported': 'Unsupported image format (png/jpg/gif/webp/svg only)',
+  'asset.empty': 'The file is empty',
+  'asset.failed': 'Failed to save image',
+  'asset.pending': 'Loading image',
 }

@@ -300,6 +300,24 @@ export const zh = {
     kindTask: '任务',
     kindMilestone: '里程碑',
   },
+
+  // T25 尾部追加：图片灯箱与附件提示（只增不改，既有键一律不动）
+  lightbox: {
+    title: '图片预览',
+    close: '关闭',
+    zoomIn: '放大',
+    zoomOut: '缩小',
+    reset: '原始大小',
+    download: '下载原图',
+    zoomLevel: '{n}%',
+  },
+  asset: {
+    tooLarge: '图片超过 5MB，请压缩后重试',
+    unsupported: '不支持的图片格式（仅 png/jpg/gif/webp/svg）',
+    empty: '文件是空的',
+    failed: '图片保存失败',
+    pending: '图片加载中',
+  },
 } as const
 
 export type MsgKey = NestedKeyOf<typeof zh>
