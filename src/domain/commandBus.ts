@@ -11,12 +11,14 @@
 // dirty 不在这里标记：Store 一变，T08 的 Autosave 就通过 store.subscribe 进入 dirty 态。
 // 撤销栈与 dirty 因此天然对齐，不存在「改了但没标脏」的野写路径。
 
-import type { Settings, Status, Task, Vault } from './types'
+import type { Dependency, Settings, Status, Task, Vault } from './types'
 import type { VaultStore } from './store'
 
 /** 任务的可改字段；id 与 createdAt 不可改。 */
 export type TaskPatch = Partial<Omit<Task, 'id' | 'createdAt'>>
 export type SettingsPatch = Partial<Settings>
+/** 依赖的可改字段：类型 / lag / 备注（id 与两端 from、to 不可改——改端点等于换一条链）。 */
+export type LinkPatch = Partial<Omit<Dependency, 'id' | 'from' | 'to'>>
 
 export interface MutationPayloads {
   'task.create': { task: Task; index: number | null }
@@ -24,6 +26,11 @@ export interface MutationPayloads {
   'task.patch': { id: string; patch: TaskPatch }
   'task.move': { id: string; status: Status; order: string }
   'settings.patch': { patch: SettingsPatch }
+  // T17 追加：依赖链命令（TaskDrawer 的依赖编辑写入口）。
+  // link.create 的 index 与 task.create 同义：deleteLinkCommand 的逆元靠它把链接还原回原下标。
+  'link.create': { link: Dependency; index: number | null }
+  'link.delete': { id: string }
+  'link.patch': { id: string; patch: LinkPatch }
 }
 
 export type MutationType = keyof MutationPayloads
@@ -58,6 +65,12 @@ function findTask(vault: Vault, id: string): Task {
   return task
 }
 
+function findLink(vault: Vault, id: string): Dependency {
+  const link = vault.links.find((candidate) => candidate.id === id)
+  if (link === undefined) throw new Error(`commandBus: 依赖不存在（${id}）`)
+  return link
+}
+
 /**
  * spec 4.2 的联动约束：status=done 时 progress 强制 100。
  * 目标状态取 patch 里的 status，没给就用任务当前状态（已 done 的任务改进度同样被压到 100）。
@@ -85,6 +98,19 @@ function invertPatch(task: Task, patch: TaskPatch): TaskPatch {
   return inverse as TaskPatch
 }
 
+/** 逆 patch（依赖版）：字段级还原，与 invertPatch 同一手法——undo 语义唯一性的关键。 */
+function invertLinkPatch(link: Dependency, patch: LinkPatch): LinkPatch {
+  const source = link as unknown as Record<string, unknown>
+  const inverse: Record<string, unknown> = {}
+  for (const key of Object.keys(patch)) inverse[key] = source[key]
+  return inverse as LinkPatch
+}
+
+function mapLink(vault: Vault, id: string, recipe: (link: Dependency) => Dependency): Vault {
+  findLink(vault, id)
+  return { ...vault, links: vault.links.map((link) => (link.id === id ? recipe(link) : link)) }
+}
+
 /** 纯函数：命令（或逆命令）作用在 vault 上的结果。不合法输入直接抛错，不静默兜底。 */
 export function reduce(vault: Vault, mutation: Mutation): Vault {
   switch (mutation.type) {
@@ -109,6 +135,21 @@ export function reduce(vault: Vault, mutation: Mutation): Vault {
     }
     case 'settings.patch':
       return { ...vault, settings: { ...vault.settings, ...mutation.payload.patch } }
+    case 'link.create': {
+      const { link, index } = mutation.payload
+      const links = [...vault.links]
+      links.splice(index ?? links.length, 0, link)
+      return { ...vault, links }
+    }
+    case 'link.delete': {
+      const { id } = mutation.payload
+      findLink(vault, id)
+      return { ...vault, links: vault.links.filter((link) => link.id !== id) }
+    }
+    case 'link.patch': {
+      const { id, patch } = mutation.payload
+      return mapLink(vault, id, (link) => ({ ...link, ...patch }))
+    }
   }
 }
 
@@ -175,6 +216,39 @@ export function patchSettingsCommand(vault: Vault, patch: SettingsPatch): Comman
     type: 'settings.patch',
     payload: { patch },
     inverse: { type: 'settings.patch', payload: { patch: inverse as SettingsPatch } },
+  }
+}
+
+// ── T17 · link 命令（依赖编辑写入口；task.* / settings.patch 行为不变） ──────────
+
+/** 新建一条依赖链；逆元是按 id 删除。index 省略即追加到数组尾部。 */
+export function createLinkCommand(link: Dependency, index: number | null = null): Command {
+  return {
+    type: 'link.create',
+    payload: { link, index },
+    inverse: { type: 'link.delete', payload: { id: link.id } },
+  }
+}
+
+/** 删除依赖；逆元带完整 link 体与原下标，undo 后连数组位置一起还原（参照 deleteTaskCommand）。 */
+export function deleteLinkCommand(vault: Vault, id: string): Command {
+  const link = findLink(vault, id)
+  const index = vault.links.findIndex((candidate) => candidate.id === id)
+  return {
+    type: 'link.delete',
+    payload: { id },
+    inverse: { type: 'link.create', payload: { link, index } },
+  }
+}
+
+/** 改依赖类型 / lag / 备注；逆元走字段级还原（参照 patchTaskCommand / invertPatch）。 */
+export function patchLinkCommand(vault: Vault, id: string, patch: LinkPatch): Command {
+  const link = findLink(vault, id)
+  if (Object.keys(patch).length === 0) throw new Error('commandBus: 空 patch 不构成变更')
+  return {
+    type: 'link.patch',
+    payload: { id, patch },
+    inverse: { type: 'link.patch', payload: { id, patch: invertLinkPatch(link, patch) } },
   }
 }
 
