@@ -373,7 +373,14 @@ function Workspace(props: {
         }}
       >
         {view === 'gantt' ? (
-          <GanttView vault={vault} filter={filter} scale={vault.settings.ganttScale} t={t} />
+          <GanttView
+            vault={vault}
+            filter={filter}
+            scale={vault.settings.ganttScale}
+            t={t}
+            // T22：未排期侧栏点一行 → 同一个任务抽屉（与看板卡片、甘特条同一入口）
+            onOpenTask={onOpenTask}
+          />
         ) : (
           <BoardView vault={vault} filter={filter} bus={bus} t={t} onOpenTask={onOpenTask} />
         )}
@@ -881,6 +888,21 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           onOpenChange={setDrawerOpen}
           taskId={drawerTaskId}
           onSelect={(task) => setDrawerTaskId(task?.id ?? null)}
+          // T24：笔记里的 [[标题]] 点击跳转——同名多任务取第一条任务候选；
+          // 只命中里程碑则开里程碑面板并选中；标题已不存在（matches 为空）时静默不动。
+          onNavigateNoteLink={(_title, matches) => {
+            const task = matches.find((match) => match.kind === 'task')
+            if (task !== undefined) {
+              setDrawerTaskId(task.id)
+              setDrawerOpen(true)
+              return
+            }
+            const milestone = matches.find((match) => match.kind === 'milestone')
+            if (milestone !== undefined) {
+              setMilestoneSelectedId(milestone.id)
+              setMilestoneOpen(true)
+            }
+          }}
         />
       )}
       {session === null ? null : (
