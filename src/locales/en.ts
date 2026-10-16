@@ -104,6 +104,20 @@ export const en: Record<MsgKey, string> = {
   'safemode.failed': 'Failed',
   'safemode.resolved': 'Resolved, loading…',
 
+  // T23 tail-append: Gantt export (PNG / SVG / CSV; key set must match zh.ts exactly)
+  'ganttExport.button': 'Export',
+  'ganttExport.format': 'Format',
+  'ganttExport.png': 'PNG image',
+  'ganttExport.svg': 'SVG vector',
+  'ganttExport.csv': 'CSV table',
+  'ganttExport.range': 'Range',
+  'ganttExport.rangeVisible': 'Visible area',
+  'ganttExport.rangeFull': 'Full time span',
+  'ganttExport.confirm': 'Export',
+  'ganttExport.cancel': 'Cancel',
+  'ganttExport.pngUnsupported': 'PNG export is unavailable in this environment; use SVG or CSV instead',
+  'ganttExport.failed': 'Export failed, please retry',
+
   // T15 tail-append: board card copy (C-plan six items / blocked marker / dependency badge; append-only)
   'card.blocked': 'Blocked',
   'card.blockedHint': 'Has unfinished predecessors',

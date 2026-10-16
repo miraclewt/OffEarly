@@ -123,6 +123,22 @@ export const zh = {
     resolved: '已处理，正在载入…',
   },
 
+  // T23 尾部追加：甘特图导出（PNG / SVG / CSV；只增不改，既有键一律不动）
+  ganttExport: {
+    button: '导出',
+    format: '格式',
+    png: 'PNG 图片',
+    svg: 'SVG 矢量图',
+    csv: 'CSV 表格',
+    range: '范围',
+    rangeVisible: '仅可见区',
+    rangeFull: '全时间跨度',
+    confirm: '导出',
+    cancel: '取消',
+    pngUnsupported: '当前环境不支持 PNG 导出，请改用 SVG 或 CSV',
+    failed: '导出失败，请重试',
+  },
+
   // T15 尾部追加：看板卡片文案（C 方案六项 / 阻塞标记 / 依赖角标；只增不改，既有键一律不动）
   card: {
     blocked: '阻塞',

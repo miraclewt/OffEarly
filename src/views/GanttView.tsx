@@ -27,6 +27,8 @@ import { buildGanttModel } from '../domain/ganttModel'
 import type { Filter, GanttScale, Vault } from '../domain/types'
 import { createI18n } from '../locales/i18n'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
+import { exportGanttChart, probePngSupport } from './GanttExporter'
+import type { GanttExportFormat, GanttExportRange } from './GanttExporter'
 import { GanttCanvas } from './GanttCanvas'
 import { GanttTable } from './GanttTable'
 import { Icon } from './IconSprite'
@@ -38,6 +40,19 @@ const INDIGO = 'var(--oe-accent)'
 const TOOLBAR_HEIGHT = 36
 
 const BODY_FONT = 'var(--oe-font)'
+
+/** T23 导出入口的常量顺序与文案键：集中在这里，避免 JSX 里散落字符串。 */
+const EXPORT_FORMAT_ORDER: GanttExportFormat[] = ['png', 'svg', 'csv']
+const EXPORT_FORMAT_LABEL: Record<GanttExportFormat, MsgKey> = {
+  png: 'ganttExport.png',
+  svg: 'ganttExport.svg',
+  csv: 'ganttExport.csv',
+}
+const EXPORT_RANGE_ORDER: GanttExportRange[] = ['visible', 'full']
+const EXPORT_RANGE_LABEL: Record<GanttExportRange, MsgKey> = {
+  visible: 'ganttExport.rangeVisible',
+  full: 'ganttExport.rangeFull',
+}
 
 /**
  * 兜底文案表：宿主通常会传 i18n.t，但在组件测试或未接线的场景下也要能独立挂载，
@@ -102,6 +117,26 @@ export function GanttView(props: GanttViewProps) {
   // 基线是「看哪一层」的视口属性，关键路径是「是否展示计算结果」的呈现开关）。
   const [criticalPathVisible, setCriticalPathVisible] = useState(true)
 
+  // T23：导出入口状态。默认「仅可见区 + PNG」；pngSupported 为 null 表示探针还在跑。
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [exportFormat, setExportFormat] = useState<GanttExportFormat>('png')
+  const [exportRange, setExportRange] = useState<GanttExportRange>('visible')
+  const [pngSupported, setPngSupported] = useState<boolean | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [exportHint, setExportHint] = useState<string | null>(null)
+
+  // R3 探针（spec 5.5）：挂载时跑一次最小 SVG → Canvas → toBlob。不可用就把 PNG 选项禁用并
+  // 提示，而不是等用户点下去才失败。jsdom 里没有真 2d 上下文，探针会如常返回 false。
+  useEffect(() => {
+    let alive = true
+    void probePngSupport().then((supported) => {
+      if (alive) setPngSupported(supported)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
   const model = useMemo(
     () => buildGanttModel(vault, filter, state.scale, { today: props.today, range: props.range }),
     [vault, filter, state.scale, props.today, props.range],
@@ -112,6 +147,56 @@ export function GanttView(props: GanttViewProps) {
   const laneHeight = lane.length > 0 ? rowHeight : 0
   const zoom = zoomFactorAt(state.zoomIndex[state.scale])
   const baselineVisible = state.baselineVisible
+
+  /**
+   * T23：三种格式共用一条出口。内容一律从当前模型投影（CSV 的行/日期/进度/依赖也直接读模型），
+   * 只有「仅可见区」需要把视口状态透传下去。PNG 失败（R3 前提被破坏）时禁用该格式并提示。
+   */
+  const handleExportConfirm = useCallback(() => {
+    setExportHint(null)
+    setExporting(true)
+    void exportGanttChart({
+      model,
+      format: exportFormat,
+      range: exportRange,
+      viewport: { scrollTop: state.scrollTop, scrollLeft: state.scrollLeft, width: state.width, height: state.height, zoom },
+      baselineVisible,
+      criticalPathVisible,
+      csvHeaders: {
+        task: t('gantt.task'),
+        start: t('gantt.start'),
+        end: t('gantt.end'),
+        progress: t('gantt.progress'),
+        dependency: t('dependency'),
+      },
+      todayLabel: t('gantt.today'),
+    })
+      .then((result) => {
+        setExportMenuOpen(false)
+        setExportHint(t('shell.exported', { name: result.filename }))
+      })
+      .catch(() => {
+        if (exportFormat === 'png') setPngSupported(false)
+        setExportHint(t('ganttExport.failed'))
+      })
+      .finally(() => {
+        setExporting(false)
+      })
+  }, [
+    model,
+    exportFormat,
+    exportRange,
+    state.scrollTop,
+    state.scrollLeft,
+    state.width,
+    state.height,
+    zoom,
+    baselineVisible,
+    criticalPathVisible,
+    t,
+  ])
+
+  const exportDisabled = exporting || (exportFormat === 'png' && pngSupported === false)
 
   const canvasHeight = state.height
   const rowWindow = useMemo(
@@ -279,6 +364,125 @@ export function GanttView(props: GanttViewProps) {
           />
           {t('criticalPath')}
         </label>
+
+        {/* T23：导出反馈（成功/失败）；PNG 不可用的说明放在弹层内靠近该格式处 */}
+        {exportHint === null ? null : (
+          <span data-testid="gantt-export-hint" style={{ fontSize: 12, color: TEXT_MUTED, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {exportHint}
+          </span>
+        )}
+
+        {/* T23：导出入口 —— 选格式（PNG / SVG / CSV）与范围（仅可见区 / 全时间跨度） */}
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <button
+            type="button"
+            data-testid="gantt-export-button"
+            aria-label={t('ganttExport.button')}
+            aria-haspopup="dialog"
+            aria-expanded={exportMenuOpen}
+            onClick={() => setExportMenuOpen((open) => !open)}
+            style={iconButtonStyle}
+          >
+            <Icon name="download" />
+          </button>
+
+          {exportMenuOpen ? (
+            <div
+              data-testid="gantt-export-menu"
+              role="dialog"
+              aria-label={t('ganttExport.button')}
+              style={{
+                position: 'absolute',
+                top: 26,
+                right: 0,
+                zIndex: 5,
+                width: 198,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                padding: 10,
+                boxSizing: 'border-box',
+                background: 'var(--oe-surface)',
+                border: `1px solid ${BORDER}`,
+                borderRadius: 'var(--oe-radius-card)',
+                boxShadow: 'var(--oe-shadow-hover)',
+                color: TEXT,
+              }}
+            >
+              <div style={{ fontSize: 12, color: TEXT_MUTED }}>{t('ganttExport.format')}</div>
+              <div role="radiogroup" aria-label={t('ganttExport.format')} style={{ display: 'flex', gap: 6 }}>
+                {EXPORT_FORMAT_ORDER.map((format) => {
+                  const disabled = format === 'png' && pngSupported === false
+                  return (
+                    <button
+                      key={format}
+                      type="button"
+                      role="radio"
+                      aria-checked={exportFormat === format}
+                      data-testid={`gantt-export-format-${format}`}
+                      disabled={disabled}
+                      onClick={() => setExportFormat(format)}
+                      style={{
+                        ...exportChipStyle,
+                        ...(exportFormat === format ? exportChipActiveStyle : null),
+                        ...(disabled ? exportChipDisabledStyle : null),
+                      }}
+                    >
+                      {t(EXPORT_FORMAT_LABEL[format])}
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div style={{ fontSize: 12, color: TEXT_MUTED }}>{t('ganttExport.range')}</div>
+              <div role="radiogroup" aria-label={t('ganttExport.range')} style={{ display: 'flex', gap: 6 }}>
+                {EXPORT_RANGE_ORDER.map((range) => (
+                  <button
+                    key={range}
+                    type="button"
+                    role="radio"
+                    aria-checked={exportRange === range}
+                    data-testid={`gantt-export-range-${range}`}
+                    onClick={() => setExportRange(range)}
+                    style={{ ...exportChipStyle, ...(exportRange === range ? exportChipActiveStyle : null) }}
+                  >
+                    {t(EXPORT_RANGE_LABEL[range])}
+                  </button>
+                ))}
+              </div>
+
+              {pngSupported === false ? (
+                <div data-testid="gantt-export-png-hint" style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--oe-blocked)' }}>
+                  {t('ganttExport.pngUnsupported')}
+                </div>
+              ) : null}
+
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  data-testid="gantt-export-cancel"
+                  onClick={() => setExportMenuOpen(false)}
+                  style={exportChipStyle}
+                >
+                  {t('ganttExport.cancel')}
+                </button>
+                <button
+                  type="button"
+                  data-testid="gantt-export-confirm"
+                  disabled={exportDisabled}
+                  onClick={handleExportConfirm}
+                  style={{
+                    ...exportChipStyle,
+                    ...exportChipActiveStyle,
+                    ...(exportDisabled ? exportChipDisabledStyle : null),
+                  }}
+                >
+                  {exporting ? t('safemode.busy') : t('ganttExport.confirm')}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <div style={{ display: 'flex', height: canvasHeight, minHeight: 0 }}>
@@ -326,6 +530,29 @@ const iconButtonStyle: CSSProperties = {
   border: `1px solid ${BORDER}`,
   borderRadius: 'var(--oe-radius-control)',
   cursor: 'pointer',
+}
+
+// T23 导出弹层的选项 chip（格式 / 范围 / 取消 / 导出共用一套）
+const exportChipStyle: CSSProperties = {
+  padding: '2px 8px',
+  fontSize: 12,
+  lineHeight: '18px',
+  color: TEXT,
+  background: 'var(--oe-surface)',
+  border: `1px solid ${BORDER}`,
+  borderRadius: 'var(--oe-radius-control)',
+  cursor: 'pointer',
+}
+
+const exportChipActiveStyle: CSSProperties = {
+  color: 'var(--oe-on-accent)',
+  background: INDIGO,
+  border: `1px solid ${INDIGO}`,
+}
+
+const exportChipDisabledStyle: CSSProperties = {
+  opacity: 0.5,
+  cursor: 'not-allowed',
 }
 
 export default GanttView
