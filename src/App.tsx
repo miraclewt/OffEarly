@@ -4,7 +4,7 @@ import { useStore } from 'zustand'
 
 import { createCommandBus } from './domain/commandBus'
 import type { Command, CommandBus } from './domain/commandBus'
-import { createQueryEngine, createEmptyFilter } from './domain/queryEngine'
+import { createEmptyFilter } from './domain/queryEngine'
 import { createVaultStore } from './domain/store'
 import type { VaultStore } from './domain/store'
 import type { Filter, Vault } from './domain/types'
@@ -37,7 +37,9 @@ import type {
 import { VaultValidationError } from './domain/schema'
 import { ConflictDialog } from './views/ConflictDialog'
 import type { ConflictLabels } from './views/ConflictDialog'
+import { BoardView } from './views/BoardView'
 import { GanttView } from './views/GanttView'
+import { MilestonePanel } from './views/MilestonePanel'
 import { Icon, IconSprite } from './views/IconSprite'
 import { SafeModeBanner } from './views/SafeModeBanner'
 import type { SafeModeLabels } from './views/SafeModeBanner'
@@ -323,73 +325,44 @@ function StartupScreen(props: {
 }
 
 /**
- * 看板占位（T15 BoardView 未落地）：骨架、列标题与计数已在，
- * 且**与甘特共用同一份 filter**（spec §6.2）——只是今天筛选恒为空筛选。
- * T15 落地后整体替换为 src/views/BoardView.tsx。
- */
-function EmptyBoard(props: { store: VaultStore; filter: Filter; t: (key: MsgKey) => string }) {
-  const { store, filter, t } = props
-  const vault = useStore(store, (state) => state.vault)
-
-  const counts = useMemo(() => {
-    const engine = createQueryEngine(vault.topics, vault.tasks, vault.links)
-    const visible = engine.query(filter)
-    return new Map(vault.settings.boardColumns.map((col) => [col, visible.filter((task) => task.status === col).length]))
-  }, [vault, filter])
-
-  return (
-    <div
-      data-testid="board"
-      style={{ display: 'flex', gap: 12, padding: 16, height: '100%', boxSizing: 'border-box' }}
-    >
-      {vault.settings.boardColumns.map((col) => (
-        <section
-          key={col}
-          style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            background: 'var(--oe-surface)',
-            border: `1px solid ${BORDER}`,
-            borderRadius: 'var(--oe-radius-card)',
-            padding: 12,
-            gap: 8,
-          }}
-        >
-          <header style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: TEXT }}>{t(`status.${col}`)}</span>
-            <span style={{ fontSize: 12, color: MUTED }}>{counts.get(col) ?? 0}</span>
-          </header>
-          <div style={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <span style={{ fontSize: 12, color: MUTED }}>{t('board.emptyColumn')}</span>
-          </div>
-        </section>
-      ))}
-    </div>
-  )
-}
-
-/**
  * 视图宿主：vault 与 filter 只在这里派生一次，看板与甘特共用（spec §6.2）。
- * 右侧详情抽屉（T17）尚未实现，故只留挂载位。
+ * 看板走 T15 的 BoardView（根元素自带 data-testid="board"，E2E 依赖它）；
+ * 甘特走 T20/T21 的 GanttView。右侧详情抽屉（T17）尚未实现，故只留挂载位。
  */
 function Workspace(props: {
   store: VaultStore
   view: 'board' | 'gantt'
   t: (key: MsgKey, params?: TranslateParams) => string
+  /** 写入口（T10 CommandBus，可能包了 T29 只读闸门）；BoardView 改列/换序经它落盘。 */
+  bus: CommandBus
+  /** 甘特菱形（data-gantt-milestone）点击 → 拉起里程碑面板（T18 选中契约的落点）。 */
+  onOpenMilestone?: (milestoneId: string) => void
 }) {
-  const { store, view, t } = props
+  const { store, view, t, bus, onOpenMilestone } = props
   const vault = useStore(store, (state) => state.vault)
   // spec §6.2：看板与甘特共用同一份筛选结果，切视图不丢条件
   const filter = useMemo<Filter>(() => vault.settings.lastFilter ?? createEmptyFilter(), [vault.settings.lastFilter])
 
   return (
     <div style={{ display: 'flex', height: '100%', minWidth: 0, minHeight: 0 }}>
-      <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+      <div
+        style={{ flex: 1, minWidth: 0, minHeight: 0 }}
+        // T18 的菱形选中契约只交付了 data-gantt-milestone 标记 + props 契约，
+        // GanttCanvas 的 MilestoneDiamond 无自带 onClick——这里用事件委托捕获点击，
+        // 把里程碑 id 外送给 App 拉起同一个 MilestonePanel（零侵入 GanttView/GanttCanvas）。
+        onClick={(event) => {
+          if (onOpenMilestone === undefined) return
+          const hit = (event.target as Element | null)?.closest('[data-gantt-milestone]')
+          if (hit !== null && hit !== undefined) {
+            const id = hit.getAttribute('data-gantt-milestone')
+            if (id !== null) onOpenMilestone(id)
+          }
+        }}
+      >
         {view === 'gantt' ? (
           <GanttView vault={vault} filter={filter} scale={vault.settings.ganttScale} t={t} />
         ) : (
-          <EmptyBoard store={store} filter={filter} t={t} />
+          <BoardView vault={vault} filter={filter} bus={bus} t={t} />
         )}
       </div>
       {/* 详情抽屉宿主（T17 落地后在此挂 TaskDrawer） */}
@@ -407,6 +380,9 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
   const [view, setView] = useState<'board' | 'gantt'>('board')
   const [conflict, setConflict] = useState<ConflictReport | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
+  // 里程碑面板（T18）：受控开合 + 选中态。侧栏入口与甘特菱形点击共用同一面板。
+  const [milestoneOpen, setMilestoneOpen] = useState(false)
+  const [milestoneSelectedId, setMilestoneSelectedId] = useState<string | null>(null)
 
   /** 会话事件出口：组件只显示，决定权留在这一层。 */
   const hooks = useMemo<SessionHooks>(
@@ -636,7 +612,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
     resolved: t('safemode.resolved'),
   }
 
-  /** 底部四个面板（T16/T18/T28）都还没实现：接成占位提示，不引用不存在的组件。 */
+  /** 底部面板：里程碑（T18）已接真面板；筛选器(T16)/备份(T28)/设置 仍占位，不引用不存在的组件。 */
   const panelPlaceholder = (label: MsgKey) => () => {
     setNotice({ key: 'shell.panelPending', params: { name: t(label) } })
   }
@@ -684,7 +660,18 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
       break
     case 'ready':
     case 'readonly':
-      main = <Workspace store={phase.store} view={view} t={t} />
+      main = (
+        <Workspace
+          store={phase.store}
+          view={view}
+          t={t}
+          bus={phase.bus}
+          onOpenMilestone={(id) => {
+            setMilestoneSelectedId(id)
+            setMilestoneOpen(true)
+          }}
+        />
+      )
       break
     case 'safe-mode':
       // 自愈也没能救回来：这里只提供横幅（vault 不可用，故无内容可展示）
@@ -788,7 +775,10 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
               store={session.store}
               bus={session.bus}
               t={t}
-              onOpenMilestones={panelPlaceholder('sidebar.milestones')}
+              onOpenMilestones={() => {
+                setMilestoneSelectedId(null)
+                setMilestoneOpen(true)
+              }}
               onOpenFilters={panelPlaceholder('sidebar.filters')}
               onOpenBackup={panelPlaceholder('sidebar.backup')}
               onOpenSettings={panelPlaceholder('sidebar.settings')}
@@ -848,6 +838,16 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           <main style={{ flex: 1, minWidth: 0, minHeight: 0 }}>{main}</main>
         </div>
       </div>
+      {session === null ? null : (
+        <MilestonePanel
+          store={session.store}
+          t={t}
+          open={milestoneOpen}
+          onOpenChange={setMilestoneOpen}
+          selectedId={milestoneSelectedId}
+          onSelect={(milestone) => setMilestoneSelectedId(milestone?.id ?? null)}
+        />
+      )}
       {conflict === null ? null : (
         <ConflictDialog
           report={conflict}
