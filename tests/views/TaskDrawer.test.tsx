@@ -530,13 +530,13 @@ describe('顶部保存指示与撤销', () => {
   })
 })
 
-describe('笔记占位', () => {
-  it('只留 T24 接入位，不渲染任何编辑器', () => {
+describe('笔记区（T24 起换成真编辑器，旧占位退役）', () => {
+  it('第 ⑤ 分区挂载 NoteEditor，且不再渲染 T24 占位', () => {
     const { view } = setup()
-    const placeholder = view.getByTestId('drawer-note-placeholder')
-    expect(placeholder.textContent).toContain('笔记由 T24 接入')
-    expect(within(view.getByTestId('drawer-notes-section')).queryByRole('textbox')).toBeNull()
-    expect(within(view.getByTestId('drawer-notes-section')).queryByRole('button')).toBeNull()
+    const section = view.getByTestId('drawer-notes-section')
+    expect(view.queryByTestId('drawer-note-placeholder')).toBeNull()
+    expect(section.querySelector('[data-testid="note-editor"]')).not.toBeNull()
+    expect(section.querySelector('[data-testid="note-editor-content"]')).not.toBeNull()
   })
 })
 
