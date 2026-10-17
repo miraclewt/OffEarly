@@ -9,11 +9,13 @@
 // （那批常量属 T48 的导出对等层）；T45 不涉导出，一律走内联 style 的 CSS 变量——
 // style 是 CSS，浏览器里能解析 var()，只有呈现属性（fill= / stroke=）不能。故本文件零新增 hex。
 //
-// 只读边界（T45）：badge 只渲染不响应——onToggleFold 是 T46 的缝，本任务视图不传，
-// 传了才挂点击；editingId 同样是为 T46 预留的投影分支（编辑中的节点隐掉 <text>，
-// 输入框是视图层的 HTML overlay，Canvas 不管）。
+// 只读边界（T45 遗留注释，T46 起解除）：badge 的 onToggleFold 与节点的 onEdit/onSelect 由
+// 视图层接线；editingId 命中的节点隐掉 <text>（输入框是视图层的 HTML overlay，Canvas 不管）。
+// 指针层口径（T46 裁决）：选中走 onPointerDown（平移拖拽的宿主是外层容器，节点必须先行
+// stopPropagation，否则点节点顺带起拖拽）；徽标同理——pointerdown 拦在节点与画布之前，
+// 折叠动作仍由 click 语义触发（键盘可达性一致）。
 
-import type { MouseEvent as ReactMouseEvent } from 'react'
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
 
 import { MINDMAP_FONT_SIZE } from '../domain/mindmapModel'
 import type { MindMapModel, MindMapNodeView } from '../domain/mindmapModel'
@@ -36,10 +38,12 @@ export interface MindMapCanvasProps {
   selectedId: string | null
   /** 就地编辑中的节点 id：编辑时隐掉该节点的 <text>（输入框由 T46 的 overlay 承接） */
   editingId: string | null
-  /** 点选节点外送 id；T45 视图用它记本地选中态。省略则节点不带指针样式。 */
+  /** 点选节点外送 id（onPointerDown 触发）；T46 视图用它记本地选中态。省略则节点不带指针样式。 */
   onSelect?(id: string): void
-  /** 折叠徽标点击（T46 接线）：T45 不传——badge 渲染但无处理器，视图保持严格只读。 */
+  /** 折叠徽标点击（T46 接线）：click 语义，pointerdown 先行拦截（不选中、不平移）。 */
   onToggleFold?(id: string): void
+  /** 双击节点进入就地编辑（T46 接线）；overlay 输入框在视图层，Canvas 只外送 id。 */
+  onEdit?(id: string): void
 }
 
 /**
@@ -70,18 +74,25 @@ function nodePaint(node: MindMapNodeView): {
 }
 
 export function MindMapCanvas(props: MindMapCanvasProps) {
-  const { model, panX, panY, zoom, selectedId, editingId, onSelect, onToggleFold } = props
+  const { model, panX, panY, zoom, selectedId, editingId, onSelect, onToggleFold, onEdit } = props
   const centerY = (node: MindMapNodeView): number => node.y + node.height / 2
 
-  const handleNodeClick = (nodeId: string): void => {
+  const handleNodePointerDown = (event: ReactPointerEvent<SVGGElement>, nodeId: string): void => {
+    // 先于画布拖拽吞掉 pointerdown：点节点 = 选中，绝不起平移（T46 指针层裁决）
+    event.stopPropagation()
     onSelect?.(nodeId)
   }
 
   const handleBadgeClick = (event: ReactMouseEvent<SVGGElement>, nodeId: string): void => {
     if (onToggleFold === undefined) return
-    // 徽标先于节点吞掉点击，避免点折叠圈顺带把节点选中（T46 的口径，这里把缝留好）
+    // 徽标先于节点吞掉点击，避免点折叠圈顺带把节点选中
     event.stopPropagation()
     onToggleFold(nodeId)
+  }
+
+  const handleBadgePointerDown = (event: ReactPointerEvent<SVGGElement>): void => {
+    // pointerdown 一律拦在节点与画布之前：点徽标既不选中也不起拖拽；折叠由 click 触发
+    event.stopPropagation()
   }
 
   return (
@@ -114,8 +125,9 @@ export function MindMapCanvas(props: MindMapCanvasProps) {
             <g
               key={node.id}
               data-mindmap-node={node.id}
-              onClick={() => handleNodeClick(node.id)}
-              style={{ cursor: onSelect === undefined ? undefined : 'pointer' }}
+              onPointerDown={(event) => handleNodePointerDown(event, node.id)}
+              onDoubleClick={() => onEdit?.(node.id)}
+              style={{ cursor: onSelect === undefined && onEdit === undefined ? undefined : 'pointer' }}
             >
               <rect
                 x={node.x}
@@ -149,7 +161,8 @@ export function MindMapCanvas(props: MindMapCanvasProps) {
               )}
               {node.folded && node.hasChildren ? (
                 <g
-                  data-mindmap-fold={node.id}
+                  data-mindmap-foldtoggle={node.id}
+                  onPointerDown={handleBadgePointerDown}
                   onClick={(event) => handleBadgeClick(event, node.id)}
                   style={{ cursor: onToggleFold === undefined ? undefined : 'pointer' }}
                 >
