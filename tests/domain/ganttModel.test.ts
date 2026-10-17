@@ -114,7 +114,7 @@ describe('T19 · 刻度与列几何（验收 2）', () => {
     expect(at('2026-10-14')).toMatchObject({ isToday: false })
   })
 
-  it('两级表头：首行按自然月合并，次行 day 为日号、week 为周一日期且跨列合并', () => {
+  it('两级表头：首行按自然月合并，次行 day 为日号、week 为 ISO 周号（CW）且跨列合并', () => {
     const day = buildGanttModel(vault, filter, 'day', viewport)
     expect(day.headerRows[0]).toEqual([{ label: '2026-10', x: 0, width: 992 }])
     expect(day.headerRows[1]).toHaveLength(31)
@@ -123,12 +123,25 @@ describe('T19 · 刻度与列几何（验收 2）', () => {
 
     const week = buildGanttModel(vault, filter, 'week', viewport)
     expect(week.headerRows[0]).toEqual([{ label: '2026-10', x: 0, width: 434 }])
+    // 周一分组：2026-10 落在 ISO 周 40..44（10-15 那一周正是 CW42）
     expect(week.headerRows[1]).toEqual([
-      { label: '09-28', x: 0, width: 56 },
-      { label: '10-05', x: 56, width: 98 },
-      { label: '10-12', x: 154, width: 98 },
-      { label: '10-19', x: 252, width: 98 },
-      { label: '10-26', x: 350, width: 84 },
+      { label: 'CW40', x: 0, width: 56 },
+      { label: 'CW41', x: 56, width: 98 },
+      { label: 'CW42', x: 154, width: 98 },
+      { label: 'CW43', x: 252, width: 98 },
+      { label: 'CW44', x: 350, width: 84 },
+    ])
+  })
+
+  it('week 次行在 ISO 年切换的那一格补年份，其余只显周号', () => {
+    // 2027-01-01(周五) 属 ISO 2026-W53；2027-01-04(周一) 起才是 ISO 2027-W1。
+    const model = buildGanttModel(vault, filter, 'week', {
+      today: '2027-01-05',
+      range: { start: '2027-01-01', end: '2027-01-10' },
+    })
+    expect(model.headerRows[1]).toEqual([
+      { label: 'CW53', x: 0, width: 42 },
+      { label: 'CW1 2027', x: 42, width: 98 },
     ])
   })
 

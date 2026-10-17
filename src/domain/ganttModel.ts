@@ -3,12 +3,16 @@
 // 渲染、导出、单测共用同一份模型。
 
 import dayjs from 'dayjs'
+import isoWeek from 'dayjs/plugin/isoWeek'
 
 import { createDependencyGraph } from './dependencyGraph'
 import { createQueryEngine } from './queryEngine'
 import { createScheduleEngine, toDateKey } from './scheduleEngine'
 import { createTopicTree } from './topicTree'
 import type { Dependency, DependencyType, Filter, Milestone, Task, Topic, Vault } from './types'
+
+// week 刻度的表头要出 ISO-8601 周号（CW42），isoWeek/isoWeekYear 来自该插件（其余日期运算仍用裸 dayjs）。
+dayjs.extend(isoWeek)
 
 export type GanttScale = 'day' | 'week'
 
@@ -117,8 +121,14 @@ function cellWidthOf(scale: GanttScale): number {
   return scale === 'day' ? 32 : 14
 }
 
-function labelOf(date: string): string {
-  return date.slice(5)
+/**
+ * week 次行单元格文案：ISO-8601 周号「CW{n}」。ISO 周分组本就按周一，与列的 isWeekStart 口径一致。
+ * `withYear` 只在该格的 ISO 年与前一周格不同时传入（新年份首格补年份，其余不标）。
+ */
+function weekCellLabel(date: string, withYear: boolean): string {
+  const d = dayjs(date)
+  const week = d.isoWeek()
+  return withYear ? `CW${week} ${d.isoWeekYear()}` : `CW${week}`
 }
 
 function isoWeekStartOf(date: string): string {
@@ -253,13 +263,17 @@ export function buildGanttModel(
       secondCells.push({ label: column.date.slice(8, 10), x: column.x, width: column.width })
     }
   } else {
+    let prevIsoYear: number | null = null
     for (const column of columns) {
       if (!column.isWeekStart) {
         const last = secondCells[secondCells.length - 1]
         if (last) last.width += column.width
         continue
       }
-      secondCells.push({ label: labelOf(isoWeekStartOf(column.date)), x: column.x, width: column.width })
+      const isoYear = dayjs(column.date).isoWeekYear()
+      const withYear = prevIsoYear !== null && isoYear !== prevIsoYear
+      prevIsoYear = isoYear
+      secondCells.push({ label: weekCellLabel(column.date, withYear), x: column.x, width: column.width })
     }
   }
 
