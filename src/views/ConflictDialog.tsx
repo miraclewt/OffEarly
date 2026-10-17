@@ -119,6 +119,10 @@ export function ConflictDialog(props: ConflictDialogProps) {
       style={{
         position: 'fixed',
         inset: 0,
+        // T36：任务详情改为居中弹窗（z-25）后，这个「保存被挡下」的弹窗必须压在它之上，
+        // 否则用户在弹窗里按 Ctrl+S 会把冲突三选关在遮罩后面（看不见也点不到）。
+        // 取 70 高于灯箱（z-60）——冲突未裁决前它是全局唯一的可交互面。
+        zIndex: 70,
         display: 'grid',
         placeItems: 'center',
         background: 'var(--oe-scrim)',

@@ -193,7 +193,7 @@ const BACKDROP: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   padding: 24,
-  background: 'var(--oe-overlay)',
+  background: 'var(--oe-scrim)',
 }
 
 const PANEL: CSSProperties = {

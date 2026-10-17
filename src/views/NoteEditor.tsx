@@ -213,7 +213,7 @@ function NoteImageView({ node, extension }: NodeViewProps) {
 
   const label = alt !== '' ? alt : src
 
-  // 未就绪（刚打开抽屉、图片还在读）：渲染灰底 chip 而不是碎图——
+  // 未就绪（刚打开弹窗、图片还在读）：渲染灰底 chip 而不是碎图——
   // 内容取 alt / 路径，都是数据不是文案，不涉 i18n。
   if (url === null) {
     return (
@@ -529,7 +529,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
     },
   }, [])
 
-  // 卸载补交：debounce 未到就切任务/关抽屉时，把最后一次编辑交给「发起它的那个任务」
+  // 卸载补交：debounce 未到就切任务/关弹窗时，把最后一次编辑交给「发起它的那个任务」
   // （commitRef 的闭包在挂载时已绑定该任务的 onCommit）。
   useEffect(
     () => () => {
@@ -595,7 +595,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
     if (candidates.length === 0) {
       if (event.key === 'Escape') {
         // 菜单开着时 Esc 只关菜单：stopPropagation 截住原生事件，
-        // 免得冒泡到抽屉在 window 上的监听、把抽屉一起关掉（T24 遗留，收尾修复）。
+        // 免得冒泡到弹窗在 window 上的监听、把弹窗一起关掉（T24 遗留，收尾修复）。
         event.stopPropagation()
         setLinkQuery(null)
         anchorRef.current = null
@@ -619,7 +619,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
       return
     }
     if (event.key === 'Escape') {
-      // 同上：截住事件，菜单与抽屉不同时关。
+      // 同上：截住事件，菜单与弹窗不同时关。
       event.preventDefault()
       event.stopPropagation()
       setLinkQuery(null)

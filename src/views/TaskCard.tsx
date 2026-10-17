@@ -52,7 +52,7 @@ export interface TaskCardProps {
   /** 判定逾期的今天（YYYY-MM-DD）；由 BoardView 注入以便测试确定化。 */
   today: string
   t: (key: MsgKey, params?: TranslateParams) => string
-  /** 点击卡片（打开详情抽屉，T17 接线）；键盘 Enter/Space 同样触发。 */
+  /** 点击卡片（打开详情弹窗，T17 接线）；键盘 Enter/Space 同样触发。 */
   onOpenTask?: (taskId: string) => void
   style?: CSSProperties
 }

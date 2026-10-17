@@ -1,4 +1,5 @@
-// T17 · TaskDrawer：任务详情抽屉（spec 6.3）——甘特图只读后，这里是唯一的排期修改入口。
+// T17 · TaskDrawer：任务详情**弹窗**（T36 起由 spec 6.3 的右侧抽屉改为居中弹窗）——
+// 甘特图只读后，这里是唯一的排期修改入口。
 //
 // 受控契约（对照 T18 MilestonePanel 的既定手法，接线归集成窗口）：
 // - `open` / `onOpenChange`：受控开合，省略时自管（可独立挂载）；
@@ -7,18 +8,33 @@
 //   「打开并定位」；这两处点击的实际接线本任务不碰（BoardView / GanttCanvas 均不改）。
 // 组件测试用 rerender 驱动 props 验证该契约。
 //
-// 五个分区（spec 第 7 节信息密度上限：详情抽屉 5 分区）：
-//   ① 标题（inline 编辑） ② 属性行 ③ 日期与进度 ④ 依赖关系 ⑤ 笔记（占位，T24 接入）
+// **呈现层（T36 起）**：居中弹窗（modal），不再是 spec 6.3 的「右侧滑出 400px」。
+// 依据是产品方的明确要求——任务编辑要一个聚焦的弹窗，而不是一条从侧边挤进来的窄栏。
+// 弹窗语义的落法：
+// - 遮罩 `--oe-scrim` + `role="dialog"` + `aria-modal`，z-25（高于里程碑面板 z-20，
+//   低于灯箱 z-60）；点遮罩空白处、Esc、右上角 × 三条出路都关得掉；
+// - **遮罩关闭要按「按下与抬起都在遮罩上」判定**：本弹窗里有富文本编辑器，
+//   从面板内拖选到面板外时 click 的 target 会落到遮罩（浏览器取共同祖先），
+//   只看 click 会把正在选字的弹窗误关掉——所以 onMouseDown 记一次落点，onClick 复核；
+// - 打开时把焦点移进面板、关闭时还给打开它的那个元素（这里是看板卡片 / 甘特条）；
+// - **不做 Tab 焦点陷阱**：笔记里的任务列表用 Tab/Shift-Tab 缩进（TipTap 既有行为），
+//   全局 trap 会把这个键吃掉——可访问性收益抵不过功能损失，故明确不实现；
+// - 组件名与 `task-drawer` / `drawer-*` 测试 id 沿用 T17 历史命名（改名会波及 6 个测试
+//   文件约 200 条断言，且 task.md 的 T17/T24 记录都以此称呼它），语义以本注释与
+//   `data-presentation="modal"` 为准。
+//
+// 五个分区（spec 第 7 节信息密度上限：详情弹窗 5 分区）：
+//   ① 标题（inline 编辑） ② 属性行 ③ 日期与进度 ④ 依赖关系 ⑤ 笔记
 // 每一条写操作都构造 Command 经 CommandBus.apply 落地（spec 3 硬规则 2）：
 // 改标题/属性/日期/进度走 patchTaskCommand；依赖增删改走 T17 新增的 link.* 命令。
 // 因此顶部保存指示（T08 SaveIndicator）与 Ctrl+Z 撤销天然联动——没有野写路径。
 //
-// 边界：不 import NoteEditor（T24 未实现）；不改 App.tsx / BoardView / Gantt*；
-// 除 link 命令外不碰 src/domain/*；工期只读展示取自 T11 ScheduleEngine.duration，
-// 不在抽屉里重算；颜色一律取 --oe-* token，无 hex、无 emoji。
+// 边界：不改 App.tsx / BoardView / Gantt*；除 link 命令外不碰 src/domain/*；
+// 工期只读展示取自 T11 ScheduleEngine.duration，不在弹窗里重算；
+// 颜色一律取 --oe-* token，无 hex、无 emoji。
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, ReactNode } from 'react'
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import { useStore } from 'zustand'
 
 import { patchTaskCommand } from '../domain/commandBus'
@@ -45,8 +61,8 @@ const SURFACE = 'var(--oe-surface)'
 const INDIGO = 'var(--oe-accent)'
 const DANGER = 'var(--oe-overdue)'
 
-/** 覆盖式抽屉宽度（spec 6.3「右侧滑出约 400px」）。 */
-const DRAWER_WIDTH = 400
+/** 弹窗面板的最大宽度；高度用 `maxHeight: 100%` 顶住视口（遮罩留 24px 内边距）。 */
+const MODAL_MAX_WIDTH = 760
 
 const STATUSES: readonly Status[] = ['todo', 'doing', 'review', 'done']
 const KINDS: readonly Kind[] = ['feature', 'bug', 'chore', 'research', 'doc']
@@ -106,12 +122,12 @@ export interface TaskDrawerProps {
   store: VaultStore
   bus: CommandBus
   t: (key: MsgKey, params?: TranslateParams) => string
-  /** 受控打开态；省略时抽屉自管开合（可独立挂载）。 */
+  /** 受控打开态；省略时弹窗自管开合（可独立挂载）。 */
   open?: boolean
   /** 开合请求外送（受控时由接线方决定，非受控时仅作通知）。 */
   onOpenChange?: (open: boolean) => void
   /**
-   * 外部选中契约：传入任务 id → 抽屉打开并定位到该任务。
+   * 外部选中契约：传入任务 id → 弹窗打开并定位到该任务。
    * 看板卡片与甘特条的点击都经此入口（实际接线归集成窗口）。
    */
   taskId?: string | null
@@ -161,6 +177,39 @@ const SECTION_TITLE: CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
   color: TEXT,
+}
+
+/** 弹窗遮罩：铺满视口、居中承载面板；`--oe-scrim` 是主题里唯一的模态遮罩色。 */
+const BACKDROP: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 25,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 24,
+  background: 'var(--oe-scrim)',
+  fontFamily: 'var(--oe-font)',
+}
+
+/**
+ * 弹窗面板：宽不超过 760（遮罩内边距再兜一层小屏），高度顶住遮罩的内容盒，
+ * 内部滚动交给 `<div>` 自适应区——顶栏常驻，五个分区在框内滚。
+ */
+const PANEL: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  width: '100%',
+  maxWidth: MODAL_MAX_WIDTH,
+  maxHeight: '100%',
+  background: SURFACE,
+  border: `1px solid ${BORDER}`,
+  borderRadius: 'var(--oe-radius-card)',
+  // 比 hover 柔影更重的一档才压得住遮罩——但主题只有这一档阴影，
+  // 与 Lightbox 同一做法取它（不再新增第六个色值/token）
+  boxShadow: 'var(--oe-shadow-hover)',
+  overflow: 'hidden',
+  boxSizing: 'border-box',
 }
 
 function SectionHeader(props: { icon: ReactNode; title: string; trailing?: ReactNode }): ReactNode {
@@ -278,6 +327,10 @@ export function TaskDrawer(props: TaskDrawerProps) {
   const latest = useRef({ taskId, titleDraft })
   latest.current = { taskId, titleDraft }
 
+  /** 弹窗面板（焦点落点）与遮罩按下落点（判定「点的是不是外部」）。 */
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const backdropPressed = useRef(false)
+
   function requestClose(): void {
     if (props.open === undefined) setSelfOpen(false)
     if (props.taskId === undefined) setSelfTaskId(null)
@@ -287,7 +340,34 @@ export function TaskDrawer(props: TaskDrawerProps) {
     setDateError(null)
   }
 
-  // 外部选中契约：taskId 变化 → 打开抽屉并定位到该任务。
+  /**
+   * 弹窗开合时的焦点交接：打开 → 焦点进面板（键盘用户下一格 Tab 就在弹窗里）；
+   * 关闭 → 还给打开它的那个元素（看板卡片 / 甘特条），不把焦点丢到 body。
+   * `preventScroll`：面板是 fixed 居中的，聚焦不该带动背景滚动位置。
+   */
+  useEffect(() => {
+    if (!open) return
+    const previous = document.activeElement
+    panelRef.current?.focus({ preventScroll: true })
+    return () => {
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true })
+    }
+  }, [open])
+
+  /** 遮罩空白处按下：记为「点外部」的起点（抬起时还要复核，见 BACKDROP 注释）。 */
+  function onBackdropMouseDown(event: ReactMouseEvent<HTMLDivElement>): void {
+    backdropPressed.current = event.target === event.currentTarget
+  }
+
+  function onBackdropClick(event: ReactMouseEvent<HTMLDivElement>): void {
+    const pressedOutside = backdropPressed.current
+    backdropPressed.current = false
+    if (!pressedOutside) return
+    if (event.target !== event.currentTarget) return
+    requestClose()
+  }
+
+  // 外部选中契约：taskId 变化 → 打开弹窗并定位到该任务。
   // 依赖只取 [props.taskId, store]，同一 id 重复传入不会重复应用。
   useEffect(() => {
     const selected = props.taskId
@@ -373,7 +453,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
     const progress = done ? 100 : task.progress
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', padding: '0 14px 20px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', padding: '0 18px 20px' }}>
         {/* ① 标题（inline 编辑） */}
         <section data-testid="drawer-title-section" style={{ ...SECTION, borderTop: 'none', paddingTop: 4 }}>
           {titleDraft === null ? (
@@ -629,67 +709,67 @@ export function TaskDrawer(props: TaskDrawerProps) {
   if (taskId === null || taskId === undefined) return null
 
   return (
-    <aside
-      data-testid="task-drawer"
-      aria-label={t('drawer.title')}
-      style={{
-        position: 'fixed',
-        top: 0,
-        right: 0,
-        bottom: 0,
-        width: DRAWER_WIDTH,
-        display: 'flex',
-        flexDirection: 'column',
-        background: SURFACE,
-        borderLeft: `1px solid ${BORDER}`,
-        boxSizing: 'border-box',
-        fontFamily: 'var(--oe-font)',
-        // 高于里程碑面板（z-20）：两者同处右侧，详情抽屉是被聚焦的编辑面
-        zIndex: 25,
-        ...props.style,
-      }}
+    <div
+      data-testid="task-modal"
+      // 遮罩本身不是对话框，语义元素是里面的面板（与 Lightbox 把 role 挂在外层不同：
+      // 灯箱的「内容」就是整个铺满的视口，这里只有中间那一块是）
+      onMouseDown={onBackdropMouseDown}
+      onClick={onBackdropClick}
+      style={BACKDROP}
     >
       <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '10px 14px',
-          borderBottom: `1px solid ${BORDER}`,
-        }}
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('drawer.title')}
+        data-testid="task-drawer"
+        data-presentation="modal"
+        style={{ ...PANEL, outline: 'none', ...props.style }}
       >
-        <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: TEXT }}>{t('drawer.title')}</span>
-        {props.autosave === undefined ? null : <SaveIndicator autosave={props.autosave} t={t} />}
-        <button
-          type="button"
-          data-testid="drawer-close"
-          aria-label={t('drawer.close')}
-          title={t('drawer.close')}
-          onClick={requestClose}
+        <div
           style={{
             display: 'flex',
-            padding: 2,
-            color: MUTED,
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
+            alignItems: 'center',
+            gap: 8,
+            flex: '0 0 auto',
+            padding: '12px 18px',
+            borderBottom: `1px solid ${BORDER}`,
           }}
         >
-          <Icon name="close" size={14} />
-        </button>
-      </div>
-
-      {task === undefined ? (
-        <div
-          data-testid="drawer-missing-task"
-          style={{ padding: '24px 16px', fontSize: 12, color: MUTED, textAlign: 'center', lineHeight: 1.7 }}
-        >
-          {t('drawer.missingTask')}
+          <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: TEXT }}>{t('drawer.title')}</span>
+          {props.autosave === undefined ? null : <SaveIndicator autosave={props.autosave} t={t} />}
+          <button
+            type="button"
+            data-testid="drawer-close"
+            aria-label={t('drawer.close')}
+            title={t('drawer.close')}
+            onClick={requestClose}
+            style={{
+              display: 'flex',
+              padding: 2,
+              color: MUTED,
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            <Icon name="close" size={14} />
+          </button>
         </div>
-      ) : (
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>{renderEditor(task)}</div>
-      )}
-    </aside>
+
+        {task === undefined ? (
+          <div
+            data-testid="drawer-missing-task"
+            style={{ padding: '24px 16px', fontSize: 12, color: MUTED, textAlign: 'center', lineHeight: 1.7 }}
+          >
+            {t('drawer.missingTask')}
+          </div>
+        ) : (
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>{renderEditor(task)}</div>
+        )}
+      </div>
+    </div>
   )
 }
 

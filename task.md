@@ -159,6 +159,7 @@ tests/**                         与 src 镜像
 ### Phase 9 · 补缺（主干直做；T34/T35 由用户反馈「无法创建任务 / 设置面板未实现」触发）
 - [x] **T34** 看板列内新建任务（列底入口 / 连续录入 / 归属与排序口径） → done (2026-10-17, workbuddy:sess-1017e, commit: "T34/T35: board inline task creation and settings panel with work calendar")
 - [x] **T35** 设置面板（语言 / 主题 / 甘特默认刻度 / 工作日历 / 关于） → done (2026-10-17, workbuddy:sess-1017e, commit: "T34/T35: board inline task creation and settings panel with work calendar")
+- [x] **T36** 任务详情改居中弹窗（呈现层重写 + 弹窗语义 / 焦点交接 / 遮罩关闭三出路） → done (2026-10-17, workbuddy:sess-1017f, commit: "T36: task details as a centred modal instead of a right side drawer")
 
 ---
 
@@ -1013,6 +1014,33 @@ tests/**                         与 src 镜像
 
 ---
 
+### T36 · 任务详情由右侧抽屉改为居中弹窗
+
+**背景：** 用户反馈「优化，任务使用弹窗的形式编辑，而不是从侧边弹出」。T17 交付的 `TaskDrawer` 按 spec 6.3 做成了「右侧滑出约 400px 的覆盖式抽屉」，本次按要求改为**居中弹窗**。属呈现层变更，写入口径与五分区一字未改。
+
+**依赖：** T17（TaskDrawer）/ T24（笔记）/ T25（图片）
+**产出：** `src/views/TaskDrawer.tsx`（呈现层重写）、`src/views/ConflictDialog.tsx` 与 `src/views/Lightbox.tsx`（配套层级 / token 修正）、`tests/views/TaskDrawer.test.tsx`、`e2e/08-task-modal.spec.ts`、`e2e/fixtures/exampleVault.ts`、`tests/examples/exampleVault.test.ts`、`e2e/06-note-image.spec.ts` 与四份文档
+
+**验收标准：**
+- [x] 任务详情是居中弹窗：遮罩铺满视口、面板水平居中、不再是贴右的 400px 侧栏（用真浏览器量几何，jsdom 不做布局）
+- [x] 弹窗语义：面板 `role="dialog"` + `aria-modal="true"` + `aria-label`，遮罩与面板分层；打开时焦点进面板，关闭还给触发它的卡片
+- [x] 三条关闭出路等价：`Esc` / 点遮罩空白处 / 右上角 ×；点面板内部不关
+- [x] 五分区（标题 / 属性 / 日期 / 依赖 / 笔记）与全部写入口径不变（仍是 `patchTaskCommand` + `link.*` 命令，撤销栈与保存指示照旧联动）
+- [x] 冲突弹窗补层级：弹窗内 `Ctrl+S` 触发冲突时，三选弹窗压在遮罩之上（可见可点）
+- [x] 组件测试 +9 条、e2e +4 条；`tsc` / `npm test` / `npm run e2e` / `npm run build` 全绿
+
+**实施注记（T36）**
+1. **呈现层**：外层 `div[data-testid=task-modal]`（`position: fixed; inset: 0; z-index: 25; display: flex; center; padding: 24; background: var(--oe-scrim)`）承载内层 `div[data-testid=task-drawer]`（`maxWidth: 760; maxHeight: 100%; overflow: hidden`，顶栏 `flex: 0 0 auto` + 内容区 `overflowY: auto`）。`props.style` 仍然最后展开（外部可覆写宽度），与改前的契约一致。
+2. **遮罩关闭必须「按下 + 抬起」双判定**：弹窗里有富文本编辑器，从面板内往外拖选文字时浏览器把 `click` 派发到两者共同祖先（即遮罩）。只看 `click.target` 会在用户选字选到边缘时把弹窗关掉。故 `onMouseDown` 记一次落点、`onClick` 复核同一落点，并在判定后复位（不复位会让下一次真点外部被上一次性状放行）。`Lightbox` 的「只看 click」在纯看图场景下够用，这里不够。
+3. **刻意不做 Tab 焦点陷阱**：笔记里的任务列表用 `Tab` / `Shift+Tab` 缩进（TipTap 既有行为），全局 trap 会把这个键吃掉——可访问性收益抵不过功能损失。只做「打开进面板 / 关闭还原」的焦点交接（`preventScroll: true`，面板是 fixed 居中的，聚焦不该带动背景滚动）。
+4. **命名沿用 T17**：组件仍叫 `TaskDrawer`、字段 id 仍是 `drawer-*` / `task-drawer`，新增 `data-presentation="modal"` 标注语义。理由：改名会波及 6 个测试文件约 200 条断言，而 task.md 的 T17/T24 记录、wave-4 车道提示词都以「抽屉 / TaskDrawer」称呼它——收益只是名字好听，风险却是把已闭验的断言全掀一遍。语义以文件头注释与本记录为准。
+5. **联动修正三处**：① `ConflictDialog` 补 `z-index: 70`（高于灯箱 60）——此前它靠 DOM 顺序压在抽屉之上，改成遮罩后若不提层，用户在弹窗里按 `Ctrl+S` 会把三选关在遮罩后面；② `Lightbox` 的 `var(--oe-overlay)` **在主题里根本没定义**（T25 起的隐性 bug，表现为遮罩透明）→ 改为 `var(--oe-scrim)`；③ 删掉 `App.tsx` 里 T15 预留、全库零引用的 `drawer-host` 空占位 div。
+6. **顺带修两处「活夹具」脆性**（本次跑测试时被真实使用触红的，不是本次改动引入的）：① `example.vault/vault.json` 是会被应用真的打开保存的活文件（手册第 11 项就叫用户去连它），一旦有人在里面改过语言 / 筛选 / 刻度，e2e 的中文文案与列数断言就整体崩——修法是 `loadExampleVaultFs()` 装夹具时**覆写 settings 的四个相位字段**（locale / theme / ganttScale / lastFilter），不复位磁盘文件（那是用户的库）。② `assets[].filename` 有两种合法形态（应用写 `assets/<id>.<ext>`，T33 手写示例库写 `<id>.<ext>`，`gcPreview` 明文兼容两者），`exampleVault.test.ts` 却按「拼 assets/ + filename」取文件——改为按 basename 归一（两条断言 + 两个小工具函数），示例库被应用保存过一次就不再误报。同理 `e2e/06` 的「新附件」基线从写死一张燃尽图改为**打开时现采**。
+
+**预估：** 0.5d
+
+---
+
 ## 完成记录（只追加）
 
 <!-- 格式：
@@ -1111,3 +1139,5 @@ tests/**                         与 src 镜像
 
 - [2026-10-17] T34 | agent: workbuddy:sess-1017e | commit: "T34/T35: board inline task creation and settings panel with work calendar" | 验收: 6/6 全部勾选 | 备注: ①**缺口定性**：`task.create` 命令与 `createTaskCommand` 自 T10 就在，但没有任何任务的产出清单包含「新建任务」的 UI 入口——不是坏，是缺。②**产出**：`src/controllers/taskCreate.ts`（`pickDefaultTopicId` 四级优先链 / `nextOrderFor` 只看未归档同列 / `buildNewTask` 构造并摆正 status=done 的进度 / `planCreateTask` + `applyCreateTask`）、`src/views/BoardColumn.tsx` 的 `AddTaskRow`（三态：按钮 / 输入框 / 灰行说明）、`src/views/BoardView.tsx` 只外送 `(status, title)`、`src/App.tsx` 的 `Workspace.createTask` 用 `store.getVault()` 读实时库。③**接线理由**：BoardView 的契约是「不读 store」（T15 头部注释），而新建必须读实时库算排序键，否则连续回车会算出重复 order——所以命令在 Workspace 落，BoardView 保持纯投影。④**不破密度线**：入口放列**体**底部，列头仍是「列名 / 计数 / 完成比」三项。⑤**测试**：`tests/controllers/taskCreate.test.ts` 18 条 + `tests/views/BoardView.test.tsx` 新增 7 条 + `tests/App.test.tsx` 新增 1 条（真 repository + mock fs，验到 vault.json 字节）+ e2e 新增 2 条（含空库「先建一个话题」路径） | 遗留: 无
 - [2026-10-17] T35 | agent: workbuddy:sess-1017e | commit: "T34/T35: board inline task creation and settings panel with work calendar" | 验收: 10/10 全部勾选 | 备注: ①**缺口定性**：T14 交付的侧栏四入口里，里程碑 / 筛选器 / 备份分别在 T18/T16/T28 接真面板，只有「设置」一直停在 `panelPlaceholder`（点击提示「设置 面板尚未实现」），且 `settings.calendar` 自 T11 起被 ScheduleEngine 消费却无编辑入口。②**产出**：`src/controllers/settingsActions.ts`（`WEEK_ORDER` 周一→周日 / `isCalendarDate` 复用 ScheduleEngine 的 `toDateKey` / `toggleWorkday` + `canToggleWorkday` / `addCalendarDate` 跨表去冲突 / `sameCalendar` / 三个「空操作不发命令」的写入口）、`src/views/SettingsPanel.tsx`（语言 / 主题只读 / 甘特刻度 / 工作日历 / 关于，Esc + 背板关闭，贴侧栏浮层与 FilterBar 同形）、`src/locales/{zh,en}.ts` 尾部追加 `settingsPanel.*`（en 用扁平键，zh 用嵌套块，均自带闭合 `},`——避开 T21 记录过的 zh 尾追加丢闭合括号的坑）、`src/App.tsx` 挂载并把 `panelPlaceholder` 整体删除（已无调用方，留着会撞 `noUnusedLocals`）。③**两个刻意决定**：日历改动整块覆盖（逆 patch 一步整块回滚）；最后一个工作日开关置灰（空 workdays 会让排期撞扫描上限）。④**测试**：`tests/controllers/settingsActions.test.ts` 15 条 + `tests/views/SettingsPanel.test.tsx` 17 条 + `tests/App.test.tsx` 新增 2 条（改语言落盘、改日历落盘）+ e2e 新增 2 条。⑤**文档同步**：`docs/user-guide.md` 第 6/9/12 项此前仍写着设置面板 / 备份面板 / 图表导出「尚未实现」（T23/T28 已实现但手册未更新），本次一并改写，并补「新建任务」「设置」两行；`docs/visual-audit.md` 第 5 节的底部入口行同步。⑥**全量验证**：`tsc` 0 / `npm test` **777 passed (44 files)** / `npm run e2e` **29 passed + 1 skipped** / `npm run build` **10/10**（产物 1111401 字节，上限 1677721） | 遗留: 无
+
+- [2026-10-17] T36 | agent: workbuddy:sess-1017f | commit: "T36: task details as a centred modal instead of a right side drawer" | 验收: 6/6 全部勾选 | 备注: ①**改动性质**：呈现层变更，写入口径零改动——五个分区、`patchTaskCommand` / `link.*` 命令、撤销栈、保存指示全部照旧，改的只是「这块面以什么形式出现」。②**落点**：`TaskDrawer.tsx` 由 `aside(position:fixed;right:0;width:400)` 改为「遮罩 + 居中面板（maxWidth 760 / maxHeight 100%）」；遮罩关闭按「按下与抬起都在遮罩上」双判定（弹窗里有富文本编辑器，跨元素拖选的 click 会落在共同祖先上，只看 click 会误关）；打开时焦点进面板、关闭还给触发它的卡片（`preventScroll`）；**刻意不做 Tab 焦点陷阱**——笔记任务列表用 Tab 缩进，trap 会吃掉该键。组件名与 `drawer-*` 测试 id 沿用 T17（改名要掀 6 个测试文件约 200 条断言，收益只是名字好听），另加 `data-presentation="modal"`。③**联动修正**：`ConflictDialog` 补 `z-index: 70`（此前靠 DOM 顺序压在抽屉上，改成遮罩后不提层会把冲突三选关在遮罩后面）；`Lightbox` 的 `var(--oe-overlay)` 在主题里**从未定义**（T25 起的隐性 bug，遮罩实际是透明的）→ 改 `var(--oe-scrim)`；删掉 App 里零引用的 `drawer-host` 占位 div。④**顺带修两处活夹具脆性**（本次跑测试时被「用户真的打开过示例库」触红，非本次引入）：`e2e/fixtures/exampleVault.ts` 装夹具时覆写 settings 的 locale/theme/ganttScale/lastFilter（示例库是活文件，里面已带一次真实使用留下的 en + 筛选 + 周刻度）；`tests/examples/exampleVault.test.ts` 与 `e2e/06` 不再假定 `assets[].filename` 只有一种形态 / 「新附件」基线不再写死一张图。**磁盘上的 example.vault/vault.json 未复位**——那是用户的库，改由夹具侧确定化。⑤**测试**：`tests/views/TaskDrawer.test.tsx` +9 条（几何 / 语义 / 三出路 / 拖选不误关 / 焦点交接 / 五分区）、`e2e/08-task-modal.spec.ts` 新增 4 条（真浏览器量几何、`elementFromPoint` 证明遮挡、Esc 后焦点回到卡片）。⑥**文档**：`docs/user-guide.md` 新增「13 · 任务详情弹窗」行（后两行顺延为 14/15）、`docs/delivery.md`（验收数字 + T36 行 + 已知限制）、`docs/visual-audit.md`（第 5 节加「任务详情呈现：刻意偏离设计稿 02」行、第 6 节措辞）、spec §6.3 就地记变更（原设计稿 02 画的仍是抽屉，读图以该条为准）。⑦**全量验证**：`tsc` 0 / `npm test` **785 passed (44 files)** / `npm run e2e` **33 passed + 1 skipped** / `npm run build` **10/10**（产物 1112110 字节，上限 1677721） | 遗留: 里程碑面板与筛选 / 设置仍是贴侧边的浮层（本次只按要求改了任务；两者是「边看边改」的辅助面，若也要弹窗化需另开任务）

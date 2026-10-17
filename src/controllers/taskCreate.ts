@@ -22,7 +22,7 @@ import { mid } from '../domain/lexorank'
 import type { Topic, Kind, Priority, Status, Task, Vault } from '../domain/types'
 import { sortByOrder } from './boardDnd'
 
-/** 新任务的默认属性：类别与优先级给中性初值，明细在 T17 抽屉里改。 */
+/** 新任务的默认属性：类别与优先级给中性初值，明细在任务详情弹窗（T17）里改。 */
 export const NEW_TASK_KIND: Kind = 'feature'
 export const NEW_TASK_PRIORITY: Priority = 'P2'
 

@@ -104,7 +104,7 @@ export function BoardView(props: BoardViewProps) {
   }, [visible])
 
   // 拖拽结束后的 click 抑制：pointerdown/pointerup 跨卡片时 click 落在公共容器上，
-  // 但同卡内误放仍会触发 click；用一次性标记挡掉，避免拖完莫名打开抽屉
+  // 但同卡内误放仍会触发 click；用一次性标记挡掉，避免拖完莫名打开弹窗
   const suppressClickRef = useRef(false)
   function clearSuppressClick(): void {
     setTimeout(() => {

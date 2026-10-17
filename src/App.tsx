@@ -361,7 +361,7 @@ function StartupScreen(props: {
 /**
  * 视图宿主：vault 与 filter 只在这里派生一次，看板与甘特共用（spec §6.2）。
  * 看板走 T15 的 BoardView（根元素自带 data-testid="board"，E2E 依赖它）；
- * 甘特走 T20/T21 的 GanttView。详情抽屉（T17）在 App 顶层挂载（fixed），此处只留挂载位。
+ * 甘特走 T20/T21 的 GanttView。任务详情弹窗（T17；T36 起改为居中弹窗）在 App 顶层挂载（fixed 遮罩），此处不再留挂载位。
  */
 function Workspace(props: {
   store: VaultStore
@@ -371,7 +371,7 @@ function Workspace(props: {
   bus: CommandBus
   /** 甘特菱形（data-gantt-milestone）点击 → 拉起里程碑面板（T18 选中契约的落点）。 */
   onOpenMilestone?: (milestoneId: string) => void
-  /** 看板卡片 / 甘特条（data-gantt-bar）点击 → 拉起任务详情抽屉（T17 选中契约的落点）。 */
+  /** 看板卡片 / 甘特条（data-gantt-bar）点击 → 拉起任务详情弹窗（T17 选中契约的落点）。 */
   onOpenTask?: (taskId: string) => void
 }) {
   const { store, view, t, bus, onOpenMilestone, onOpenTask } = props
@@ -397,7 +397,7 @@ function Workspace(props: {
         style={{ flex: 1, minWidth: 0, minHeight: 0 }}
         // T18/T17 的选中契约只交付了 data-gantt-milestone / data-gantt-bar 标记 + props 契约，
         // GanttCanvas 的菱形与任务条都无自带 onClick——这里用事件委托捕获点击，
-        // 把 id 外送给 App 拉起里程碑面板 / 任务抽屉（零侵入 GanttView/GanttCanvas）。
+        // 把 id 外送给 App 拉起里程碑面板 / 任务弹窗（零侵入 GanttView/GanttCanvas）。
         onClick={(event) => {
           const el = event.target as Element | null
           if (el === null) return
@@ -422,7 +422,7 @@ function Workspace(props: {
             filter={filter}
             scale={vault.settings.ganttScale}
             t={t}
-            // T22：未排期侧栏点一行 → 同一个任务抽屉（与看板卡片、甘特条同一入口）
+            // T22：未排期侧栏点一行 → 同一个任务弹窗（与看板卡片、甘特条同一入口）
             onOpenTask={onOpenTask}
           />
         ) : (
@@ -437,8 +437,8 @@ function Workspace(props: {
           />
         )}
       </div>
-      {/* 详情抽屉宿主（T17 已接线；TaskDrawer 为 fixed 抽屉，在 App 顶层挂载） */}
-      <div data-testid="drawer-host" style={{ flex: '0 0 auto', minWidth: 0 }} />
+      {/* T36：任务详情是 fixed 居中弹窗（TaskDrawer 自带遮罩，在 App 顶层挂载），
+          不再需要 T15 预留给「右侧抽屉列」的宿主占位 div —— 它没有任何引用，已删除。 */}
     </div>
   )
 }
@@ -455,7 +455,8 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
   // 里程碑面板（T18）：受控开合 + 选中态。侧栏入口与甘特菱形点击共用同一面板。
   const [milestoneOpen, setMilestoneOpen] = useState(false)
   const [milestoneSelectedId, setMilestoneSelectedId] = useState<string | null>(null)
-  // T17 详情抽屉：受控开合 + 选中任务 id。BoardView 卡片与甘特条点击共用同一入口。
+  // T17 任务详情弹窗（T36 起居中弹窗）：受控开合 + 选中任务 id。
+  // 看板卡片、甘特条、未排期侧栏三处点击共用同一入口。
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null)
   // T16 筛选面板：受控开合（侧栏「筛选器」入口拉起）。

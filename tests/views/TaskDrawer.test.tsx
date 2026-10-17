@@ -699,17 +699,141 @@ describe('纯函数', () => {
 })
 
 describe('视图接线边界', () => {
-  it('抽屉不渲染任何“保存”按钮：写操作即时落库，由 Autosave 负责落盘', () => {
+  it('弹窗不渲染任何“保存”按钮：写操作即时落库，由 Autosave 负责落盘', () => {
     const { view } = setup()
     expect(view.queryByRole('button', { name: '保存' })).toBeNull()
   })
+})
 
-  it('右侧约 400px 覆盖式抽屉（fixed + right:0），样式可被外部覆写', () => {
-    const { view } = setup({ style: { width: 420 } })
-    const drawer = view.getByTestId('task-drawer')
-    expect(drawer.style.position).toBe('fixed')
-    expect(drawer.style.right).toBe('0px')
-    expect(drawer.style.bottom).toBe('0px')
-    expect(drawer.style.width).toBe('420px')
+// ─────────────────────── T36 · 居中弹窗呈现（不再是右侧抽屉） ───────────────────────
+//
+// 产品方要求「任务编辑用弹窗，不要从侧边弹出」。以下用例把弹窗语义钉住：
+// 遮罩居中、role=dialog、三条关闭出路、以及「拖选文字不误关」这条只有富文本弹窗才有的坑。
+
+describe('T36 · 居中弹窗呈现', () => {
+  it('遮罩铺满视口并居中承载面板，面板不再是贴右的 400px 侧栏', () => {
+    const { view } = setup()
+    const overlay = view.getByTestId('task-modal')
+    const panel = view.getByTestId('task-drawer')
+
+    expect(overlay.style.position).toBe('fixed')
+    expect(overlay.style.inset).toBe('0px')
+    expect(overlay.style.display).toBe('flex')
+    expect(overlay.style.justifyContent).toBe('center')
+    expect(overlay.style.alignItems).toBe('center')
+    expect(overlay.style.background).toContain('--oe-scrim')
+
+    // 面板必须挂在遮罩里（不是各自 fixed 的兄弟节点）
+    expect(panel.parentElement).toBe(overlay)
+    expect(panel.style.position).toBe('')
+    expect(panel.style.right).toBe('')
+    expect(panel.style.top).toBe('')
+    expect(panel.style.width).toBe('100%')
+    expect(panel.style.maxWidth).toBe('760px')
+    // 高度顶住遮罩内容盒，内部滚动交给分区容器
+    expect(panel.style.maxHeight).toBe('100%')
+    expect(panel.style.overflow).toBe('hidden')
+  })
+
+  it('面板是对话框本体：role=dialog + aria-modal + 可聚焦 + 弹窗标记', () => {
+    const { view } = setup()
+    const panel = view.getByTestId('task-drawer')
+    expect(panel.getAttribute('role')).toBe('dialog')
+    expect(panel.getAttribute('aria-modal')).toBe('true')
+    expect(panel.getAttribute('aria-label')).toBe('任务详情')
+    expect(panel.getAttribute('data-presentation')).toBe('modal')
+    // tabIndex=-1：程序化焦点落点（Tab 顺序不进入它）
+    expect(panel.getAttribute('tabindex')).toBe('-1')
+  })
+
+  it('样式可被外部覆写（面板宽度与遮罩内边距）', () => {
+    const { view } = setup({ style: { maxWidth: 560 } })
+    expect(view.getByTestId('task-drawer').style.maxWidth).toBe('560px')
+    expect(view.getByTestId('task-modal').style.padding).toBe('24px')
+  })
+
+  it('点遮罩空白处关闭：onOpenChange(false) + onSelect(null)', () => {
+    const { view, onOpenChange, onSelect } = setup()
+    const overlay = view.getByTestId('task-modal')
+    fireEvent.mouseDown(overlay)
+    fireEvent.click(overlay)
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    expect(onSelect).toHaveBeenCalledWith(null)
+  })
+
+  it('从面板内往外拖选文字（按下在面板、click 落在共同祖先）不会误关弹窗', () => {
+    // setup() 用 taskId="x" 挂载 → 组件会在挂载时按「外部选中」外送一次 onOpenChange(true)，
+    // 这里只关心「关闭」，所以先清账（既有用例断言的是 toHaveBeenCalledWith(false)，不受影响）
+    const { view, onOpenChange, onSelect } = setup()
+    onOpenChange.mockClear()
+    onSelect.mockClear()
+
+    const overlay = view.getByTestId('task-modal')
+    // 浏览器把跨元素的 click 派发到「按下与抬起」的共同祖先，也就是这个遮罩
+    fireEvent.mouseDown(view.getByTestId('drawer-title-display'))
+    fireEvent.click(overlay)
+    expect(onOpenChange).not.toHaveBeenCalled()
+    expect(onSelect).not.toHaveBeenCalled()
+    // 但认定过一次「按下在外部」之后，标记要复位——否则下次真点外部会被上一次性状放行
+    fireEvent.mouseDown(overlay)
+    fireEvent.click(overlay)
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('点面板内部不关闭', () => {
+    const { view, onOpenChange } = setup()
+    onOpenChange.mockClear()
+    const panel = view.getByTestId('task-drawer')
+    fireEvent.mouseDown(panel)
+    fireEvent.click(panel)
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
+  it('关闭按钮是第三条出路，与 Esc / 点遮罩等价', () => {
+    const { view, onOpenChange, onSelect } = setup()
+    fireEvent.click(view.getByTestId('drawer-close'))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    expect(onSelect).toHaveBeenCalledWith(null)
+  })
+
+  it('打开时焦点进面板，关闭后还给打开它的那个元素', () => {
+    const store = createVaultStore(makeVault())
+    const bus = createCommandBus(store)
+    // 照 App 的真实接线：选中 id 与开合都是状态，任务 id 起手为 null（看板卡片点击时才给）
+    function Harness() {
+      const [open, setOpen] = useState(false)
+      const [taskId, setTaskId] = useState<string | null>(null)
+      return (
+        <>
+          <button
+            type="button"
+            data-testid="board-card-x"
+            onClick={() => {
+              setTaskId('x')
+              setOpen(true)
+            }}
+          >
+            登录页迭代
+          </button>
+          <TaskDrawer store={store} bus={bus} t={t()} open={open} taskId={taskId} onOpenChange={setOpen} />
+        </>
+      )
+    }
+    const view = render(<Harness />)
+    const trigger = view.getByTestId('board-card-x')
+    trigger.focus()
+    fireEvent.click(trigger)
+
+    expect(document.activeElement).toBe(view.getByTestId('task-drawer'))
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(view.queryByTestId('task-drawer')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('弹窗里仍是那五个分区（密度上限不因改呈现而变）', () => {
+    const { view } = setup()
+    const panel = view.getByTestId('task-drawer')
+    expect(panel.querySelectorAll('[data-testid$="-section"]').length).toBe(5)
   })
 })

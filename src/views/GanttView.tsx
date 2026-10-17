@@ -85,7 +85,7 @@ export interface GanttViewProps {
   /** 画布可视宽度（不含左侧任务表）；省略时用控制器内的值。 */
   width?: number
   t?: (key: MsgKey, params?: TranslateParams) => string
-  /** 点击未排期任务（T22 补排期入口）→ 拉起任务详情抽屉；接线归集成窗口。 */
+  /** 点击未排期任务（T22 补排期入口）→ 拉起任务详情弹窗；接线归集成窗口。 */
   onOpenTask?: (taskId: string) => void
   style?: CSSProperties
 }

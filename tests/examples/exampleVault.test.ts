@@ -29,6 +29,24 @@ function isOverdue(task: Task): boolean {
   return task.due !== undefined && task.status !== 'done' && task.due < TODAY
 }
 
+/**
+ * `assets.filename` 的两种合法形态都要能落到磁盘上：
+ * 本仓库的应用写的是**带前缀的相对路径**（`assets/<id>.<ext>`，见 assetStore.put），
+ * 而 T33 手写的示例库用的是**纯文件名**（`asset-burndown.png`）；
+ * 领域层两处都刻意兼容（assetGc 的用例注明「保留表里原样，可能不带前缀」）。
+ * 所以断言不能假定只有一种——示例库被应用打开并保存过一次之后，
+ * 里面就会出现应用写的记录（本用例最初就是这样被真实使用触红的）。
+ */
+function assetFilePath(filename: string): string {
+  const bare = filename.startsWith('assets/') ? filename.slice('assets/'.length) : filename
+  return join(VAULT_DIR, 'assets', bare)
+}
+
+/** 同一口径的「去掉 assets/ 前缀」比较键（表里的 filename 与笔记里的引用各有形态）。 */
+function bareName(filename: string): string {
+  return filename.startsWith('assets/') ? filename.slice('assets/'.length) : filename
+}
+
 describe('T33 · example.vault', () => {
   it('通过 VaultSchema 校验与迁移（连接时不报错）', () => {
     expect(() => loadVault()).not.toThrow()
@@ -157,10 +175,10 @@ describe('T33 · example.vault', () => {
     expect(imageRefs.length).toBeGreaterThanOrEqual(1)
 
     for (const { task, filename } of imageRefs) {
-      const asset = vault.assets.find((candidate) => candidate.filename === filename)
+      const asset = vault.assets.find((candidate) => bareName(candidate.filename) === bareName(filename))
       expect(asset, `任务 ${task.id} 引用的 ${filename} 未登记在 assets[]`).toBeDefined()
 
-      const path = join(VAULT_DIR, 'assets', filename)
+      const path = assetFilePath(filename)
       expect(existsSync(path), `资产文件缺失：${filename}`).toBe(true)
       // sizeBytes 必须等于磁盘真实体积，否则后续「清理未引用附件」会误判
       expect(statSync(path).size).toBe(asset?.sizeBytes)
@@ -170,7 +188,7 @@ describe('T33 · example.vault', () => {
   it('资产是合法的 PNG（不能被当成乱码文件塞进 assets/）', () => {
     const vault = loadVault()
     for (const asset of vault.assets) {
-      const bytes = readFileSync(join(VAULT_DIR, 'assets', asset.filename))
+      const bytes = readFileSync(assetFilePath(asset.filename))
       expect([...bytes.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
       expect(bytes.subarray(12, 16).toString('ascii')).toBe('IHDR')
     }
