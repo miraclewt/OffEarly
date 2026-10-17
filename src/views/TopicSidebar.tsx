@@ -25,7 +25,6 @@ import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
 import type { IconName } from './IconSprite'
 
-const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
 const MUTED = 'var(--oe-text-muted)'
 const INDIGO = 'var(--oe-accent)'
@@ -244,11 +243,15 @@ export function TopicSidebar(props: TopicSidebarProps) {
             height: 26,
             paddingLeft: 4 + depth * INDENT,
             paddingRight: 4,
-            // 左色条 / 整行底色都在禁用之列（spec 9.3 C 方案），选中态只用文字色与底色提示
-            background: selected ? ROW_HOVER : hovered ? 'var(--oe-fill-subtle)' : 'transparent',
+            // 左色条 / 整行底色都在禁用之列（spec 9.3 C 方案），选中态只用圆角浅底行 + 文字色
+            background: selected ? ROW_HOVER : hovered ? 'var(--oe-row-hover)' : 'transparent',
             borderRadius: 'var(--oe-radius-control)',
             cursor: 'pointer',
-            color: topic.archived ? ARCHIVED_TEXT : selected ? TEXT : 'var(--oe-text-secondary)',
+            color: topic.archived
+              ? ARCHIVED_TEXT
+              : selected
+                ? 'var(--oe-accent-deep)'
+                : 'var(--oe-text-secondary)',
             fontSize: 13,
             fontWeight: selected ? 600 : 400,
           }}
@@ -289,7 +292,7 @@ export function TopicSidebar(props: TopicSidebarProps) {
               width: 10,
               height: 10,
               flex: '0 0 10px',
-              borderRadius: 'var(--oe-radius-control)',
+              borderRadius: '50%',
               background: topic.color,
               opacity: topic.archived ? 0.4 : 1,
             }}
@@ -383,7 +386,7 @@ export function TopicSidebar(props: TopicSidebarProps) {
             minWidth: 132,
             padding: 4,
             background: 'var(--oe-surface)',
-            border: `1px solid ${BORDER}`,
+            border: '1px solid var(--oe-separator)',
             borderRadius: 'var(--oe-radius-card)',
             boxShadow: 'var(--oe-shadow-hover)',
             zIndex: 11,
@@ -463,8 +466,8 @@ export function TopicSidebar(props: TopicSidebarProps) {
         flex: '0 0 220px',
         height: '100%',
         minHeight: 0,
-        background: 'var(--oe-fill)',
-        borderRight: `1px solid ${BORDER}`,
+        // 材质由 App 外壳的振镜侧栏提供，这里保持透明，避免双层底色
+        background: 'transparent',
         boxSizing: 'border-box',
         fontFamily: 'var(--oe-font)',
         ...props.style,
@@ -476,9 +479,10 @@ export function TopicSidebar(props: TopicSidebarProps) {
           alignItems: 'center',
           gap: 6,
           padding: '10px 8px 6px 12px',
-          fontSize: 12,
-          fontWeight: 600,
-          color: MUTED,
+          fontSize: 11,
+          fontWeight: 650,
+          letterSpacing: '0.02em',
+          color: 'var(--oe-text-faint)',
         }}
       >
         <span style={{ flex: 1 }}>{t('sidebar.topics')}</span>
@@ -537,7 +541,13 @@ export function TopicSidebar(props: TopicSidebarProps) {
 
       <div
         data-testid="topic-sidebar-footer"
-        style={{ borderTop: `1px solid ${BORDER}`, padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}
+        style={{
+          borderTop: '1px solid var(--oe-separator)',
+          padding: 6,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
+        }}
       >
         {bottom.map((entry) => (
           <button

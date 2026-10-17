@@ -174,9 +174,9 @@ describe('T22-1 · 右侧折叠面板列出 unscheduled（标题 + topic 色点�
 
     const canvas = view.getByTestId('gantt-canvas-scroll')
     const panel = view.getByTestId('gantt-unscheduled-panel')
-    // 面板在 DOM 中位于画布之后（右侧），且同处一行；颜色取 --oe-* token
+    // 面板在 DOM 中位于画布之后（右侧），且同处一行；结构分隔取发丝线 token
     expect(canvas.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(panel.getAttribute('style')).toContain('var(--oe-border)')
+    expect(panel.getAttribute('style')).toContain('var(--oe-separator)')
   })
 
   it('没有未排期任务时给一句空态文案', () => {

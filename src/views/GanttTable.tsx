@@ -8,13 +8,14 @@ import type { GanttRowWindow } from '../controllers/ganttViewport'
 import type { GanttRow } from '../domain/ganttModel'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 
-const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
 const TEXT_MUTED = 'var(--oe-text-muted)'
 const LANE_FILL = 'var(--oe-lane-fill)'
-const DEFAULT_TOPIC_COLOR = '#4F46E5'
+const DEFAULT_TOPIC_COLOR = '#5E5CE6'
 
-const DATE_WIDTH = 58
+/** 日期列：11px 等宽数字的 `YYYY-MM-DD` 约 62px，再加 10px 列间距才不会与下一列粘连。 */
+const DATE_WIDTH = 74
+const DATE_GUTTER = 10
 const PROGRESS_WIDTH = 52
 
 export interface GanttTableProps {
@@ -41,7 +42,7 @@ function Swatch(props: { color: string | null }) {
         width: 8,
         height: 8,
         flex: '0 0 8px',
-        borderRadius: 'var(--oe-radius-control)',
+        borderRadius: '50%',
         background: props.color ?? DEFAULT_TOPIC_COLOR,
       }}
     />
@@ -68,7 +69,7 @@ function Row(props: { row: GanttRow; top: number; height: number; t: GanttTableP
         display: 'flex',
         alignItems: 'center',
         boxSizing: 'border-box',
-        borderBottom: `1px solid ${BORDER}`,
+        borderBottom: '1px solid var(--oe-separator)',
         fontSize: 12,
         color: TEXT,
       }}
@@ -109,8 +110,34 @@ function Row(props: { row: GanttRow; top: number; height: number; t: GanttTableP
           {row.label}
         </span>
       </div>
-      <div style={{ width: DATE_WIDTH, color: TEXT_MUTED, flex: `0 0 ${DATE_WIDTH}px` }}>{start}</div>
-      <div style={{ width: DATE_WIDTH, color: TEXT_MUTED, flex: `0 0 ${DATE_WIDTH}px` }}>{due}</div>
+      <div
+        style={{
+          width: DATE_WIDTH,
+          color: TEXT_MUTED,
+          flex: `0 0 ${DATE_WIDTH}px`,
+          paddingRight: DATE_GUTTER,
+          boxSizing: 'border-box',
+          whiteSpace: 'nowrap',
+          fontSize: 11,
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {start}
+      </div>
+      <div
+        style={{
+          width: DATE_WIDTH,
+          color: TEXT_MUTED,
+          flex: `0 0 ${DATE_WIDTH}px`,
+          paddingRight: DATE_GUTTER,
+          boxSizing: 'border-box',
+          whiteSpace: 'nowrap',
+          fontSize: 11,
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {due}
+      </div>
       <div
         style={{
           width: PROGRESS_WIDTH,
@@ -140,7 +167,7 @@ export function GanttTable(props: GanttTableProps) {
         display: 'flex',
         flexDirection: 'column',
         background: 'var(--oe-surface)',
-        borderRight: `1px solid ${BORDER}`,
+        borderRight: '1px solid var(--oe-separator)',
         boxSizing: 'border-box',
       }}
     >
@@ -151,7 +178,7 @@ export function GanttTable(props: GanttTableProps) {
           flex: `0 0 ${GANTT_HEADER_HEIGHT}px`,
           display: 'flex',
           alignItems: 'center',
-          borderBottom: `1px solid ${BORDER}`,
+          borderBottom: '1px solid var(--oe-separator)',
           fontSize: 11,
           color: TEXT_MUTED,
           boxSizing: 'border-box',
@@ -160,10 +187,16 @@ export function GanttTable(props: GanttTableProps) {
         <div data-gantt-table-col="task" style={{ flex: 1, minWidth: 0, paddingLeft: 8 }}>
           {t('gantt.task')}
         </div>
-        <div data-gantt-table-col="start" style={{ width: DATE_WIDTH, flex: `0 0 ${DATE_WIDTH}px` }}>
+        <div
+          data-gantt-table-col="start"
+          style={{ width: DATE_WIDTH, flex: `0 0 ${DATE_WIDTH}px`, paddingRight: DATE_GUTTER, boxSizing: 'border-box' }}
+        >
           {t('gantt.start')}
         </div>
-        <div data-gantt-table-col="end" style={{ width: DATE_WIDTH, flex: `0 0 ${DATE_WIDTH}px` }}>
+        <div
+          data-gantt-table-col="end"
+          style={{ width: DATE_WIDTH, flex: `0 0 ${DATE_WIDTH}px`, paddingRight: DATE_GUTTER, boxSizing: 'border-box' }}
+        >
           {t('gantt.end')}
         </div>
         <div
@@ -201,7 +234,7 @@ export function GanttTable(props: GanttTableProps) {
                 paddingLeft: 8,
                 boxSizing: 'border-box',
                 background: LANE_FILL,
-                borderBottom: `1px solid ${BORDER}`,
+                borderBottom: '1px solid var(--oe-separator)',
                 fontSize: 12,
                 fontWeight: 600,
                 color: TEXT,

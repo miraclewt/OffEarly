@@ -24,26 +24,26 @@ import type { MsgKey, TranslateParams } from '../locales/i18n'
  * 直接断言，改动等于改契约。
  */
 
-/** 周末 / 节假日列浅灰底（spec 5.4 写死的 #F5F5F5）。 */
-export const GANTT_OFF_COLUMN_FILL = '#F5F5F5'
+/** 周末 / 节假日列浅灰底。 */
+export const GANTT_OFF_COLUMN_FILL = '#F5F5F7'
 /** 基线细灰条。 */
-export const GANTT_BASELINE_FILL = '#9CA3AF'
-/** 今日线：1px 红。 */
-export const GANTT_TODAY_COLOR = '#DC2626'
+export const GANTT_BASELINE_FILL = '#8E8E93'
+/** 今日线：1px 系统红。 */
+export const GANTT_TODAY_COLOR = '#FF3B30'
 /** 任务条浅底：用 topic 色本身 + 透明度，颜色语义与侧栏 swatch 一致。 */
 export const GANTT_BAR_OPACITY = 0.18
 /** 进度内条：topic 色压暗的比例（深色）。 */
 export const GANTT_PROGRESS_MIX = 0.35
 
-const GRID_COLOR = 'var(--oe-border)'
-const TOPIC_ROW_FILL = '#FAFAFA'
-const LANE_FILL = '#F8FAFC'
+const GRID_COLOR = 'var(--oe-separator)'
+const TOPIC_ROW_FILL = '#FAFAFC'
+const LANE_FILL = '#F7F7FA'
 /** 普通依赖箭头：中性灰。 */
-export const GANTT_ARROW_COLOR = '#9CA3AF'
-/** 关键路径高亮：主强调色深靛（spec 7）。 */
-export const GANTT_CRITICAL_COLOR = '#4F46E5'
-/** 成环依赖：逾期红（spec 7 语义色）+ 虚线，提示先解环（spec 5.3 降级）。 */
-export const GANTT_CYCLE_COLOR = '#DC2626'
+export const GANTT_ARROW_COLOR = '#8E8E93'
+/** 关键路径高亮：系统靛深档。 */
+export const GANTT_CRITICAL_COLOR = '#4038C8'
+/** 成环依赖：系统红 + 虚线，提示先解环（spec 5.3 降级）。 */
+export const GANTT_CYCLE_COLOR = '#FF3B30'
 /** hover 时非直接依赖元素的透明度（T21 验收 4）。 */
 export const GANTT_HOVER_DIM_OPACITY = 0.25
 /** 关键路径任务条的描边宽度（「描边加粗」）。 */
@@ -54,7 +54,7 @@ const CYCLE_DASH = '5 4'
 const ARROW_GAP = 10
 const TEXT_MUTED = 'var(--oe-text-muted)'
 const TEXT = 'var(--oe-text-secondary)'
-const DEFAULT_TOPIC_COLOR = '#4F46E5'
+const DEFAULT_TOPIC_COLOR = '#5E5CE6'
 const MILESTONE_SIZE = 12
 export const GANTT_ARROW_MARKER_ID = 'oe-gantt-arrow-head'
 export const GANTT_ARROW_MARKER_CRITICAL_ID = 'oe-gantt-arrow-head-critical'
@@ -450,16 +450,17 @@ export function GanttCanvas(props: GanttCanvasProps) {
               data-testid="gantt-today-label"
               style={{
                 position: 'absolute',
-                top: 0,
+                top: 1,
                 left: todayX,
                 transform: 'translateX(-50%)',
-                padding: '0 4px',
-                height: 18,
-                lineHeight: '18px',
+                padding: '0 6px',
+                height: 16,
+                lineHeight: '16px',
                 fontSize: 10,
-                color: 'var(--oe-on-accent)',
-                background: GANTT_TODAY_COLOR,
-                borderRadius: 'var(--oe-radius-control)',
+                fontWeight: 600,
+                color: GANTT_TODAY_COLOR,
+                background: 'rgba(255, 59, 48, 0.12)',
+                borderRadius: 999,
                 whiteSpace: 'nowrap',
               }}
             >
@@ -610,7 +611,7 @@ export function GanttCanvas(props: GanttCanvasProps) {
                           y={row.bar.y + offset}
                           width={row.bar.width * zoom}
                           height={row.bar.height}
-                          rx={3}
+                          rx={6}
                           fill={topicBarFill(row.color)}
                           fillOpacity={GANTT_BAR_OPACITY}
                           stroke={barCritical ? GANTT_CRITICAL_COLOR : undefined}
@@ -626,7 +627,7 @@ export function GanttCanvas(props: GanttCanvasProps) {
                             y={row.bar.y + offset}
                             width={row.bar.progressWidth * zoom}
                             height={row.bar.height}
-                            rx={2}
+                            rx={6}
                             fill={topicProgressFill(row.color)}
                             opacity={dimOpacity}
                             pointerEvents="none"
@@ -639,7 +640,7 @@ export function GanttCanvas(props: GanttCanvasProps) {
                             y={row.baseline.y + offset}
                             width={row.baseline.width * zoom}
                             height={row.baseline.height}
-                            rx={2}
+                            rx={3}
                             fill={GANTT_BASELINE_FILL}
                             opacity={dimOpacity}
                             pointerEvents="none"

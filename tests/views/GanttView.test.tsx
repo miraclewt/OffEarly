@@ -380,7 +380,7 @@ describe('T20-3 · 任务条 / 里程碑 / 跨 topic 轨道', () => {
     const bar = view.container.querySelector('[data-gantt-bar="t1"]')!
     const progress = view.container.querySelector('[data-gantt-progress="t1"]')!
 
-    expect(bar.getAttribute('rx')).toBe('3')
+    expect(bar.getAttribute('rx')).toBe('6')
     expect(bar.getAttribute('data-topic-id')).toBe('a')
     expect(bar.getAttribute('fill')).toBe(TOPIC_A_COLOR)
     expect(Number(bar.getAttribute('fill-opacity'))).toBeLessThan(0.5)

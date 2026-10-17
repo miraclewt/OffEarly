@@ -194,6 +194,8 @@ const BACKDROP: CSSProperties = {
   justifyContent: 'center',
   padding: 24,
   background: 'var(--oe-scrim)',
+  backdropFilter: 'blur(8px) saturate(140%)',
+  WebkitBackdropFilter: 'blur(8px) saturate(140%)',
 }
 
 const PANEL: CSSProperties = {
@@ -205,9 +207,9 @@ const PANEL: CSSProperties = {
   maxHeight: 720,
   overflow: 'hidden',
   background: SURFACE,
-  border: `1px solid ${BORDER}`,
+  border: '1px solid var(--oe-separator)',
   borderRadius: RADIUS_CARD,
-  boxShadow: 'var(--oe-shadow-hover)',
+  boxShadow: 'var(--oe-shadow-pop)',
 }
 
 const HEADER: CSSProperties = {

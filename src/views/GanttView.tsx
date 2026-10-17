@@ -36,7 +36,6 @@ import { GanttCanvas } from './GanttCanvas'
 import { GanttTable } from './GanttTable'
 import { Icon } from './IconSprite'
 
-const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
 const TEXT_MUTED = 'var(--oe-text-muted)'
 const INDIGO = 'var(--oe-accent)'
@@ -306,16 +305,6 @@ export function GanttView(props: GanttViewProps) {
         data-testid={`gantt-scale-${scale}`}
         aria-pressed={active}
         onClick={() => viewport.setScale(scale)}
-        style={{
-          padding: '2px 10px',
-          fontSize: 12,
-          lineHeight: '20px',
-          color: active ? 'var(--oe-on-accent)' : TEXT,
-          background: active ? INDIGO : 'var(--oe-surface)',
-          border: `1px solid ${active ? INDIGO : BORDER}`,
-          borderRadius: 'var(--oe-radius-control)',
-          cursor: 'pointer',
-        }}
       >
         {label}
       </button>
@@ -351,12 +340,14 @@ export function GanttView(props: GanttViewProps) {
           alignItems: 'center',
           gap: 8,
           padding: '0 12px',
-          borderBottom: `1px solid ${BORDER}`,
+          borderBottom: '1px solid var(--oe-separator)',
           boxSizing: 'border-box',
         }}
       >
-        {scaleButton('day', t('gantt.scale.day'))}
-        {scaleButton('week', t('gantt.scale.week'))}
+        <div className="oe-seg">
+          {scaleButton('day', t('gantt.scale.day'))}
+          {scaleButton('week', t('gantt.scale.week'))}
+        </div>
 
         <span style={{ width: 8 }} />
 
@@ -455,7 +446,7 @@ export function GanttView(props: GanttViewProps) {
                 padding: 10,
                 boxSizing: 'border-box',
                 background: 'var(--oe-surface)',
-                border: `1px solid ${BORDER}`,
+                border: '1px solid var(--oe-separator)',
                 borderRadius: 'var(--oe-radius-card)',
                 boxShadow: 'var(--oe-shadow-hover)',
                 color: TEXT,
@@ -609,7 +600,7 @@ function GanttUnscheduledPanel(props: GanttUnscheduledPanelProps): ReactElement 
         flexDirection: 'column',
         minHeight: 0,
         boxSizing: 'border-box',
-        borderLeft: `1px solid ${BORDER}`,
+        borderLeft: '1px solid var(--oe-separator)',
         background: 'var(--oe-surface)',
         color: TEXT,
         fontFamily: BODY_FONT,
@@ -635,7 +626,7 @@ function GanttUnscheduledPanel(props: GanttUnscheduledPanelProps): ReactElement 
           color: TEXT,
           background: 'transparent',
           border: 'none',
-          borderBottom: `1px solid ${BORDER}`,
+          borderBottom: '1px solid var(--oe-separator)',
           cursor: 'pointer',
         }}
       >
@@ -695,7 +686,7 @@ function GanttUnscheduledPanel(props: GanttUnscheduledPanelProps): ReactElement 
                     boxSizing: 'border-box',
                     fontSize: 12,
                     color: TEXT,
-                    borderBottom: `1px solid ${BORDER}`,
+                    borderBottom: '1px solid var(--oe-separator)',
                     cursor: 'pointer',
                   }}
                 >
@@ -727,8 +718,8 @@ const iconButtonStyle: CSSProperties = {
   padding: 0,
   fontSize: 12,
   color: TEXT,
-  background: 'var(--oe-surface)',
-  border: `1px solid ${BORDER}`,
+  background: 'transparent',
+  border: 'none',
   borderRadius: 'var(--oe-radius-control)',
   cursor: 'pointer',
 }
@@ -739,8 +730,8 @@ const exportChipStyle: CSSProperties = {
   fontSize: 12,
   lineHeight: '18px',
   color: TEXT,
-  background: 'var(--oe-surface)',
-  border: `1px solid ${BORDER}`,
+  background: 'var(--oe-fill)',
+  border: 'none',
   borderRadius: 'var(--oe-radius-control)',
   cursor: 'pointer',
 }
@@ -748,7 +739,6 @@ const exportChipStyle: CSSProperties = {
 const exportChipActiveStyle: CSSProperties = {
   color: 'var(--oe-on-accent)',
   background: INDIGO,
-  border: `1px solid ${INDIGO}`,
 }
 
 const exportChipDisabledStyle: CSSProperties = {

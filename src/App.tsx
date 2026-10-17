@@ -61,7 +61,6 @@ import { BackupPanel } from './views/BackupPanel'
 import { SettingsPanel } from './views/SettingsPanel'
 
 const INDIGO = 'var(--oe-accent)'
-const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
 const MUTED = 'var(--oe-text-muted)'
 
@@ -297,8 +296,9 @@ const CARD: CSSProperties = {
   margin: '0 auto',
   padding: '28px 32px',
   background: 'var(--oe-surface)',
-  border: `1px solid ${BORDER}`,
-  borderRadius: 'var(--oe-radius-card)',
+  border: `1px solid var(--oe-separator)`,
+  borderRadius: 'var(--oe-radius-overlay)',
+  boxShadow: 'var(--oe-shadow-pop)',
   textAlign: 'center',
 }
 
@@ -342,9 +342,9 @@ function StartupScreen(props: {
               style={{
                 padding: '6px 16px',
                 fontSize: 13,
-                color: TEXT,
-                background: 'var(--oe-surface)',
-                border: `1px solid ${BORDER}`,
+                color: 'var(--oe-text-secondary)',
+                background: 'var(--oe-fill)',
+                border: 'none',
                 borderRadius: 'var(--oe-radius-control)',
                 cursor: 'pointer',
               }}
@@ -887,8 +887,10 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           style={{
             width: 220,
             flex: '0 0 220px',
-            background: 'var(--oe-fill)',
-            borderRight: `1px solid ${BORDER}`,
+            background: 'var(--oe-material-sidebar)',
+            backdropFilter: 'blur(20px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+            borderRight: '1px solid var(--oe-separator)',
             display: 'flex',
             flexDirection: 'column',
             minHeight: 0,
@@ -897,7 +899,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 16 }}>
             <LogoMark />
             <div>
-              <div style={{ fontSize: 16, fontWeight: 600 }}>OffEarly</div>
+              <div style={{ fontSize: 15, fontWeight: 650, letterSpacing: '-0.01em' }}>OffEarly</div>
               <div style={{ fontSize: 11, color: MUTED }}>早下班</div>
             </div>
           </div>
@@ -927,16 +929,18 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
               alignItems: 'center',
               justifyContent: 'flex-end',
               gap: 12,
-              height: 40,
-              flex: '0 0 40px',
+              height: 44,
+              flex: '0 0 44px',
               padding: '0 16px',
-              background: 'var(--oe-surface)',
-              borderBottom: `1px solid ${BORDER}`,
+              background: 'var(--oe-material-bar)',
+              backdropFilter: 'blur(20px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+              borderBottom: '1px solid var(--oe-separator)',
             }}
           >
             {/* 视图切换与顶栏提示；撤销/重做按钮随 T15 的卡片交互一起挂 */}
             {session === null ? null : (
-              <div role="group" style={{ display: 'flex', gap: 4, marginRight: 'auto' }}>
+              <div role="group" className="oe-seg" style={{ marginRight: 'auto' }}>
                 {(['board', 'gantt'] as const).map((mode) => (
                   <button
                     key={mode}
@@ -945,15 +949,6 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
                     aria-pressed={view === mode}
                     onClick={() => {
                       setView(mode)
-                    }}
-                    style={{
-                      padding: '3px 10px',
-                      fontSize: 12,
-                      color: view === mode ? 'var(--oe-on-accent)' : TEXT,
-                      background: view === mode ? INDIGO : 'transparent',
-                      border: `1px solid ${view === mode ? INDIGO : BORDER}`,
-                      borderRadius: 'var(--oe-radius-control)',
-                      cursor: 'pointer',
                     }}
                   >
                     {mode === 'board' ? t('shell.viewBoard') : t('shell.viewGantt')}

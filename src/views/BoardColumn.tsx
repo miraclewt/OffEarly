@@ -19,7 +19,6 @@ import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
 import { TaskCard } from './TaskCard'
 
-const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
 const MUTED = 'var(--oe-text-muted)'
 const INDIGO = 'var(--oe-accent)'
@@ -95,7 +94,7 @@ function AddTaskRow(props: {
           fontSize: 12,
           color: MUTED,
           background: 'transparent',
-          border: `1px dashed ${BORDER}`,
+          border: 'none',
           borderRadius: 'var(--oe-radius-control)',
           cursor: 'pointer',
         }}
@@ -176,9 +175,8 @@ export function BoardColumn(props: BoardColumnProps) {
     padding: '0 7px',
     fontSize: 11,
     lineHeight: '18px',
-    color: 'var(--oe-text-secondary)',
-    background: 'var(--oe-surface)',
-    border: `1px solid ${BORDER}`,
+    color: 'var(--oe-text-muted)',
+    background: 'var(--oe-fill)',
     borderRadius: 999,
   }
 
@@ -191,8 +189,7 @@ export function BoardColumn(props: BoardColumnProps) {
         minWidth: 0,
         display: 'flex',
         flexDirection: 'column',
-        background: 'var(--oe-fill)',
-        border: `1px solid ${BORDER}`,
+        background: 'var(--oe-fill-subtle)',
         borderRadius: 'var(--oe-radius-card)',
       }}
     >
@@ -201,11 +198,10 @@ export function BoardColumn(props: BoardColumnProps) {
           display: 'flex',
           alignItems: 'center',
           gap: 8,
-          padding: '10px 12px',
-          borderBottom: `1px solid ${BORDER}`,
+          padding: '10px 12px 6px',
         }}
       >
-        <span style={{ fontSize: 13, fontWeight: 600, color: TEXT }}>{title}</span>
+        <span style={{ fontSize: 13, fontWeight: 650, color: TEXT }}>{title}</span>
         <span data-testid={`board-column-count-${status}`} style={headerCountStyle}>
           {tasks.length}
         </span>
@@ -213,7 +209,7 @@ export function BoardColumn(props: BoardColumnProps) {
         <span
           data-testid={`board-column-ratio-${status}`}
           title={t('card.progressRatio')}
-          style={{ fontSize: 12, color: MUTED }}
+          style={{ fontSize: 11, color: 'var(--oe-text-faint)' }}
         >
           {ratioText}
         </span>
@@ -231,8 +227,8 @@ export function BoardColumn(props: BoardColumnProps) {
           display: 'flex',
           flexDirection: 'column',
           gap: 8,
-          background: isOver ? 'var(--oe-fill-subtle)' : 'transparent',
-          borderRadius: '0 0 var(--oe-radius-card) var(--oe-radius-card)',
+          background: isOver ? 'var(--oe-fill)' : 'transparent',
+          borderRadius: 'var(--oe-radius-card)',
         }}
       >
         <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>

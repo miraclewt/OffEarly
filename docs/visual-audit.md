@@ -2,7 +2,7 @@
 
 > 对照：spec 第 7 节「简洁、克制」、`docs/design/01`–`04` 效果图
 > 产出：`src/styles/theme.css`（唯一色值事实源）、本文件（差异清单）
-> 日期：2026-10-15
+> 日期：2026-10-15 初稿（T30）；**2026-10-17 T38 全局重设计换值，见第 8 节**
 
 ## 1. 为什么做这次校对
 
@@ -13,35 +13,47 @@
 
 ## 2. 落地的 token 表
 
+> ⚠️ 本表已于 **2026-10-17（T38 全局重设计）** 整体换值：「spec 要求」列记的是 spec §7 原文的字面值，
+> 现已被 macOS 通透方向的值取代（差异与理由见第 8 节）。**以本表「值」列为准。**
+
 | 变量 | 值 | spec 要求 | 用途 |
 |---|---|---|---|
-| `--oe-bg` | `#FAFAFA` | ✅ 背景 `#FAFAFA` | 应用底色 |
+| `--oe-bg` | `#F4F5F8` | ~~`#FAFAFA`~~ | 应用底色（冷灰画布，让白卡与半透明材质浮起） |
 | `--oe-surface` | `#FFFFFF` | ✅ 卡片 `#FFFFFF` | 卡片 / 面板 / 弹层底 |
-| `--oe-border` | `#E5E7EB` | ✅ 边框 `#E5E7EB` | 所有 1px 描边 |
-| `--oe-accent` | `#4F46E5` | ✅ 强调 `#4F46E5` | 唯一强调色 |
-| `--oe-overdue` | `#DC2626` | ✅ 逾期 `#DC2626` | 逾期 + 错误态 |
-| `--oe-off-column` | `#F5F5F5` | ✅ 周末底 `#F5F5F5` | 甘特周末 / 节假日列 |
-| `--oe-on-accent` | `#FFFFFF` | — | 强调底上的文字 |
-| `--oe-fill` / `--oe-fill-subtle` | `#F3F4F6` / `#F9FAFB` | — | 次级填充 / 悬停行 |
-| `--oe-row-selected` | `#E5E7EB` | — | 侧栏选中行（与边框同值，语义不同故独立命名） |
-| `--oe-lane-fill` | `#F8FAFC` | — | 甘特泳道底 |
-| `--oe-text` | `#111827` | — | 主文字 |
-| `--oe-text-secondary` | `#374151` | — | 次级文字 |
-| `--oe-text-muted` | `#6B7280` | — | 弱文字 |
-| `--oe-text-faint` | `#9CA3AF` | — | 失效 / 归档文字 |
-| `--oe-blocked` / `--oe-blocked-border` / `--oe-blocked-bg` | `#B45309` / `#F59E0B` / `#FFFBEB` | ✅ 阻塞琥珀 | 阻塞三件套 |
-| `--oe-done` | `#059669` | ✅ 完成绿 | **已声明，尚未被消费**（见 §5） |
-| `--oe-radius-control` / `--oe-radius-card` | `6px` / `8px` | ✅ 圆角 6–8px | 控件 / 卡片两档 |
-| `--oe-shadow-hover` | `0 2px 4px rgba(17,24,39,.10)` | ✅ 仅 hover 2–4px 柔影 | 唯一阴影 |
-| `--oe-scrim` | `rgba(17,24,39,.28)` | — | 模态遮罩（可访问性层次，非装饰） |
-| `--oe-font` | 系统无衬线栈 | — | 唯一字体族 |
+| `--oe-border` | `rgba(0,0,0,.12)` | ~~`#E5E7EB`~~ | 控件与输入框描边 |
+| `--oe-separator` | `rgba(0,0,0,.07)` | — **新增** | 结构发丝线：侧栏右缘 / 顶栏底 / 面板头底 |
+| `--oe-card-border` | `rgba(0,0,0,.05)` | — **新增** | 卡片发丝边，比结构线更弱，只给白卡一圈「纸边」 |
+| `--oe-accent` | `#5E5CE6` | ~~`#4F46E5`~~ | 唯一强调色（系统靛） |
+| `--oe-accent-deep` / `--oe-accent-tint` | `#4038C8` / `rgba(94,92,230,.13)` | — **新增** | 浅底上的强调文字 / 强调浅底 |
+| `--oe-overdue` | `#FF3B30` | ~~`#DC2626`~~ | 逾期 + 错误态（Apple 系统红） |
+| `--oe-off-column` | `#F5F5F7` | ~~`#F5F5F5`~~ | 甘特周末 / 节假日列 |
+| `--oe-on-accent` | `#FFFFFF` | ✅ | 强调底上的文字 |
+| `--oe-fill` / `--oe-fill-subtle` | `rgba(120,120,128,.10)` / `.06` | ~~`#F3F4F6` / `#F9FAFB`~~ | chip / 分段槽 / 列容器：Apple 灰填充，随底色透出 |
+| `--oe-row-selected` | `rgba(94,92,230,.13)` | ~~`#E5E7EB`~~ | 侧栏选中行 = 强调浅底圆角行 |
+| `--oe-row-hover` | `rgba(0,0,0,.045)` | — **新增** | 悬停行（比选中弱一档） |
+| `--oe-lane-fill` | `#FAFAFC` | ~~`#F8FAFC`~~ | 甘特泳道底 |
+| `--oe-material-sidebar` / `--oe-material-bar` / `--oe-material-overlay` | `rgba(248,248,251,.72)` / `rgba(255,255,255,.62)` / `rgba(246,246,248,.86)` | — **新增** | 振镜材质三档，一律配 `backdrop-filter: blur() saturate()` |
+| `--oe-text` | `#1D1D1F` | ~~`#111827`~~ | 主文字（Apple 灰阶） |
+| `--oe-text-secondary` | `#3A3A3C` | ~~`#374151`~~ | 次级文字 |
+| `--oe-text-muted` | `#6E6E73` | ~~`#6B7280`~~ | 弱文字 |
+| `--oe-text-faint` | `#98989D` | ~~`#9CA3AF`~~ | 失效 / 归档文字 |
+| `--oe-blocked` / `--oe-blocked-border` / `--oe-blocked-bg` | `#9A4D00` / `#FF9500` / `rgba(255,149,0,.14)` | ~~`#B45309` / `#F59E0B` / `#FFFBEB`~~ | 阻塞：文字 / 描边 / 浅底（Apple 系统橙一档） |
+| `--oe-done` | `#34C759` | ~~`#059669`~~ | 完成绿（Apple 系统绿），消费点见 §6 |
+| `--oe-radius-control` / `--oe-radius-card` / `--oe-radius-overlay` | `8px` / `12px` / `14px` | ~~6–8px 两档~~ | 控件 / 卡片 / 浮层三档 |
+| `--oe-shadow-card` | `0 1px 2px rgba(0,0,0,.04), 0 6px 16px rgba(0,0,0,.06)` | — **新增** | 卡片静态双层柔影 |
+| `--oe-shadow-hover` | `0 2px 4px rgba(0,0,0,.06), 0 10px 24px rgba(0,0,0,.10)` | ~~唯一阴影~~ | hover 抬升影（只换阴影，不做位移） |
+| `--oe-shadow-pop` | `0 24px 64px rgba(0,0,0,.22)` | — **新增** | 浮层 / 弹窗深影 |
+| `--oe-shadow-seg` | `0 1px 3px rgba(0,0,0,.14), 0 0 0 .5px rgba(0,0,0,.04)` | — **新增** | 分段控件的白滑块 |
+| `--oe-focus-ring` | `0 0 0 3.5px rgba(94,92,230,.28)` | — **新增** | Apple 式焦点光晕（`:focus-visible` 与输入框） |
+| `--oe-scrim` | `rgba(20,20,28,.34)` | ~~`rgba(17,24,39,.28)`~~ | 模态遮罩（可访问性层次，非装饰） |
+| `--oe-font` | 系统无衬线栈 | ✅ | 唯一字体族 |
 
 ## 3. 色值分类审计（89 处 → 零散色值归零）
 
 | 类别 | 数量 | 处置 |
 |---|---|---|
 | 界面 chrome 色 | 20 个不同值 | 全部收敛为上表 token |
-| 语义色（仅三处） | 逾期红 / 阻塞琥珀 / 完成绿 | ✅ 红仅用于逾期与错误态；琥珀仅用于阻塞与安全模式；**没有第四种语义色** |
+| 语义色（仅三处） | 逾期红 / 阻塞橙 / 完成绿 | ✅ 红仅用于逾期与错误态；橙仅用于阻塞与安全模式；**没有第四种语义色**（T38 换档为 Apple 系统色，档位与数量不变） |
 | 话题分类色 `TOPIC_PALETTE` | 12 色 | **保持字面量**：写进 `vault.json` 的用户数据，且被测试断言长度与成员 |
 | SVG 呈现属性锁定的字面量 | 9 处 | **必须保持字面量**（见 §4） |
 
@@ -50,13 +62,14 @@
 SVG 的**呈现属性**（`fill=` / `stroke=` 这类 XML attribute，区别于内联 `style`）**不解析 `var()`**：
 写成 `fill="var(--oe-x)"` 浏览器会直接渲染成黑色。因此下面这些必须留字面量 hex：
 
-| 位置 | 值 | 原因 |
+| 位置 | 值（T38 后） | 原因 |
 |---|---|---|
-| `GANTT_OFF_COLUMN_FILL` | `#F5F5F5` | SVG `fill` + 测试断言 |
-| `GANTT_BASELINE_FILL` | `#9CA3AF` | SVG `fill` + 测试断言 |
-| `GANTT_TODAY_COLOR` | `#DC2626` | SVG `stroke` + 内联 style 双用途 + 测试断言 |
-| `ARROW_COLOR` / `LANE_FILL` / `TOPIC_ROW_FILL` | — | SVG `fill` / `stroke` |
-| `DEFAULT_TOPIC_COLOR` | `#4F46E5` | 话题数据兜底色 |
+| `GANTT_OFF_COLUMN_FILL` | `#F5F5F7` | SVG `fill` + 测试断言 |
+| `GANTT_BASELINE_FILL` | `#8E8E93` | SVG `fill` + 测试断言 |
+| `GANTT_TODAY_COLOR` | `#FF3B30` | SVG `stroke` + 内联 style 双用途 + 测试断言 |
+| `GANTT_ARROW_COLOR` / `GANTT_CRITICAL_COLOR` / `GANTT_CYCLE_COLOR` | `#8E8E93` / `#4038C8` / `#FF3B30` | SVG `stroke` / `fill` |
+| `LANE_FILL` / `TOPIC_ROW_FILL` | `#F7F7FA` / `#FAFAFC` | SVG `fill` |
+| `DEFAULT_TOPIC_COLOR` | `#5E5CE6` | 话题数据兜底色（与 `--oe-accent` 同值，但必须是字面量） |
 | 里程碑菱形 `stroke="#FFFFFF"` | `#FFFFFF` | SVG 呈现属性 |
 | `mixColor(..., target='#000000')` | `#000000` | 颜色计算基色，非样式 |
 
@@ -64,11 +77,13 @@ SVG 的**呈现属性**（`fill=` / `stroke=` 这类 XML attribute，区别于�
 
 ## 4. 圆角 / 阴影 / 渐变归一
 
-| 项 | 校对前 | 校对后 |
-|---|---|---|
-| 圆角 | 6×15、8×4、**12×2、10×1、4×1、3×2、2×1** | 仅 6（控件）与 8（卡片 / 弹层）两档，共 19 处 |
-| 阴影 | `0 2px 8px rgba(17,24,39,.08)`（偏移 8px，超出 2–4px 范围） | 唯一 token `0 2px 4px rgba(17,24,39,.10)` |
-| 渐变 | 无 | 无 ✅ |
+| 项 | 校对前（T30 初稿） | T30 校对后 | T38 重设计后 |
+|---|---|---|---|
+| 圆角 | 6×15、8×4、**12×2、10×1、4×1、3×2、2×1** | 仅 6（控件）与 8（卡片 / 弹层）两档，共 19 处 | 三档：8（控件）/ 12（卡片）/ 14（浮层与弹窗），仍零游离值 |
+| 阴影 | `0 2px 8px rgba(17,24,39,.08)`（偏移 8px，超出 2–4px 范围） | 唯一 token `0 2px 4px rgba(17,24,39,.10)` | 四档：卡片静态双层柔影 / hover 抬升影 / 浮层深影 / 分段滑块影；全部只在 token 里，视图零字面阴影 |
+| 分隔线 | 各视图各写一份灰 | 一律 `--oe-border` 1px | 分两级：结构发丝线 `--oe-separator`（.07）与卡片纸边 `--oe-card-border`（.05，0.5px）；控件描边仍 `--oe-border` |
+| 材质 | 不透明实色 | 不透明实色 | 侧栏 / 顶栏 / 浮层为半透明振镜 + `backdrop-filter: blur() saturate()` |
+| 渐变 | 无 | 无 | 无 ✅（唯一例外是 `select` 的原生箭头 data-uri，属控件替换非装饰） |
 | 装饰插画 / 头像 | 无 | 无 ✅ |
 
 ## 5. 与 `docs/design/01`–`04` 的目视比对
@@ -78,7 +93,7 @@ SVG 的**呈现属性**（`fill=` / `stroke=` 这类 XML attribute，区别于�
 | 项 | 设计稿 | 当前实现 | 结论 |
 |---|---|---|---|
 | 应用底色 / 卡片底色 | 浅灰底 + 纯白卡片 | 同 | ✅ 一致 |
-| 卡片圆角 / 描边 | 约 8px + 1px 极细描边、静态无阴影 | 归一到 8px + `--oe-border`，静态无阴影 | ✅ 一致 |
+| 卡片圆角 / 描边 | 约 8px + 1px 极细描边、静态无阴影 | 12px + 0.5px 纸边 + 静态双层柔影（`--oe-shadow-card`） | ⚠️ T38 起刻意偏离（纵深优先于「绝对平」，见 §8） |
 | 侧栏话题色点 | 正圆 | 10px 方块 + 圆角 6（10px 下被钳制为 5px，视觉即正圆） | ✅ 等价 |
 | 底部三入口 | 筛选器 / 备份 / 设置 | 已接线且面板全部落地（T16 筛选栏 / T28 备份面板 / T35 设置面板） | ✅ 一致 |
 | 工具条 | 看板/甘特 + 5 个筛选下拉 + 搜索 + 撤销/重做 + 导出 | 看板/甘特 切换 + 保存指示；筛选在侧栏入口的浮层里，导出在甘特工具栏 | ⚠️ 布局不同，能力等价（非视觉差异） |
@@ -123,3 +138,44 @@ SVG 的**呈现属性**（`fill=` / `stroke=` 这类 XML attribute，区别于�
   - 外链 `<script src>` / `<link href>` 计数 **0**，`type="module"` 计数 **0**
   - 24 个 `--oe-*` 变量已进入产物 `<style>` 块
   - `npm run lint:emoji` 通过（theme.css 亦在扫描范围内）
+
+## 8. T38 · 全局重设计（macOS 通透方向，2026-10-17）
+
+**触发**：用户拿三屏实拍（看板 / 甘特 / 任务详情弹窗）要求「分析当前 UI 的问题，进行必要的重设计，偏好现代、苹果那边的设计风格」。
+**流程**：按本仓库惯例先出效果图再动代码——同屏三案对比（A macOS 通透 / B 深色玻璃 / C 极简留白）+ 推荐特写，用户选 **方案 A**；
+强调色在「系统靛 `#5E5CE6`」与「沿用深靛 `#4F46E5`」之间二选一，用户选 **系统靛**。
+
+### 实拍诊断（重设计逐条针对）
+
+| # | 问题 | 根因 | 处置 |
+|---|---|---|---|
+| 1 | 全平、无纵深 | 所有面同为不透明白，层级只靠 1px 灰边 | 引入振镜材质三档（侧栏 / 顶栏 / 浮层）+ `backdrop-filter: blur() saturate()`，阴影分四档按层级给 |
+| 2 | 描边噪声 | 结构线与卡片边同值同宽，每个面都被同一圈线包一遍 | 分隔降为发丝线两级（`--oe-separator` .07 / `--oe-card-border` .05·0.5px），控件描边才用 `--oe-border` |
+| 3 | 侧栏读不出「当前在哪」 | 选中态与 hover 同档灰 | 选中改强调浅底圆角行（`--oe-row-selected` = accent 13%）+ 文字转 `--oe-accent-deep`，hover 另立一档 |
+| 4 | 同类控件三种画法 | 视图切换 / 刻度切换 / 语言与主题各画各的按钮 | 统一为 `.oe-seg` 分段控件（灰槽 + 白滑块，选中态由 `aria-pressed` 驱动，语义不变） |
+| 5 | 数字对不齐、甘特左表两列粘连 | 日期未用等宽数字 + 列宽 58px 容不下 11px 的 `YYYY-MM-DD` | 日期 / 进度一律 `tabular-nums`；日期列 58→74（含 10px 列距），任务表 320→344 保住标签列宽 |
+
+另修一处真实缺陷：`BackupPanel` 此前是**随流块**排在 App 根节点上（无遮罩、无浮起，打开时把主区挤成一条），
+本次补上与任务详情同族的居中弹窗壳（scrim + blur + `--oe-shadow-pop`）。
+
+### 守住的约束（越界即视为规范破坏）
+
+- 语义色仍**仅三处**（逾期红 / 阻塞橙 / 完成绿），只是换成 Apple 系统色档位，没有新增第四种；
+- **无左色条 / 无顶线 / 无整卡底色 / 无渐变**（`BoardView.test.tsx` 那条正则断言仍在，且仍为绿）；
+- `TOPIC_PALETTE` 12 色**一字未改**——它是写进 `vault.json` 的用户数据；
+- SVG 呈现属性仍保持字面量（见 §3），只是把值同步到新色阶；
+- **全部 `data-testid` 与 aria 属性零改动**，e2e 与组件测试的选择器一个没动；
+- 信息密度上限不变：卡片 6 项 / 弹窗 5 分区 / 列头 3 项。
+
+### 测试契约的两处换值
+
+`tests/views/GanttView.test.tsx`（任务条 `rx` 3→6）与 `tests/views/ganttUnscheduled.test.tsx`（分隔由 `--oe-border`→`--oe-separator`）
+断言的正是被改掉的视觉契约本身，随本次一起改；`tests/views/BoardView.test.tsx` 只改了用例标题里的过期 hex（断言未动）。
+
+### 验证（2026-10-17 重设计后复跑）
+
+- `npx tsc --noEmit` → 0
+- `npx vitest run` → **785 passed（44 files）**
+- `npm run e2e` → **33 passed + 1 skipped**（跳过项为既有的 dnd-kit `file://` 拖拽不稳定用例，与本次无关）
+- `npm run build` → **10/10**，产物 `dist/OffEarly.html` **1116201 字节**（上限 1677721）
+- 真 Chromium（`file://` + example.vault 夹具）实拍五屏目视核对：看板 / 甘特 / 任务详情弹窗 / 筛选浮层 / 设置浮层

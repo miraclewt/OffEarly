@@ -55,6 +55,7 @@ import type { IconName } from './IconSprite'
 import { Lightbox } from './Lightbox'
 
 const BORDER = 'var(--oe-border)'
+const SEPARATOR = 'var(--oe-separator)'
 const TEXT = 'var(--oe-text)'
 const MUTED = 'var(--oe-text-muted)'
 const SURFACE = 'var(--oe-surface)'
@@ -63,6 +64,7 @@ const INDIGO = 'var(--oe-accent)'
 const BODY_FONT = 'var(--oe-font)'
 const RADIUS_CONTROL = 'var(--oe-radius-control)'
 const RADIUS_CARD = 'var(--oe-radius-card)'
+const RADIUS_OVERLAY = 'var(--oe-radius-overlay)'
 
 /** 默认 debounce：400ms 是「停手即落库」与「撤销栈不被逐字刷满」之间的折中。 */
 const DEFAULT_DEBOUNCE_MS = 400
@@ -802,7 +804,7 @@ const TOOLBAR: CSSProperties = {
   gap: 2,
   flexWrap: 'wrap',
   padding: '4px 6px',
-  borderBottom: `1px solid ${BORDER}`,
+  borderBottom: `1px solid ${SEPARATOR}`,
 }
 
 const TOOL_BUTTON: CSSProperties = {
@@ -838,9 +840,9 @@ const LINK_MENU: CSSProperties = {
   flexDirection: 'column',
   gap: 2,
   background: SURFACE,
-  border: `1px solid ${BORDER}`,
-  borderRadius: RADIUS_CARD,
-  boxShadow: 'var(--oe-shadow-hover)',
+  border: `1px solid ${SEPARATOR}`,
+  borderRadius: RADIUS_OVERLAY,
+  boxShadow: 'var(--oe-shadow-pop)',
 }
 
 const LINK_MENU_TITLE: CSSProperties = {

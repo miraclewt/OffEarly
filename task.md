@@ -161,6 +161,7 @@ tests/**                         与 src 镜像
 - [x] **T35** 设置面板（语言 / 主题 / 甘特默认刻度 / 工作日历 / 关于） → done (2026-10-17, workbuddy:sess-1017e, commit: "T34/T35: board inline task creation and settings panel with work calendar")
 - [x] **T36** 任务详情改居中弹窗（呈现层重写 + 弹窗语义 / 焦点交接 / 遮罩关闭三出路） → done (2026-10-17, workbuddy:sess-1017f, commit: "T36: task details as a centred modal instead of a right side drawer")
 - [x] **T37** 交付收尾：示例库复位到默认 + 面板形态裁决（任务详情弹窗，里程碑 / 筛选 / 设置维持浮层） → done (2026-10-17, workbuddy:sess-1017g, commit: "docs: record panel-form decision and restore example vault to default")
+- [x] **T38** 全局视觉重设计（macOS 通透：振镜材质 / 发丝线分级 / 分段控件 / token 换值） → done (2026-10-17, qoder:sess-1017h, commit: "T38: macOS-translucent visual redesign")
 
 ---
 
@@ -1042,6 +1043,36 @@ tests/**                         与 src 镜像
 
 ---
 
+### T38 · 全局视觉重设计（macOS 通透方向）
+
+**背景：** 用户拿三屏实拍（看板 / 甘特 / 任务详情弹窗）提出「分析当前 UI 存在的问题，进行必要的重设计，我更喜欢现代化的 UI 界面，和苹果那边的设计风格类似的」。按仓库惯例先出同屏三案效果图（A macOS 通透 / B 深色玻璃 / C 极简留白）+ 推荐特写，用户选 **方案 A**；强调色二选一选 **系统靛 `#5E5CE6`**。属呈现层变更：领域层、命令层、持久化层零改动。
+
+**依赖：** T30（theme.css 唯一事实源）/ T14–T17（侧栏与看板）/ T20–T23（甘特）/ T36（居中弹窗）
+**产出：** `src/styles/theme.css`（换值 + 材质 / 分段控件 / 原生控件收敛）、`src/App.tsx`、`src/views/{TopicSidebar,BoardColumn,TaskCard,GanttView,GanttTable,GanttCanvas,TaskDrawer,BackupPanel,FilterBar,SettingsPanel,MilestonePanel,ConflictDialog,Lightbox,NoteEditor}.tsx`、`src/controllers/ganttViewport.ts`、三份测试的过期断言、`docs/visual-audit.md` §8 与 spec §7 变更注记
+
+**验收标准：**
+- [x] 五条实拍诊断逐条落地：纵深（振镜材质三档 + 阴影四档）/ 描边分级（发丝线两级）/ 选中态可读（强调浅底行）/ 同类控件统一（`.oe-seg`）/ 数字等宽与甘特左表列距
+- [x] 换值集中在 theme.css：视图层只改「材质 / 分级 / 控件形态」三类，零新增游离色值
+- [x] 守住既有硬约束：语义色仍仅三处、无左色条 / 顶线 / 整卡底色 / 渐变、密度上限不变、`TOPIC_PALETTE` 一字未改、SVG 呈现属性仍字面量
+- [x] 全部 `data-testid` 与 aria 属性零改动（e2e 选择器一个没动）；键盘可达性不降级（`:focus-visible` 光晕 + 分段控件仍由 `aria-pressed` 驱动）
+- [x] 真 Chromium 实拍五屏目视核对（看板 / 甘特 / 任务详情弹窗 / 筛选浮层 / 设置浮层）
+- [x] `tsc` / `npm test` **785** / `npm run e2e` **33 passed + 1 skipped** / `npm run build` **10/10** 全绿
+
+**实施注记（T38）**
+1. **token 换值是这次唯一的杠杆**：全库内联样式引用 `var(--oe-*)`，所以换色 / 换圆角 / 换阴影只改 theme.css 一处即全局生效；视图层改的集中在「哪里该有材质、哪条线该降级、哪个控件该统一」，不是逐处调参。
+2. **两类值刻意不进 token**：① `TOPIC_PALETTE` 12 色是写进 `vault.json` 的用户数据（改它等于改用户的库）；② SVG 呈现属性不解析 `var()`，`GANTT_*` 与里程碑菱形描边必须留字面量——本次只把它们的**值**同步到新色阶，机制一字未动（依据见 `docs/visual-audit.md` §3）。
+3. **发丝线分两级是这次的关键取舍**：T30 把 89 处散值收敛成一条 `--oe-border`，代价是「结构线」与「卡片纸边」同值同宽，每个面都被同一圈线包一遍。本次拆出 `--oe-separator`（.07，结构）与 `--oe-card-border`（.05 + 0.5px，纸边），控件描边仍用 `--oe-border`——三级封顶，不再长回散值。
+4. **分段控件走 class 而非内联**：`.oe-seg` 的选中态必须由 `button[aria-pressed='true']` 跨元素驱动，内联样式做不到；这是全库第一处**样式语义 class**（此前只有 `IconSprite` 透给 SVG 的 `className`），代价是它必须住在 theme.css 里——唯一事实源不变。视图切换与甘特刻度切换保留原 `data-testid` 与 `aria-pressed`，只换画法。
+5. **hover 只换阴影、不做 translateY**：看板卡片可拖拽，dnd-kit 会写 `transform`，任何 CSS 位移都会与拖拽的 transform 打架。
+6. **顺带修一个真实缺陷（非样式）**：`BackupPanel` 此前作为随流块排在 App 根节点——打开时既无遮罩也不浮起，还把主内容区挤成一条。补上与任务详情同族的居中弹窗壳（scrim + blur + `--oe-shadow-pop` + 点背板关闭），`data-testid="backup-panel"` 原样保留、另加 `backup-backdrop`。
+7. **甘特左表列宽**：实拍发现 `YYYY-MM-DD` 在 58px 列里溢出并与下一列粘连成「2026-10-012026-10-20」。日期列 58→74（含 10px 列距）、任务表 320→344，标签列宽回到 144px；日期与进度加 `font-variant-numeric: tabular-nums` 才谈得上上下行对齐。
+8. **测试契约的两处换值**：`tests/views/GanttView.test.tsx` 任务条 `rx` 3→6、`tests/views/ganttUnscheduled.test.tsx` 分隔 `--oe-border`→`--oe-separator`——这两条钉的正是被本次改掉的视觉契约，属预期改动；`tests/views/BoardView.test.tsx` 只改了用例标题里过期的 hex，断言未动。
+9. **原生控件收敛放在全局 CSS**：`select` 去原生箭头换 data-uri chevron、`input[type=range]` 4px 槽 + 白圆钮、`checkbox` 走 `accent-color`、滚动条细圆角、`:focus-visible` 光晕。这样各视图不必各写一份，也不必给每个下拉包一层自定义组件（那会波及一批 testid）。
+
+**预估：** 0.5d
+
+---
+
 ## 完成记录（只追加）
 
 <!-- 格式：
@@ -1144,3 +1175,5 @@ tests/**                         与 src 镜像
 - [2026-10-17] T36 | agent: workbuddy:sess-1017f | commit: "T36: task details as a centred modal instead of a right side drawer" | 验收: 6/6 全部勾选 | 备注: ①**改动性质**：呈现层变更，写入口径零改动——五个分区、`patchTaskCommand` / `link.*` 命令、撤销栈、保存指示全部照旧，改的只是「这块面以什么形式出现」。②**落点**：`TaskDrawer.tsx` 由 `aside(position:fixed;right:0;width:400)` 改为「遮罩 + 居中面板（maxWidth 760 / maxHeight 100%）」；遮罩关闭按「按下与抬起都在遮罩上」双判定（弹窗里有富文本编辑器，跨元素拖选的 click 会落在共同祖先上，只看 click 会误关）；打开时焦点进面板、关闭还给触发它的卡片（`preventScroll`）；**刻意不做 Tab 焦点陷阱**——笔记任务列表用 Tab 缩进，trap 会吃掉该键。组件名与 `drawer-*` 测试 id 沿用 T17（改名要掀 6 个测试文件约 200 条断言，收益只是名字好听），另加 `data-presentation="modal"`。③**联动修正**：`ConflictDialog` 补 `z-index: 70`（此前靠 DOM 顺序压在抽屉上，改成遮罩后不提层会把冲突三选关在遮罩后面）；`Lightbox` 的 `var(--oe-overlay)` 在主题里**从未定义**（T25 起的隐性 bug，遮罩实际是透明的）→ 改 `var(--oe-scrim)`；删掉 App 里零引用的 `drawer-host` 占位 div。④**顺带修两处活夹具脆性**（本次跑测试时被「用户真的打开过示例库」触红，非本次引入）：`e2e/fixtures/exampleVault.ts` 装夹具时覆写 settings 的 locale/theme/ganttScale/lastFilter（示例库是活文件，里面已带一次真实使用留下的 en + 筛选 + 周刻度）；`tests/examples/exampleVault.test.ts` 与 `e2e/06` 不再假定 `assets[].filename` 只有一种形态 / 「新附件」基线不再写死一张图。**磁盘上的 example.vault/vault.json 未复位**——那是用户的库，改由夹具侧确定化。⑤**测试**：`tests/views/TaskDrawer.test.tsx` +9 条（几何 / 语义 / 三出路 / 拖选不误关 / 焦点交接 / 五分区）、`e2e/08-task-modal.spec.ts` 新增 4 条（真浏览器量几何、`elementFromPoint` 证明遮挡、Esc 后焦点回到卡片）。⑥**文档**：`docs/user-guide.md` 新增「13 · 任务详情弹窗」行（后两行顺延为 14/15）、`docs/delivery.md`（验收数字 + T36 行 + 已知限制）、`docs/visual-audit.md`（第 5 节加「任务详情呈现：刻意偏离设计稿 02」行、第 6 节措辞）、spec §6.3 就地记变更（原设计稿 02 画的仍是抽屉，读图以该条为准）。⑦**全量验证**：`tsc` 0 / `npm test` **785 passed (44 files)** / `npm run e2e` **33 passed + 1 skipped** / `npm run build` **10/10**（产物 1112110 字节，上限 1677721） | 遗留: 里程碑面板与筛选 / 设置仍是贴侧边的浮层（本次只按要求改了任务；两者是「边看边改」的辅助面，若也要弹窗化需另开任务）
 
 - [2026-10-17] T37 | agent: workbuddy:sess-1017g | commit: "docs: record panel-form decision and restore example vault to default" | 验收: 2/2 | 备注: ①**背景**：T36 结尾留了两个待用户决定的问题，本次照用户回复收口（回复原文「1改过的就丢弃就好，回复到默认；2 维持浮层即可」）。②**示例库复位**：`git checkout -- example.vault/vault.json` 把用户上次用应用打开保存留下的版本（被压成一行、locale=en、留了一个筛选、ganttScale=week）恢复到 HEAD 默认（5 话题 / 15 任务 / 3 里程碑 / 7 依赖 / 1 张配图，locale=zh、day 刻度、无筛选）；同时删掉两处未跟踪产物——4 份 `.backup/vault-20261017-*.json` 自动快照与粘贴进来的 38KB 图 `assets/dJX1-bs9W9aNuGXyp7jmR.png`。删前已把这三样连同改前 vault.json 复制到 `%TEMP%/taskdone-discard-20261017/` 兜底（不随仓库提交）。③**只复位数据、不动夹具策略**：T36 给 `e2e/fixtures/exampleVault.ts` 加的 settings 覆写（locale/theme/ganttScale/lastFilter）与 `e2e/06` 的「新附件」现采基线**保留**——示例库虽已干净，但它仍是「会被应用真的打开保存的活文件」，夹具侧确定化是防复发，不该跟着数据一起撤。④**面板形态裁决**：里程碑 / 筛选 / 设置三面维持贴侧边浮层（`MilestonePanel` fixed+right:0；`FilterBar` 与 `SettingsPanel` 均「背板 fixed/inset:0/z-19 + 面板 fixed」），与任务详情的居中弹窗并存；已把 `docs/delivery.md` 已知限制第 5 节那条从「两者风格不同是有意为之」升级为「2026-10-17 产品方裁决，不再变更」，`docs/visual-audit.md` 第 5 节比对表同步。⑤**验证（复位后复跑）**：`tsc` 0 / `npm test` **785 passed (44 files)** / `npm run e2e` **33 passed + 1 skipped** / `npm run build` **10/10**——全绿说明夹具确实已与「用户库当前状态」解耦（复位前那种「用户玩过一次就 24/34 崩」的情形不会再现）。⑥**顺带**：`test-results/` 累积到 503 个文件（21M）触发环境批量删除护栏，已整体挪到系统临时区，未提交也无需提交（`.gitignore` 第 9 行本就忽略） | 遗留: 工作区仅剩一处未跟踪遗留 `scripts/resolve-conflict.mjs`（此前车道冲突并集工具，用户未要求处理，保留）
+
+- [2026-10-17] T38 | agent: qoder:sess-1017h | commit: "T38: macOS-translucent visual redesign" | 验收: 6/6 全部勾选 | 备注: ①**方向先裁决再动手**：按用户既有偏好（评审视觉先要效果图），先出同屏三案对比 + 推荐特写，用户定 **方案 A · macOS 通透** 与强调色 **系统靛 `#5E5CE6`**，之后才改代码。②**改动性质**：纯呈现层。领域 / 命令 / 持久化 / 契约四层零改动，`data-testid` 与 aria 属性一个没动。③**杠杆在 token**：换值全部集中在 `src/styles/theme.css`（含新增 `--oe-separator` / `--oe-card-border` / 三档 `--oe-material-*` / `--oe-accent-deep` / `--oe-focus-ring` 与圆角第三档、阴影四档），视图层只补「材质 / 分级 / 控件统一」三类；原生控件（select / range / checkbox / 滚动条 / `:focus-visible`）在全局 CSS 一次性收敛，不给每个下拉包自定义组件。④**刻意不 token 化的两类值**：`TOPIC_PALETTE` 12 色是用户库数据；SVG 呈现属性不解析 `var()`，`GANTT_*` 只同步字面量值、机制不动。⑤**顺带修的布局缺陷**：`BackupPanel` 原本是随流块排在 App 根（无遮罩、挤压主区）→ 补居中弹窗壳，新增 `backup-backdrop`、原 `backup-panel` 保留。⑥**实拍发现并修掉的排版问题**：甘特左表 `YYYY-MM-DD` 在 58px 列里溢出粘连 → 日期列 74（含 10 列距）、任务表 320→344、日期与进度加 `tabular-nums`。⑦**测试改动三处**（`GanttView` 的 `rx` 3→6、`ganttUnscheduled` 的分隔 token、`BoardView` 用例标题里过期 hex），前两条钉的正是被改掉的视觉契约，属预期。⑧**文档**：`docs/visual-audit.md` §2/§3/§4/§5 换值 + 新增 §8（诊断表、守住的约束、验证数字），spec §7 顶部加变更注记（字面色值 / 圆角 / 阴影档位由 token 取代，语义色仅三处等硬约束仍成立）。⑨**全量验证**：`tsc` 0 / `npm test` **785 passed (44 files)** / `npm run e2e` **33 passed + 1 skipped** / `npm run build` **10/10**（产物 1116201 字节，上限 1677721）+ 真 Chromium 五屏实拍目视核对 | 遗留: 深色主题未做（`--oe-material-*` 与阴影均为浅色值，切深色需另开任务）；`.oe-seg` 是本项目第一处样式语义 class，若后续要引入组件库需先约定它的去留

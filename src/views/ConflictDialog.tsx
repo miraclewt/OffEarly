@@ -62,8 +62,9 @@ const PANEL: CSSProperties = {
   width: 420,
   padding: '20px 24px',
   background: 'var(--oe-surface)',
-  border: `1px solid ${BORDER}`,
-  borderRadius: 'var(--oe-radius-card)',
+  border: '1px solid var(--oe-separator)',
+  borderRadius: 'var(--oe-radius-overlay)',
+  boxShadow: 'var(--oe-shadow-pop)',
 }
 
 const BUTTON: CSSProperties = {

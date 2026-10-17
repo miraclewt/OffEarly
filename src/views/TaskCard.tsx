@@ -21,7 +21,6 @@ import type { Priority, Task, Topic } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
 
-const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
 const MUTED = 'var(--oe-text-muted)'
 const FAINT = 'var(--oe-text-faint)'
@@ -36,9 +35,8 @@ const PRIORITY_DOT: Record<Priority, string> = {
   P3: 'var(--oe-text-faint)',
 }
 
-/** 琥珀阻塞标记三件套（theme.css 注释要求一起用）。 */
+/** 琥珀阻塞标记（theme.css 的阻塞三件套中此处用两件套：文字色 + 浅底）。 */
 const BLOCKED_COLOR = 'var(--oe-blocked)'
-const BLOCKED_BORDER = 'var(--oe-blocked-border)'
 const BLOCKED_BG = 'var(--oe-blocked-bg)'
 
 export interface TaskCardProps {
@@ -82,11 +80,12 @@ export function TaskCard(props: TaskCardProps) {
   const topicColor = topic?.color ?? FAINT
 
   const cardStyle: CSSProperties = {
-    // C 方案：白底卡片 + 发丝边框 + 8px 圆角；左色条 / 顶线 / 话题色整卡底色一律没有
+    // C 方案：白底卡片 + 发丝边框 + 12px 圆角 + 静态双层柔影；左色条 / 顶线 / 话题色整卡底色一律没有
     background: SURFACE,
-    border: `1px solid ${BORDER}`,
+    border: '0.5px solid var(--oe-card-border)',
     borderRadius: 'var(--oe-radius-card)',
-    padding: '8px 10px',
+    boxShadow: 'var(--oe-shadow-card)',
+    padding: '10px 12px',
     cursor: 'grab',
     transform: toTransform(transform),
     transition,
@@ -108,6 +107,7 @@ export function TaskCard(props: TaskCardProps) {
       data-overdue={overdue ? 'true' : 'false'}
       data-has-note={hasNote ? 'true' : 'false'}
       data-deps={dependencyCount}
+      className="oe-card"
       role="button"
       tabIndex={0}
       aria-label={task.title}
@@ -154,8 +154,7 @@ export function TaskCard(props: TaskCardProps) {
               lineHeight: '16px',
               color: BLOCKED_COLOR,
               background: BLOCKED_BG,
-              border: `1px solid ${BLOCKED_BORDER}`,
-              borderRadius: 'var(--oe-radius-control)',
+              borderRadius: 6,
             }}
           >
             {t('card.blocked')}
@@ -214,7 +213,7 @@ export function TaskCard(props: TaskCardProps) {
             lineHeight: '16px',
             color: 'var(--oe-text-secondary)',
             background: 'var(--oe-fill)',
-            borderRadius: 'var(--oe-radius-control)',
+            borderRadius: 6,
           }}
         >
           {t(`card.kind.${task.kind}` as MsgKey)}
@@ -243,7 +242,9 @@ export function TaskCard(props: TaskCardProps) {
             style={{
               fontSize: 11,
               color: overdue ? OVERDUE : MUTED,
+              fontWeight: overdue ? 600 : 400,
               whiteSpace: 'nowrap',
+              fontVariantNumeric: 'tabular-nums',
             }}
           >
             {task.due}

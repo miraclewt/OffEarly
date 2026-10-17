@@ -145,7 +145,7 @@ export interface TaskDrawerProps {
 }
 
 const INPUT: CSSProperties = {
-  padding: '4px 6px',
+  padding: '6px 10px',
   fontSize: 12,
   color: TEXT,
   background: SURFACE,
@@ -159,8 +159,9 @@ const INPUT: CSSProperties = {
 const FIELD_LABEL: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 3,
+  gap: 4,
   fontSize: 11,
+  fontWeight: 550,
   color: MUTED,
   minWidth: 0,
 }
@@ -170,12 +171,12 @@ const SECTION: CSSProperties = {
   flexDirection: 'column',
   gap: 8,
   padding: '12px 0',
-  borderTop: `1px solid ${BORDER}`,
+  borderTop: '1px solid var(--oe-separator)',
 }
 
 const SECTION_TITLE: CSSProperties = {
   fontSize: 12,
-  fontWeight: 600,
+  fontWeight: 650,
   color: TEXT,
 }
 
@@ -189,6 +190,8 @@ const BACKDROP: CSSProperties = {
   justifyContent: 'center',
   padding: 24,
   background: 'var(--oe-scrim)',
+  backdropFilter: 'blur(8px) saturate(140%)',
+  WebkitBackdropFilter: 'blur(8px) saturate(140%)',
   fontFamily: 'var(--oe-font)',
 }
 
@@ -203,11 +206,9 @@ const PANEL: CSSProperties = {
   maxWidth: MODAL_MAX_WIDTH,
   maxHeight: '100%',
   background: SURFACE,
-  border: `1px solid ${BORDER}`,
-  borderRadius: 'var(--oe-radius-card)',
-  // 比 hover 柔影更重的一档才压得住遮罩——但主题只有这一档阴影，
-  // 与 Lightbox 同一做法取它（不再新增第六个色值/token）
-  boxShadow: 'var(--oe-shadow-hover)',
+  border: '1px solid var(--oe-separator)',
+  borderRadius: 'var(--oe-radius-overlay)',
+  boxShadow: 'var(--oe-shadow-pop)',
   overflow: 'hidden',
   boxSizing: 'border-box',
 }
@@ -733,29 +734,41 @@ export function TaskDrawer(props: TaskDrawerProps) {
             alignItems: 'center',
             gap: 8,
             flex: '0 0 auto',
-            padding: '12px 18px',
-            borderBottom: `1px solid ${BORDER}`,
+            padding: '10px 14px',
+            background: 'var(--oe-material-overlay)',
+            backdropFilter: 'blur(16px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(16px) saturate(180%)',
+            borderBottom: '1px solid var(--oe-separator)',
           }}
         >
-          <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: TEXT }}>{t('drawer.title')}</span>
-          {props.autosave === undefined ? null : <SaveIndicator autosave={props.autosave} t={t} />}
-          <button
-            type="button"
-            data-testid="drawer-close"
-            aria-label={t('drawer.close')}
-            title={t('drawer.close')}
-            onClick={requestClose}
-            style={{
-              display: 'flex',
-              padding: 2,
-              color: MUTED,
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            <Icon name="close" size={14} />
-          </button>
+          <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+            {props.autosave === undefined ? null : <SaveIndicator autosave={props.autosave} t={t} />}
+          </span>
+          <span style={{ fontSize: 13, fontWeight: 650, color: TEXT }}>{t('drawer.title')}</span>
+          <span style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              data-testid="drawer-close"
+              aria-label={t('drawer.close')}
+              title={t('drawer.close')}
+              onClick={requestClose}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 22,
+                height: 22,
+                padding: 0,
+                color: MUTED,
+                background: 'var(--oe-fill)',
+                border: 'none',
+                borderRadius: '50%',
+                cursor: 'pointer',
+              }}
+            >
+              <Icon name="close" size={12} />
+            </button>
+          </span>
         </div>
 
         {task === undefined ? (

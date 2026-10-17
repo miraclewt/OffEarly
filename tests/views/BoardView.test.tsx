@@ -208,7 +208,7 @@ describe('TaskCard C 方案六项', () => {
     expect(view.queryByTestId('task-due-k4')).toBeNull()
   })
 
-  it('逾期到期日用 --oe-overdue（#DC2626）；done 列不判逾期', () => {
+  it('逾期到期日用 --oe-overdue（#FF3B30）；done 列不判逾期', () => {
     const { view } = setup()
     const overdueDue = view.getByTestId('task-due-k2')
     expect(overdueDue.getAttribute('data-overdue')).toBe('true')

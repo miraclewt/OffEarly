@@ -371,7 +371,40 @@ export function BackupPanel(props: BackupPanelProps) {
   const importerDisabled = importer === undefined
 
   return (
-    <div data-testid="backup-panel" style={{ padding: 16 }}>
+    <div
+      data-testid="backup-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onOpenChange?.(false)
+      }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 22,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        background: 'var(--oe-scrim)',
+        backdropFilter: 'blur(8px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(8px) saturate(140%)',
+        fontFamily: 'var(--oe-font)',
+      }}
+    >
+      <div
+        data-testid="backup-panel"
+        style={{
+          width: '100%',
+          maxWidth: 560,
+          maxHeight: '100%',
+          overflowY: 'auto',
+          padding: 16,
+          background: 'var(--oe-surface)',
+          border: '1px solid var(--oe-separator)',
+          borderRadius: 'var(--oe-radius-overlay)',
+          boxShadow: 'var(--oe-shadow-pop)',
+          boxSizing: 'border-box',
+        }}
+      >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ fontSize: 15, fontWeight: 600, color: TEXT }}>{text.title}</div>
         {onOpenChange === undefined ? null : (
@@ -633,6 +666,7 @@ export function BackupPanel(props: BackupPanelProps) {
           {text.imported}
         </div>
       ) : null}
+      </div>
     </div>
   )
 }

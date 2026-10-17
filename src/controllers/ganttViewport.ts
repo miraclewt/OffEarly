@@ -19,8 +19,8 @@ export const GANTT_MAX_ZOOM_INDEX = GANTT_ZOOM_STEPS.length - 1
 
 /** 时间轴表头高度（两级刻度共用）。 */
 export const GANTT_HEADER_HEIGHT = 40
-/** 左侧任务表宽度。 */
-export const GANTT_TABLE_WIDTH = 320
+/** 左侧任务表宽度：任务列 144 + 开始/结束各 74 + 进度 52。 */
+export const GANTT_TABLE_WIDTH = 344
 
 export const GANTT_DEFAULT_CANVAS_WIDTH = 960
 export const GANTT_DEFAULT_CANVAS_HEIGHT = 480
