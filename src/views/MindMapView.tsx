@@ -98,8 +98,8 @@ const EXPORT_FORMAT_LABEL: Record<MindMapExportFormat, MsgKey> = {
 }
 const EXPORT_RANGE_ORDER: MindMapExportRange[] = ['visible', 'full']
 const EXPORT_RANGE_LABEL: Record<MindMapExportRange, MsgKey> = {
-  visible: 'ganttExport.rangeVisible',
-  full: 'ganttExport.rangeFull',
+  visible: 'mindmap.exportVisible',
+  full: 'mindmap.exportFull',
 }
 
 /** 兜底文案表：与 GanttView 同款，测试或未接线场景也能独立挂载（不依赖 navigator.language）。 */
