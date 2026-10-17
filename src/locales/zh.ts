@@ -88,6 +88,7 @@ export const zh = {
   shell: {
     viewBoard: '看板',
     viewGantt: '甘特',
+    viewMindmap: '导图',
     remoteUpdated: '另一端已更新磁盘版本，保存时会询问',
     panelPending: '{name} 面板尚未实现',
     drawerHost: '详情抽屉',
@@ -376,6 +377,28 @@ export const zh = {
     rail: '任务表',
     collapse: '收起任务表',
     expand: '展开任务表',
+  },
+
+  // T45 尾部追加：思维导图（只增不改，既有键一律不动；T46/T47/T48 直接复用本节的编辑/导出文案）
+  mindmap: {
+    emptyTitle: '还没有思维导图',
+    emptyHint: '在画布上自由展开你的想法，数据与任务库一起保存在 vault 中。',
+    create: '新建思维导图',
+    defaultName: '未命名导图',
+    centerTopic: '中心主题',
+    branch: '分支',
+    deleteMap: '删除此图',
+    renameMap: '重命名',
+    foldAll: '全部折叠',
+    unfoldAll: '全部展开',
+    fit: '适应画布',
+    export: '导出',
+    exportPng: '导出 PNG',
+    exportSvg: '导出 SVG',
+    exportVisible: '仅可见区',
+    exportFull: '全图',
+    cancel: '取消',
+    deleteConfirm: '删除整张思维导图？',
   },
 } as const
 

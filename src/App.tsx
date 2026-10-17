@@ -41,6 +41,7 @@ import { ConflictDialog } from './views/ConflictDialog'
 import type { ConflictLabels } from './views/ConflictDialog'
 import { BoardView } from './views/BoardView'
 import { GanttView } from './views/GanttView'
+import { MindMapView } from './views/MindMapView'
 import { FilterBar } from './views/FilterBar'
 import { MilestonePanel } from './views/MilestonePanel'
 import { createAssetStore } from './persistence/assetStore'
@@ -365,7 +366,7 @@ function StartupScreen(props: {
  */
 function Workspace(props: {
   store: VaultStore
-  view: 'board' | 'gantt'
+  view: 'board' | 'gantt' | 'mindmap'
   t: (key: MsgKey, params?: TranslateParams) => string
   /** 写入口（T10 CommandBus，可能包了 T29 只读闸门）；BoardView 改列/换序经它落盘。 */
   bus: CommandBus
@@ -416,7 +417,11 @@ function Workspace(props: {
           }
         }}
       >
-        {view === 'gantt' ? (
+        {view === 'mindmap' ? (
+          // T45：导图自带 onClick（节点选中留在视图本地 state），不经上面的事件委托；
+          // 空态「新建」经 Workspace 的 bus（可能包了 T29 只读闸门）落盘。
+          <MindMapView vault={vault} bus={bus} t={t} />
+        ) : view === 'gantt' ? (
           <GanttView
             vault={vault}
             filter={filter}
@@ -449,7 +454,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
   // 反复 setPhase 形成渲染死循环，用户点击推进的相位会被立刻覆盖回 need-dir。
   const ports = useMemo(() => props.ports ?? startupPorts(), [props.ports])
   const [phase, setPhase] = useState<Phase>({ kind: 'booting' })
-  const [view, setView] = useState<'board' | 'gantt'>('board')
+  const [view, setView] = useState<'board' | 'gantt' | 'mindmap'>('board')
   const [conflict, setConflict] = useState<ConflictReport | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   // 里程碑面板（T18）：受控开合 + 选中态。侧栏入口与甘特菱形点击共用同一面板。
@@ -941,7 +946,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
             {/* 视图切换与顶栏提示；撤销/重做按钮随 T15 的卡片交互一起挂 */}
             {session === null ? null : (
               <div role="group" className="oe-seg" style={{ marginRight: 'auto' }}>
-                {(['board', 'gantt'] as const).map((mode) => (
+                {(['board', 'gantt', 'mindmap'] as const).map((mode) => (
                   <button
                     key={mode}
                     type="button"
@@ -951,7 +956,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
                       setView(mode)
                     }}
                   >
-                    {mode === 'board' ? t('shell.viewBoard') : t('shell.viewGantt')}
+                    {mode === 'board' ? t('shell.viewBoard') : mode === 'gantt' ? t('shell.viewGantt') : t('shell.viewMindmap')}
                   </button>
                 ))}
               </div>

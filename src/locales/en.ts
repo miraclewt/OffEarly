@@ -73,6 +73,7 @@ export const en: Record<MsgKey, string> = {
   // Integration lane: app shell plus conflict / safe-mode copy (tail append, existing keys untouched)
   'shell.viewBoard': 'Board',
   'shell.viewGantt': 'Gantt',
+  'shell.viewMindmap': 'Mind map',
   'shell.remoteUpdated': 'Another device updated the file; you will be asked on save',
   'shell.panelPending': '{name} panel is not implemented yet',
   'shell.drawerHost': 'Details',
@@ -330,4 +331,24 @@ export const en: Record<MsgKey, string> = {
   'ganttTable.rail': 'Tasks',
   'ganttTable.collapse': 'Collapse task table',
   'ganttTable.expand': 'Expand task table',
+
+  // T45 tail-append: mind map view (key set must match zh.ts exactly; T46/T47/T48 reuse the edit/export copy)
+  'mindmap.emptyTitle': 'No mind maps yet',
+  'mindmap.emptyHint': 'Spread your ideas out freely on the canvas — everything is saved in the vault alongside your tasks.',
+  'mindmap.create': 'New mind map',
+  'mindmap.defaultName': 'Untitled map',
+  'mindmap.centerTopic': 'Central topic',
+  'mindmap.branch': 'Branch',
+  'mindmap.deleteMap': 'Delete this map',
+  'mindmap.renameMap': 'Rename',
+  'mindmap.foldAll': 'Collapse all',
+  'mindmap.unfoldAll': 'Expand all',
+  'mindmap.fit': 'Fit to canvas',
+  'mindmap.export': 'Export',
+  'mindmap.exportPng': 'Export PNG',
+  'mindmap.exportSvg': 'Export SVG',
+  'mindmap.exportVisible': 'Visible area',
+  'mindmap.exportFull': 'Full map',
+  'mindmap.cancel': 'Cancel',
+  'mindmap.deleteConfirm': 'Delete the entire mind map?',
 }
