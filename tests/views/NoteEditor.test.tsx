@@ -439,6 +439,7 @@ function makeVault(): Vault {
     milestones: [{ id: 'm1', topicId: 't1', title: 'v1.0 发布', date: '2026-10-30', done: false }],
     links: [],
     assets: [],
+    mindmaps: [],
   }
 }
 

@@ -99,6 +99,7 @@ function makeVault(tasks: Task[], milestones: Milestone[], links: Dependency[]):
     milestones,
     links,
     assets: [],
+    mindmaps: [],
   }
 }
 

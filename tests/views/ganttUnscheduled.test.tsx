@@ -77,6 +77,7 @@ function makeVault(tasks: Task[]): Vault {
     milestones: [],
     links: [],
     assets: [],
+    mindmaps: [],
   }
 }
 

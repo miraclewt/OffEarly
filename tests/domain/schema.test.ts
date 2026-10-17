@@ -79,6 +79,7 @@ function makeVault(overrides: Partial<Vault> = {}): Vault {
     milestones: [makeMilestone()],
     links: [makeLink()],
     assets: [{ id: 'a1f3c9', filename: 'a1f3c9.png', sizeBytes: 20480, createdAt: NOW }],
+    mindmaps: [],
     ...overrides,
   }
 }
@@ -279,5 +280,32 @@ describe('migrate', () => {
 
   it('空 id 一类非法值直接被 migrate 拒绝', () => {
     expect(() => migrate({ ...makeVault(), vaultId: '' })).toThrow(z.ZodError)
+  })
+
+  it('旧库缺 mindmaps 键时补空数组（schemaVersion 保持 1）', () => {
+    const raw = without('mindmaps')
+    const vault = migrate(raw)
+    expect(vault.mindmaps).toEqual([])
+    expect(vault.schemaVersion).toBe(1)
+  })
+
+  it('mindmaps 递归节点树通过校验', () => {
+    const vault = migrate({ ...makeVault(), mindmaps: [
+      {
+        id: 'm1',
+        name: '图一',
+        order: 'V',
+        createdAt: '2026-10-17T00:00:00.000Z',
+        updatedAt: '2026-10-17T00:00:00.000Z',
+        root: {
+          id: 'r',
+          text: '中心主题',
+          order: 'V',
+          folded: false,
+          children: [{ id: 'a', text: '分支', order: 'V', folded: true, children: [] }],
+        },
+      },
+    ] })
+    expect(vault.mindmaps[0]!.root.children[0]!.folded).toBe(true)
   })
 })

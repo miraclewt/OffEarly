@@ -79,6 +79,7 @@ function makeVault(): Vault {
     milestones: [],
     links: [],
     assets: [],
+    mindmaps: [],
   }
 }
 

@@ -150,6 +150,7 @@ function makeVault(): Vault {
     // t2 → t1：t1 被 t2 阻塞（t2 未完成）
     links: [{ id: 'l1', from: 't2', to: 't1', type: 'FS', lagDays: 0 }],
     assets: [],
+    mindmaps: [],
   }
 }
 

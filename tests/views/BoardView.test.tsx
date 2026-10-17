@@ -100,6 +100,7 @@ function makeVault(): Vault {
       { id: 'l4', from: 'k1', to: 'k2', type: 'FS', lagDays: 0 },
     ],
     assets: [],
+    mindmaps: [],
   }
 }
 

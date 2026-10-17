@@ -44,6 +44,7 @@ function vault(overrides: Partial<Vault> = {}): Vault {
     milestones: [],
     links: [],
     assets: [],
+    mindmaps: [],
     ...overrides,
   }
 }

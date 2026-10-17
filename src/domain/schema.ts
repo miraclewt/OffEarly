@@ -6,6 +6,8 @@ import type {
   Dependency,
   Filter,
   Milestone,
+  MindMap,
+  MindNode,
   Settings,
   Status,
   Task,
@@ -78,6 +80,27 @@ export const MilestoneSchema = z.object({
   note: z.string().optional(),
 })
 
+// 思维导图 spec §2：节点树是自引用结构，z.lazy 是 zod 对递归 schema 的标准写法，
+// 显式标注 z.ZodType<MindNode> 让 types.ts 继续做事实源。
+export const MindNodeSchema: z.ZodType<MindNode> = z.lazy(() =>
+  z.object({
+    id,
+    text: z.string(),
+    order: z.string(),
+    folded: z.boolean(),
+    children: z.array(MindNodeSchema),
+  }),
+)
+
+export const MindMapSchema = z.object({
+  id,
+  name: z.string(),
+  root: MindNodeSchema,
+  order: z.string(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+})
+
 export const AssetSchema = z.object({
   id,
   filename: z.string(),
@@ -141,6 +164,9 @@ export const VaultSchema = z.object({
   milestones: z.array(MilestoneSchema),
   links: z.array(DependencySchema),
   assets: z.array(AssetSchema),
+  // 思维导图 spec §2：旧库缺键直接解析补空，schemaVersion 保持 1、不注册迁移
+  // （先例：SettingsSchema 的字段默认值）。键序排在 assets 之后，save 的键序约定不变。
+  mindmaps: z.array(MindMapSchema).default([]),
 })
 
 // 编译期防漂移：schema 推导出的类型必须与 types.ts 完全一致，
@@ -157,6 +183,7 @@ export type SchemaAlignment = [
   Assert<Equal<Dependency, z.infer<typeof DependencySchema>>>,
   Assert<Equal<Milestone, z.infer<typeof MilestoneSchema>>>,
   Assert<Equal<Asset, z.infer<typeof AssetSchema>>>,
+  Assert<Equal<MindMap, z.infer<typeof MindMapSchema>>>,
   Assert<Equal<Filter, z.infer<typeof FilterSchema>>>,
   Assert<Equal<WorkCalendar, z.infer<typeof WorkCalendarSchema>>>,
 ]

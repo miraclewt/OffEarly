@@ -166,6 +166,7 @@ export function createNewVault(now: Date = new Date()): Vault {
     milestones: [],
     links: [],
     assets: [],
+    mindmaps: [],
   })
 }
 

@@ -70,6 +70,26 @@ export interface Milestone {
   note?: string
 }
 
+export interface MindNode {
+  id: string
+  text: string
+  /** 兄弟排序键，复用 domain/lexorank.mid */
+  order: string
+  /** 折叠：子树暂时隐藏但保留 */
+  folded: boolean
+  children: MindNode[]
+}
+
+export interface MindMap {
+  id: string
+  name: string
+  root: MindNode
+  /** 多张图之间的列表排序键 */
+  order: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Asset {
   id: string
   filename: string
@@ -123,4 +143,5 @@ export interface Vault {
   milestones: Milestone[]
   links: Dependency[]
   assets: Asset[]
+  mindmaps: MindMap[]
 }

@@ -32,6 +32,7 @@ function emptyVault(): Vault {
     milestones: [],
     links: [],
     assets: [],
+    mindmaps: [],
   }
 }
 

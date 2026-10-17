@@ -75,6 +75,7 @@ function makeVault(overrides: Partial<Vault> = {}): Vault {
     milestones: [makeMilestone('m1', { date: '2026-10-20' })],
     links: [link('t1', 't2'), link('t2', 't3')],
     assets: [],
+    mindmaps: [],
     ...overrides,
   }
 }
