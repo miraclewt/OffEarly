@@ -1,17 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  addNodeCommand,
   createCommandBus,
+  createMapCommand,
   createTaskCommand,
+  deleteMapCommand,
+  deleteNodeCommand,
   deleteTaskCommand,
+  moveNodeCommand,
   moveTaskCommand,
+  patchMapCommand,
+  patchNodeCommand,
   patchSettingsCommand,
   patchTaskCommand,
 } from '../../src/domain/commandBus'
 import type { CommandBus } from '../../src/domain/commandBus'
 import { createVaultStore } from '../../src/domain/store'
 import type { VaultStore } from '../../src/domain/store'
-import type { Task, Vault } from '../../src/domain/types'
+import type { MindMap, MindNode, Task, Vault } from '../../src/domain/types'
 import { createAutosave } from '../../src/persistence/autosave'
 import { createNewVault } from '../../src/persistence/vaultRepository'
 
@@ -304,5 +311,153 @@ describe('外部注入的订阅面', () => {
 
     expect(store.getVault()).toEqual(before)
     expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+// ── T41 · 思维导图命令（图与节点树写入口；task.* / settings.patch 行为不变） ──────
+
+describe('思维导图命令', () => {
+  /** 种子图：root r，子 ['a'（有子 a1）, 'b']。直接换 vault 不走 bus，undo 栈保持 0。 */
+  function seedMap(overrides: Partial<MindMap> = {}): MindMap {
+    const map: MindMap = {
+      id: 'map-1',
+      name: '图 1',
+      order: 'm',
+      createdAt: T0.toISOString(),
+      updatedAt: T0.toISOString(),
+      root: {
+        id: 'r',
+        text: 'R',
+        order: 'm',
+        folded: false,
+        children: [
+          {
+            id: 'a',
+            text: 'A',
+            order: 'a',
+            folded: false,
+            children: [{ id: 'a1', text: 'A1', order: 'a1', folded: false, children: [] }],
+          },
+          { id: 'b', text: 'B', order: 'b', folded: false, children: [] },
+        ],
+      },
+      ...overrides,
+    }
+    store.setVault({ ...store.getVault(), mindmaps: [map] })
+    return map
+  }
+
+  function mapRoot(s: VaultStore, id = 'map-1'): MindNode {
+    const map = s.getVault().mindmaps.find((candidate) => candidate.id === id)
+    if (map === undefined) throw new Error('夹具：图不存在')
+    return map.root
+  }
+
+  it('addNodeCommand + undo 还原树', () => {
+    const map = seedMap() // root 'r'，子 ['a','b']
+    const before = structuredClone(store.getVault())
+    const node: MindNode = { id: 'c', text: 'C', order: 'w', folded: false, children: [] }
+
+    bus.apply(addNodeCommand(map.id, 'r', node, null))
+    expect(mapRoot(store).children.map((n) => n.id)).toEqual(['a', 'b', 'c'])
+
+    bus.undo()
+    expect(mapRoot(store).children.map((n) => n.id)).toEqual(['a', 'b'])
+    expect(store.getVault()).toEqual(before)
+  })
+
+  it('deleteNodeCommand 逆元携完整子树复原位置', () => {
+    seedMap()
+    const before = structuredClone(store.getVault())
+
+    bus.apply(deleteNodeCommand(store.getVault(), 'map-1', 'a')) // 删 a（有子 a1）
+    expect(mapRoot(store).children.map((n) => n.id)).toEqual(['b'])
+
+    bus.undo()
+    expect(mapRoot(store).children.map((n) => n.id)).toEqual(['a', 'b'])
+    expect(mapRoot(store).children[0]!.children.map((n) => n.id)).toEqual(['a1']) // a 回 index 0 且 a1 仍在
+    expect(store.getVault()).toEqual(before)
+  })
+
+  it('deleteNodeCommand 删根抛错、不压 undo 栈', () => {
+    seedMap()
+    expect(() => deleteNodeCommand(store.getVault(), 'map-1', 'r')).toThrow()
+    expect(bus.undoDepth()).toBe(0)
+  })
+
+  it('patchNodeCommand 字段级逆（text/folded）', () => {
+    seedMap()
+    const before = structuredClone(store.getVault())
+
+    bus.apply(patchNodeCommand(store.getVault(), 'map-1', 'a', { text: '改过', folded: true }))
+    const patched = mapRoot(store).children[0]!
+    expect({ text: patched.text, folded: patched.folded }).toEqual({ text: '改过', folded: true })
+
+    bus.undo()
+    const restored = mapRoot(store).children[0]!
+    expect({ text: restored.text, folded: restored.folded }).toEqual({ text: 'A', folded: false })
+    expect(store.getVault()).toEqual(before)
+    expect(() => patchNodeCommand(store.getVault(), 'map-1', 'a', {})).toThrow(/空 patch/)
+  })
+
+  it('moveNodeCommand 跨父移动 + 逆元回原父原下标', () => {
+    seedMap()
+    const before = structuredClone(store.getVault())
+
+    bus.apply(moveNodeCommand(store.getVault(), 'map-1', 'a1', 'b', 0)) // a1: a→b index0
+    expect(mapRoot(store).children.map((n) => n.id)).toEqual(['a', 'b'])
+    expect(mapRoot(store).children[0]!.children).toEqual([])
+    expect(mapRoot(store).children[1]!.children.map((n) => n.id)).toEqual(['a1'])
+
+    bus.undo()
+    expect(store.getVault()).toEqual(before)
+  })
+
+  it('moveNodeCommand 移入自身子树抛错、不压 undo 栈', () => {
+    seedMap()
+    const before = structuredClone(store.getVault())
+    expect(() => moveNodeCommand(store.getVault(), 'map-1', 'a', 'a1', 0)).toThrow()
+    expect(bus.undoDepth()).toBe(0)
+    // 同一构造期拦截：移根、移入自身同样抛错
+    expect(() => moveNodeCommand(store.getVault(), 'map-1', 'r', 'a', 0)).toThrow()
+    expect(() => moveNodeCommand(store.getVault(), 'map-1', 'a', 'a', 0)).toThrow()
+    expect(bus.undoDepth()).toBe(0)
+    expect(store.getVault()).toEqual(before)
+  })
+
+  it('createMapCommand / patchMapCommand 往返，空 patch 抛错', () => {
+    const created: MindMap = {
+      id: 'map-new',
+      name: '新图',
+      order: 'z',
+      createdAt: T0.toISOString(),
+      updatedAt: T0.toISOString(),
+      root: { id: 'nr', text: '根', order: 'm', folded: false, children: [] },
+    }
+    bus.apply(createMapCommand(created))
+    expect(store.getVault().mindmaps.map((m) => m.id)).toEqual(['map-new'])
+
+    bus.apply(patchMapCommand(store.getVault(), 'map-new', { name: '改名', updatedAt: T1.toISOString() }))
+    expect(store.getVault().mindmaps[0]!.name).toBe('改名')
+
+    bus.undo()
+    expect(store.getVault().mindmaps[0]!.name).toBe('新图')
+    expect(() => patchMapCommand(store.getVault(), 'map-new', {})).toThrow(/空 patch/)
+    bus.undo()
+    expect(store.getVault().mindmaps).toEqual([])
+  })
+
+  it('deleteMapCommand undo 后图与原下标复原', () => {
+    const first = seedMap()
+    const second: MindMap = { ...first, id: 'map-2', name: '图 2' }
+    store.setVault({ ...store.getVault(), mindmaps: [first, second] })
+    const before = structuredClone(store.getVault())
+
+    bus.apply(deleteMapCommand(store.getVault(), 'map-1')) // 删第一张
+    expect(store.getVault().mindmaps.map((m) => m.id)).toEqual(['map-2'])
+
+    bus.undo()
+    expect(store.getVault()).toEqual(before)
+    expect(store.getVault().mindmaps.map((m) => m.id)).toEqual(['map-1', 'map-2'])
   })
 })
