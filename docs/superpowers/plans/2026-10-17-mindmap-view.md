@@ -23,7 +23,7 @@
 
 ---
 
-### Task T40：数据模型（types + schema + 工厂 + fixture）
+### Task 40：数据模型（types + schema + 工厂 + fixture）
 
 **Files:**
 - Modify: `src/domain/types.ts`（Task 接口之后、Vault 之前插入新类型；Vault L114-126 加字段）
@@ -121,7 +121,7 @@ export const MindMapSchema = z.object({
 
 ---
 
-### Task T41：CommandBus 思维导图命令 + 树工具
+### Task 41：CommandBus 思维导图命令 + 树工具
 
 **Files:**
 - Create: `src/domain/mindmapTree.ts`
@@ -211,7 +211,7 @@ Run → FAIL（工厂不存在 / 命令类型编译失败）。
 
 ---
 
-### Task T42：控制器构造层 mindmapActions（plan→apply）
+### Task 42：控制器构造层 mindmapActions（plan→apply）
 
 **Files:**
 - Create: `src/controllers/mindmapActions.ts`
@@ -254,7 +254,7 @@ Run: `npx vitest run tests/controllers/mindmapActions.test.ts` → FAIL。
 
 ---
 
-### Task T43：布局模型 mindmapModel（纯函数）
+### Task 43：布局模型 mindmapModel（纯函数）
 
 **Files:**
 - Create: `src/domain/mindmapModel.ts`
@@ -330,7 +330,7 @@ Run → FAIL。
 
 ---
 
-### Task T44：视口控制器 mindmapViewport（pan/zoom/fit）
+### Task 44：视口控制器 mindmapViewport（pan/zoom/fit）
 
 **Files:**
 - Create: `src/controllers/mindmapViewport.ts`
@@ -368,7 +368,7 @@ it('applyWheel：Ctrl 缩放、普通滚轮平移，返回是否消费', () => {
 
 ---
 
-### Task T45：画布投影 + tab 接线（只读渲染）
+### Task 45：画布投影 + tab 接线（只读渲染）
 
 **Files:**
 - Create: `src/views/MindMapCanvas.tsx`、`src/views/MindMapView.tsx`
@@ -436,7 +436,7 @@ it('App 顶栏出现第三个 tab 并可切入', () => { /* 复用 App 集成测
 
 ---
 
-### Task T46：编辑交互（就地编辑、快捷键、折叠、平移缩放）
+### Task 46：编辑交互（就地编辑、快捷键、折叠、平移缩放）
 
 **Files:**
 - Modify: `src/views/MindMapView.tsx`、`src/views/MindMapCanvas.tsx`
@@ -472,7 +472,7 @@ it('方向键导航：Tab 后 ArrowDown 选中下一个兄弟', …) // 若实�
 
 ---
 
-### Task T47：跨父拖拽 move + 图管理工具条
+### Task 47：跨父拖拽 move + 图管理工具条
 
 **Files:**
 - Modify: `src/views/MindMapView.tsx`
@@ -489,7 +489,7 @@ it('方向键导航：Tab 后 ArrowDown 选中下一个兄弟', …) // 若实�
 
 ---
 
-### Task T48：导出 PNG/SVG + e2e + 文档收尾
+### Task 48：导出 PNG/SVG + e2e + 文档收尾
 
 **Files:**
 - Create: `src/views/MindMapExporter.ts`
