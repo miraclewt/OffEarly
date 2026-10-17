@@ -565,3 +565,103 @@ describe('T46-3 · 折叠徽标 + 指针层（拖拽平移 / 滚轮）', () => {
   })
 })
 
+// ============================================================================
+// T46 修复轮（review findings）：
+//   ① 键位表缺 event.target 过滤——工具条 <select>/新建/适应画布按钮上的 keydown 冒泡到
+//      根容器会误触节点动作（Enter 加同级 + preventDefault 吞掉按钮激活、Space 折叠写库、
+//      方向键在 select 上双触发、Tab 被 preventDefault 挡死键盘焦点逃逸）。
+//   ② finishEditing 对「文本未变」的提交要 no-op，否则原样 blur 也留一条零变更 undo 记录。
+//   ③ overlay 输入框的 aria-label 该用节点级文案（mindmap.renameNode），不是图级 renameMap。
+// fireEvent 的返回值即 dispatchEvent 结果：false = 事件被 preventDefault（默认动作被吞）。
+// ============================================================================
+
+describe('T46-4 · 修复轮：键位表控件守卫 / 零变更提交跳过 / 编辑框无障碍标签', () => {
+  it('焦点在「新建」按钮上按 Enter：不加同级、不写库，且默认动作（按钮激活）未被吞', () => {
+    const m = mountT46()
+    fireEvent.pointerDown(m.nodeEl('a')) // 有选中节点才构成「Enter=加同级」的触发条件
+    expect(m.selected()).toBe('a')
+
+    const create = m.view.getByTestId('mindmap-create')
+    create.focus()
+    expect(document.activeElement).toBe(create)
+    expect(fireEvent.keyDown(create, { key: 'Enter' })).toBe(true) // 未 preventDefault
+    expect(m.bus.undoDepth()).toBe(0)
+    expect(m.store.getVault().mindmaps[0]!.root.children).toHaveLength(2) // 无新同级
+
+    // 同一枚按钮上的 Space（折叠）与 Tab（加子/焦点逃逸）也一律不接管
+    expect(fireEvent.keyDown(create, { key: ' ' })).toBe(true)
+    expect(fireEvent.keyDown(create, { key: 'Tab' })).toBe(true)
+    expect(m.bus.undoDepth()).toBe(0)
+    expect(findNode(m.store.getVault().mindmaps[0]!.root, 'a')!.folded).toBe(false)
+    expect(m.view.queryByTestId('mindmap-input')).toBeNull()
+  })
+
+  it('图切换 select 上的方向键/Enter 不驱动节点游走或加同级', () => {
+    const m = mountT46([editTree(), map('m2', '第二图', node('r2', '第二中心'))])
+    fireEvent.pointerDown(m.nodeEl('a'))
+    const select = m.view.getByTestId('mindmap-select')
+    select.focus()
+
+    expect(fireEvent.keyDown(select, { key: 'ArrowDown' })).toBe(true)
+    expect(m.selected()).toBe('a') // 视图不介入：留给 select 自己的键盘语义
+    expect(fireEvent.keyDown(select, { key: 'ArrowRight' })).toBe(true)
+    expect(m.selected()).toBe('a')
+    expect(fireEvent.keyDown(select, { key: 'Enter' })).toBe(true)
+    expect(m.bus.undoDepth()).toBe(0)
+  })
+
+  it('守卫只拦交互控件：根容器自身冒泡的 keydown 仍走键位表（回归）', () => {
+    const m = mountT46()
+    fireEvent.pointerDown(m.nodeEl('a'))
+    fireEvent.keyDown(m.root(), { key: ' ' })
+    expect(m.bus.undoDepth()).toBe(1)
+    expect(findNode(m.store.getVault().mindmaps[0]!.root, 'a')!.folded).toBe(true)
+  })
+
+  it('文本未变时收尾零写入：原样 blur、trim 后相同的 Enter、占位文案清空后 blur', () => {
+    const m = mountT46()
+    fireEvent.doubleClick(m.nodeEl('a'))
+    const input = m.view.getByTestId('mindmap-input') as HTMLInputElement
+    expect(input.value).toBe('分支A')
+    fireEvent.blur(input) // 没改一个字就点空白
+    expect(m.bus.undoDepth()).toBe(0)
+    expect(m.view.queryByTestId('mindmap-input')).toBeNull() // 编辑照常退出
+    expect(m.selected()).toBe('a')
+
+    // 只有首尾空白：trim 后与原文相同 → 同样不落库
+    fireEvent.doubleClick(m.nodeEl('a'))
+    const input2 = m.view.getByTestId('mindmap-input') as HTMLInputElement
+    fireEvent.change(input2, { target: { value: '  分支A  ' } })
+    fireEvent.keyDown(input2, { key: 'Enter' })
+    expect(m.bus.undoDepth()).toBe(0)
+
+    // 空输入落到兜底文案，而原文恰是兜底文案（Tab 新建的占位分支）→ 也是零变更
+    fireEvent.pointerDown(m.nodeEl('a'))
+    fireEvent.keyDown(m.root(), { key: 'Tab' })
+    expect(m.bus.undoDepth()).toBe(1) // 只有 add 这一条
+    m.refresh()
+    const placeholder = m.view.getByTestId('mindmap-input') as HTMLInputElement
+    expect(placeholder.value).toBe('分支')
+    fireEvent.change(placeholder, { target: { value: '   ' } })
+    fireEvent.blur(placeholder)
+    expect(m.bus.undoDepth()).toBe(1)
+
+    // 反向哨兵：真改了字必须照常落库（守卫不是把提交全吞了）
+    fireEvent.doubleClick(m.nodeEl('a'))
+    const input3 = m.view.getByTestId('mindmap-input') as HTMLInputElement
+    fireEvent.change(input3, { target: { value: '改名' } })
+    fireEvent.blur(input3)
+    expect(m.bus.undoDepth()).toBe(2)
+    expect(findNode(m.store.getVault().mindmaps[0]!.root, 'a')!.text).toBe('改名')
+  })
+
+  it('编辑框 aria-label 用节点级文案「重命名分支」（可访问名查询），不再借图级「重命名」', () => {
+    const m = mountT46()
+    fireEvent.doubleClick(m.nodeEl('a'))
+    const input = m.view.getByLabelText('重命名分支') as HTMLInputElement
+    expect(input.getAttribute('data-mindmap-input')).toBe('a')
+    expect(input.getAttribute('aria-label')).toBe(t('mindmap.renameNode'))
+    expect(m.view.queryByLabelText('重命名')).toBeNull()
+  })
+})
+

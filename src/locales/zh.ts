@@ -389,6 +389,7 @@ export const zh = {
     branch: '分支',
     deleteMap: '删除此图',
     renameMap: '重命名',
+    renameNode: '重命名分支',
     foldAll: '全部折叠',
     unfoldAll: '全部展开',
     fit: '适应画布',

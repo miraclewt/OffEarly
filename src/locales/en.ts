@@ -341,6 +341,7 @@ export const en: Record<MsgKey, string> = {
   'mindmap.branch': 'Branch',
   'mindmap.deleteMap': 'Delete this map',
   'mindmap.renameMap': 'Rename',
+  'mindmap.renameNode': 'Rename branch',
   'mindmap.foldAll': 'Collapse all',
   'mindmap.unfoldAll': 'Expand all',
   'mindmap.fit': 'Fit to canvas',

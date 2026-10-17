@@ -170,12 +170,18 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
    * 结束编辑。commit=true → applyRenameNode(raw 输入，trim 与兜底在控制器里做)；
    * false → 纯退出，零 bus 写入（Escape 裁决）。先清 ref 再写库，blur 竞态自然被
    * editingRef 守卫吃掉（Enter 提交卸载后浏览器补发的 blur 不会再提交一次）。
+   * 文本没变（与 normalizeText 同口径：空白落兜底文案）就不写库——不然「进编辑原样 blur」
+   * 会留一条零变更 undo 记录，撤销栈被无意义条目灌满。
    */
   const finishEditing = useCallback(
     (commit: boolean, raw: string) => {
       const nodeId = editingRef.current
       setEditing(null)
       if (!commit || nodeId === null || selectedMap === null) return
+      const original = findNode(selectedMap.root, nodeId)?.text
+      if (original === undefined) return // 节点已被他处删除：没有可改写的目标
+      const trimmed = raw.trim()
+      if (trimmed === original || (trimmed === '' && t('mindmap.branch') === original)) return
       applyRenameNode(bus, vault, selectedMap.id, nodeId, raw, t('mindmap.branch'))
     },
     [bus, vault, selectedMap, t, setEditing],
@@ -198,6 +204,12 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
   // ---- T46 · 键盘层（根容器 onKeyDown，xmind 键位表） -----------------------
 
   function handleRootKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    // 控件守卫：工具条（图切换 select / 新建 / 适应画布按钮）与编辑输入框里的 keydown 会
+    // 冒泡到这里，但它们不属于「画布节点快捷键」的作用域——不加这层拦截，焦点在「新建」上
+    // 按 Enter 会同时加同级节点并 preventDefault 吞掉按钮激活；在 select 上按方向键会
+    // 选项与游走双触发；Tab 在输入框里打字/切焦点会被 preventDefault 劫持成「加子节点」。
+    const target = event.target as Element | null
+    if (target !== null && target.closest('button,select,input,textarea') !== null) return
     // IME 守卫：组词期间的 keydown 一律不响应快捷键。
     // React 19 的 synthetic KeyboardEvent 连 isComposing 接口都不透出（tsc 实证），
     // nativeEvent 才是事实源。手动验证项：真实中文输入法（搜狗/微软拼音等）的组词时序
@@ -450,7 +462,7 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
                 type="text"
                 data-testid="mindmap-input"
                 data-mindmap-input={editingView.id}
-                aria-label={t('mindmap.renameMap')}
+                aria-label={t('mindmap.renameNode')}
                 defaultValue={editingRawText}
                 // 与 <g transform="translate(pan) scale(zoom)"> 同一投影：screen = content*zoom + pan
                 style={{
