@@ -14,6 +14,8 @@
 // data-testid="board"（与替换掉的 EmptyBoard 占位一致，E2E 依赖它）。
 //
 // 未接线边界：TaskDrawer（T17）只经 onOpenTask 回调暴露；FilterBar（T16）不 import。
+// 列内新建（T34）同样只外送 (status, title)——命令由接线方（App 的 Workspace）用实时库构造，
+// 本组件不读 store、也不需要知道 taskCreate 的存在。
 
 import { useMemo, useRef } from 'react'
 import type { CSSProperties } from 'react'
@@ -44,6 +46,14 @@ export interface BoardViewProps {
   t: (key: MsgKey, params?: TranslateParams) => string
   /** 点击卡片（T17 TaskDrawer 接线点）。 */
   onOpenTask?: (taskId: string) => void
+  /**
+   * 列内新建任务：列底「+ 新建任务」提交时外送 (列 status, 标题)。
+   * 命令构造交给上层（App 的 Workspace 用 store.getVault() 读**实时**库来算排序键，
+   * 连续录入时不会拿渲染快照算重 key）；省略即视为不可创建（只渲染 createHint 灰行）。
+   */
+  onCreateTask?: (status: Status, title: string) => void
+  /** 不可创建时的说明（库里没有未归档话题）。 */
+  createHint?: string
   /** 判定逾期的今天（YYYY-MM-DD）；省略取本地当天，测试注入以确定化。 */
   today?: string
   style?: CSSProperties
@@ -186,6 +196,13 @@ export function BoardView(props: BoardViewProps) {
             today={today}
             t={t}
             onOpenTask={handleOpenTask}
+            // 列底新建：把 status 绑进回调，列组件只管「回车提交了标题」
+            onCreateTask={
+              props.onCreateTask === undefined
+                ? undefined
+                : (title: string) => props.onCreateTask?.(status, title)
+            }
+            createHint={props.createHint}
           />
         ))}
       </div>

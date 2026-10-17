@@ -7,7 +7,8 @@ import type { Command, CommandBus } from './domain/commandBus'
 import { createEmptyFilter } from './domain/queryEngine'
 import { createVaultStore } from './domain/store'
 import type { VaultStore } from './domain/store'
-import type { Filter, Vault } from './domain/types'
+import type { Filter, Status, Vault } from './domain/types'
+import { applyCreateTask } from './controllers/taskCreate'
 import { createI18n } from './locales/i18n'
 import type { I18n, LocaleSource, MsgKey, TranslateParams } from './locales/i18n'
 import { createAutosave } from './persistence/autosave'
@@ -57,6 +58,7 @@ import type { SafeModeLabels } from './views/SafeModeBanner'
 import { SaveIndicator } from './views/SaveIndicator'
 import { TopicSidebar } from './views/TopicSidebar'
 import { BackupPanel } from './views/BackupPanel'
+import { SettingsPanel } from './views/SettingsPanel'
 
 const INDIGO = 'var(--oe-accent)'
 const BORDER = 'var(--oe-border)'
@@ -377,6 +379,18 @@ function Workspace(props: {
   // spec §6.2：看板与甘特共用同一份筛选结果，切视图不丢条件
   const filter = useMemo<Filter>(() => vault.settings.lastFilter ?? createEmptyFilter(), [vault.settings.lastFilter])
 
+  // 列内新建：一个未归档话题都没有时（topicId 是必填字段）不提供入口，只给灰行说明
+  const canCreateTask = useMemo(() => vault.topics.some((topic) => !topic.archived), [vault.topics])
+
+  /**
+   * `+ 新建任务` 的落点：读**实时**库（store.getVault()）而不是渲染快照——
+   * 连续回车录入时，排序键才不会拿旧库算出重复的 order；
+   * 命令构造在 controllers/taskCreate.ts（纯函数，单测覆盖）。
+   */
+  function createTask(status: Status, title: string): void {
+    applyCreateTask(bus, store.getVault(), { title, status })
+  }
+
   return (
     <div style={{ display: 'flex', height: '100%', minWidth: 0, minHeight: 0 }}>
       <div
@@ -412,7 +426,15 @@ function Workspace(props: {
             onOpenTask={onOpenTask}
           />
         ) : (
-          <BoardView vault={vault} filter={filter} bus={bus} t={t} onOpenTask={onOpenTask} />
+          <BoardView
+            vault={vault}
+            filter={filter}
+            bus={bus}
+            t={t}
+            onOpenTask={onOpenTask}
+            onCreateTask={canCreateTask ? createTask : undefined}
+            createHint={t('newTask.noTopic')}
+          />
         )}
       </div>
       {/* 详情抽屉宿主（T17 已接线；TaskDrawer 为 fixed 抽屉，在 App 顶层挂载） */}
@@ -440,6 +462,8 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
   const [filterOpen, setFilterOpen] = useState(false)
   // T28 备份面板：受控开合（侧栏「备份」入口拉起）。
   const [backupOpen, setBackupOpen] = useState(false)
+  // T35 设置面板：受控开合（侧栏「设置」入口拉起，此前是 shell.panelPending 占位）。
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   /** 会话事件出口：组件只显示，决定权留在这一层。 */
   const hooks = useMemo<SessionHooks>(
@@ -678,11 +702,6 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
     resolved: t('safemode.resolved'),
   }
 
-  /** 底部面板：里程碑(T18)、筛选器(T16)已接真面板；备份(T28)/设置 仍占位，不引用不存在的组件。 */
-  const panelPlaceholder = (label: MsgKey) => () => {
-    setNotice({ key: 'shell.panelPending', params: { name: t(label) } })
-  }
-
   let main: ReactNode
   switch (phase.kind) {
     case 'booting':
@@ -894,7 +913,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
                 setFilterOpen(true)
               }}
               onOpenBackup={() => setBackupOpen(true)}
-              onOpenSettings={panelPlaceholder('sidebar.settings')}
+              onOpenSettings={() => setSettingsOpen(true)}
               style={{ flex: 1, minHeight: 0 }}
             />
           )}
@@ -991,6 +1010,15 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
       )}
       {session === null ? null : (
         <FilterBar store={session.store} bus={session.bus} t={t} open={filterOpen} onOpenChange={setFilterOpen} />
+      )}
+      {session === null ? null : (
+        <SettingsPanel
+          store={session.store}
+          bus={session.bus}
+          t={t}
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+        />
       )}
       {session === null && recovery === undefined ? null : (
         <BackupPanel

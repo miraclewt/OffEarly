@@ -21,6 +21,7 @@ import { createVaultStore } from '../../src/domain/store'
 import type { Task, Topic, Vault } from '../../src/domain/types'
 import { createI18n } from '../../src/locales/i18n'
 import { BoardView } from '../../src/views/BoardView'
+import type { BoardViewProps } from '../../src/views/BoardView'
 
 const TODAY = '2026-10-15'
 const NOW = '2026-10-15T09:30:00.000Z'
@@ -102,7 +103,11 @@ function makeVault(): Vault {
   }
 }
 
-function setup(filter = createEmptyFilter()) {
+function setup(
+  filter = createEmptyFilter(),
+  // 只放「接线方注入的可选 props」：vault/filter/bus/t/today 由 Harness 自己派生
+  extra: Pick<BoardViewProps, 'onCreateTask' | 'createHint'> = {},
+) {
   const store = createVaultStore(makeVault())
   const bus = createCommandBus(store)
   const i18n = createI18n({ getLocale: () => 'zh', subscribe: () => () => {} })
@@ -118,6 +123,7 @@ function setup(filter = createEmptyFilter()) {
         t={i18n.t}
         today={TODAY}
         onOpenTask={onOpenTask}
+        {...extra}
       />
     )
   }
@@ -437,5 +443,94 @@ describe('拖拽换列的组件级结果', () => {
     const engine = createQueryEngine(store.getVault().topics, store.getVault().tasks, store.getVault().links, { today: TODAY })
     const review = engine.query(createEmptyFilter()).filter((task) => task.status === 'review')
     expect(review.map((task) => task.id).sort()).toEqual(['k1', 'k5'])
+  })
+})
+
+// ─────────────────────────────── 列内新建任务（T34） ───────────────────────────────
+
+describe('列内新建任务入口', () => {
+  it('四列各有一个新建入口，默认不展开输入框', () => {
+    const { view } = setup(createEmptyFilter(), { onCreateTask: vi.fn() })
+    for (const status of ['todo', 'doing', 'review', 'done'] as const) {
+      expect(view.getByTestId(`board-add-task-${status}`).textContent).toContain('新建任务')
+      expect(view.queryByTestId(`board-new-task-input-${status}`)).toBeNull()
+    }
+  })
+
+  it('点入口展开输入框；回车把 (列 status, 标题) 外送给接线方', () => {
+    const onCreateTask = vi.fn()
+    const { view } = setup(createEmptyFilter(), { onCreateTask })
+
+    fireEvent.click(view.getByTestId('board-add-task-doing'))
+    const input = view.getByTestId('board-new-task-input-doing')
+    fireEvent.change(input, { target: { value: '  接入支付回调  ' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onCreateTask).toHaveBeenCalledWith('doing', '接入支付回调')
+  })
+
+  it('提交后输入框清空但保持展开（连续录入）', () => {
+    const onCreateTask = vi.fn()
+    const { view } = setup(createEmptyFilter(), { onCreateTask })
+
+    fireEvent.click(view.getByTestId('board-add-task-todo'))
+    const input = view.getByTestId('board-new-task-input-todo') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '第一条' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    fireEvent.change(input, { target: { value: '第二条' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onCreateTask.mock.calls).toEqual([
+      ['todo', '第一条'],
+      ['todo', '第二条'],
+    ])
+    expect(input.value).toBe('')
+    // 仍是展开态（输入框还在）
+    expect(view.getByTestId('board-new-task-input-todo')).toBeDefined()
+  })
+
+  it('空白标题不提交；Esc 收起输入框', () => {
+    const onCreateTask = vi.fn()
+    const { view } = setup(createEmptyFilter(), { onCreateTask })
+
+    fireEvent.click(view.getByTestId('board-add-task-review'))
+    const input = view.getByTestId('board-new-task-input-review')
+    fireEvent.change(input, { target: { value: '   ' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onCreateTask).not.toHaveBeenCalled()
+
+    fireEvent.change(input, { target: { value: '半截标题' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(onCreateTask).not.toHaveBeenCalled()
+    expect(view.queryByTestId('board-new-task-input-review')).toBeNull()
+    expect(view.getByTestId('board-add-task-review')).toBeDefined()
+  })
+
+  it('失焦收起（不留下半截草稿）', () => {
+    const onCreateTask = vi.fn()
+    const { view } = setup(createEmptyFilter(), { onCreateTask })
+    fireEvent.click(view.getByTestId('board-add-task-todo'))
+    const input = view.getByTestId('board-new-task-input-todo')
+    fireEvent.change(input, { target: { value: '走神了' } })
+    fireEvent.blur(input)
+    expect(onCreateTask).not.toHaveBeenCalled()
+    expect(view.queryByTestId('board-new-task-input-todo')).toBeNull()
+  })
+
+  it('不可创建（无话题）时只渲染灰行说明，没有可点的入口', () => {
+    const { view } = setup(createEmptyFilter(), { createHint: '先建一个话题，再新建任务' })
+    for (const status of ['todo', 'doing', 'review', 'done'] as const) {
+      expect(view.getByTestId(`board-add-task-blocked-${status}`).textContent).toBe('先建一个话题，再新建任务')
+      expect(view.queryByTestId(`board-add-task-${status}`)).toBeNull()
+      expect(view.queryByTestId(`board-new-task-input-${status}`)).toBeNull()
+    }
+  })
+
+  it('新建入口不影响列头三项与列内卡片', () => {
+    const { view } = setup(createEmptyFilter(), { onCreateTask: vi.fn() })
+    const column = view.getByTestId('board-column-todo')
+    expect(within(column).getByTestId('board-column-count-todo').textContent).toBe('3')
+    expect(within(column).getByTestId('board-column-ratio-todo').textContent).toBe('0%')
+    expect(within(column).getByTestId('task-card-k1')).toBeDefined()
   })
 })

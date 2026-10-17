@@ -318,6 +318,58 @@ export const zh = {
     failed: '图片保存失败',
     pending: '图片加载中',
   },
+
+  // T34 尾部追加：看板列内新建任务（只增不改，既有键一律不动）
+  newTask: {
+    label: '新建任务',
+    placeholder: '任务标题，回车创建',
+    hint: '回车创建并可连续录入，Esc 退出',
+    noTopic: '先建一个话题，再新建任务',
+  },
+
+  // T35 尾部追加：设置面板（只增不改，既有键一律不动）
+  settingsPanel: {
+    title: '设置',
+    close: '关闭',
+    language: '语言',
+    languageAuto: '跟随系统',
+    languageZh: '简体中文',
+    languageEn: 'English',
+    theme: '主题',
+    themeLight: '浅色',
+    themeHint: '当前版本仅提供浅色主题',
+    gantt: '甘特图',
+    ganttScale: '默认刻度',
+    ganttScaleDay: '日',
+    ganttScaleWeek: '周',
+    calendar: '工作日历',
+    calendarHint: '影响工期计算与甘特图排期，改完立即生效',
+    workdays: '工作日',
+    weekday: {
+      mon: '周一',
+      tue: '周二',
+      wed: '周三',
+      thu: '周四',
+      fri: '周五',
+      sat: '周六',
+      sun: '周日',
+    },
+    workdayHint: '至少保留一个工作日',
+    holidays: '假期',
+    extraWorkdays: '补班',
+    datePlaceholder: 'YYYY-MM-DD',
+    add: '添加',
+    remove: '移除',
+    noHolidays: '暂无假期',
+    noExtraWorkdays: '暂无补班',
+    invalidDate: '日期不合法，请用 YYYY-MM-DD',
+    crossCleared: '同一天只能属于假期或补班，已从另一份列表移除',
+    about: '关于',
+    aboutVault: '库标识',
+    aboutRevision: '修订号',
+    aboutVersion: '版本',
+    aboutCounts: '{tasks} 个任务 · {topics} 个话题 · {milestones} 个里程碑',
+  },
 } as const
 
 export type MsgKey = NestedKeyOf<typeof zh>

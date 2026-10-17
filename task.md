@@ -156,6 +156,10 @@ tests/**                         与 src 镜像
 - [x] **T32** Playwright E2E 套件（file:// 全流程） → done (2026-10-15, deepseek:sess-1015k, commit: "T32: Playwright E2E over file:// single-file build with fake FS")
 - [x] **T33** example.vault 示例库 + 一页纸用户手册 → done (2026-10-15, deepseek:sess-1015k)
 
+### Phase 9 · 补缺（主干直做；T34/T35 由用户反馈「无法创建任务 / 设置面板未实现」触发）
+- [x] **T34** 看板列内新建任务（列底入口 / 连续录入 / 归属与排序口径） → done (2026-10-17, workbuddy:sess-1017e, commit: "T34/T35: board inline task creation and settings panel with work calendar")
+- [x] **T35** 设置面板（语言 / 主题 / 甘特默认刻度 / 工作日历 / 关于） → done (2026-10-17, workbuddy:sess-1017e, commit: "T34/T35: board inline task creation and settings panel with work calendar")
+
 ---
 
 ## 任务明细
@@ -957,6 +961,58 @@ tests/**                         与 src 镜像
 
 ---
 
+### T34 · 看板列内新建任务
+
+**背景：** 用户反馈「无法创建任务」。事实核查：`CommandBus` 的 `task.create` 命令与 `createTaskCommand` 早在 T10 就绪，但 **T01–T33 没有任何任务把「新建任务」的 UI 入口写进产出清单**——看板能拖、能改、能删（抽屉），就是不能建。属交付缺口，不是缺陷。
+
+**依赖：** T15（BoardView / BoardColumn）, T10（CommandBus）, T13（lastFilter 读法）
+**产出：** `src/controllers/taskCreate.ts`、`src/views/BoardColumn.tsx`（列底新建行）、`src/views/BoardView.tsx`（回调外送）、`src/App.tsx`（Workspace 落点）
+
+**验收标准：**
+- [x] 看板每一列底部有「+ 新建任务」入口，回车创建、Esc / 失焦退出 —— 列**体**底部（列头仍严格三项），`board-add-task-<status>` / `board-new-task-input-<status>`
+- [x] 创建后任务立刻出现在该列，状态 = 列、排序键追加到列尾（LexoRank），不进别的列 —— `nextOrderFor` 只看未归档同列任务，`mid(列尾, undefined)`；单测断言连续三次创建后键严格递增无重复
+- [x] 归属话题：优先当前筛选的话题（筛选生效时新任务才可见），否则第一个未归档话题；**一个可用话题都没有时不提供入口**，列底改为「先建一个话题」说明 —— topicId 是 Task 必填字段，`planCreateTask` 返回 `no-topic` 且一个字节都不写
+- [x] 连续录入：提交后输入框保持展开并清空（Trello 手法）；空白标题不提交 —— 组件测试覆盖两次连击 Enter 的调用序列与输入框复位数
+- [x] 写入口仍是 CommandBus 单一写入口，可 Ctrl+Z 撤销、随 autosave 落盘 —— `applyCreateTask` 复用 `createTaskCommand`（未扩命令类型）；App 级用例在真 repository + mock fs 上断言 `vault.json` 里的 `tasks`
+- [x] 边界：`status=done` 的任务进度直接摆到 100（`task.create` 的 reducer 不做归一，构造时摆正） —— 单测断言
+
+**实施注记（T34 发现）**：
+1. **落点放在 Workspace 而不是 BoardView**。BoardView 的既定契约是「vault/filter 由外部传入、不读 store」（T15 头部注释），而新建需要**实时**库来算排序键——连续回车若用渲染快照算 `order`，同一 tick 内两次创建会算出重复键。故 BoardView 只把 `(status, title)` 外送，`applyCreateTask(bus, store.getVault(), …)` 由 Workspace（App.tsx）执行。
+2. **列底而非列头**。spec 第 7 节「列头 3 项（列名 / 计数 / 完成比）均为上限」，加按钮会破线；放在列体内（与「暂无任务」空态同区）不触碰该约束。
+3. **默认归属取筛选话题**。`pickDefaultTopicId` 的优先级链是「显式指定 → lastFilter.topicIds 里第一个可用的 → 第一个未归档话题」。step ② 的存在是因为 example.vault 这类库默认带筛选：不这么做，新建的任务会当场从看板上消失，用户会以为「还是建不了」。
+
+**预估：** 0.5d
+
+---
+
+### T35 · 设置面板
+
+**背景：** 用户反馈「设置面板未实现」。事实核查：`TopicSidebar` 的四个底部入口（里程碑 / 筛选器 / 备份 / 设置）在 T14 就交付了回调 props，前三者在 T16/T18/T28 陆续接真面板，**只有「设置」一直是 `panelPlaceholder`**（点击提示「设置 面板尚未实现」），因 T01–T33 没有该任务。同时 `settings.calendar` 已在 T11 被 ScheduleEngine 消费，却没有面向用户的编辑入口。
+
+**依赖：** T04（locale 源与消息表）, T10（settings.patch）, T11（工作日历消费方）, T14（侧栏入口）
+**产出：** `src/controllers/settingsActions.ts`、`src/views/SettingsPanel.tsx`、`src/locales/{zh,en}.ts`（尾部追加）、`src/App.tsx`（挂载与开合）
+
+**验收标准：**
+- [x] 侧栏「设置」拉起真面板，`shell.panelPending` 占位提示不再出现 —— App 级用例断言 `settings-panel` 可见且 `shell-notice` 不存在
+- [x] 语言（跟随系统 / 中文 / English）切换即时生效并落盘 —— 复用 T04 的 `settings.locale` 源：改完全树重渲染（看板列头变 To Do），Ctrl+S 后 `vault.json` 里是 `en`
+- [x] 主题项只读呈现「浅色」并给出说明（本版无深色主题，spec 4.2 `theme: 'light'`） —— 不做假开关
+- [x] 甘特图默认刻度 日 / 周 落进 `settings.ganttScale`，切到甘特视图即为该刻度 —— 与 `GanttView.scale` 同一字段
+- [x] 工作日历：七个工作日开关（周一 → 周日，0=周日口径与 dayjs / ScheduleEngine 一致）+ 假期表 + 补班表，可增可删 —— 写进 `settings.calendar`，直接改工期计算与排期
+- [x] 日期输入拦下伪日期（`2026-02-30`）并提示，不写库、不进撤销栈 —— `isCalendarDate` 复用 ScheduleEngine 的 `toDateKey`（领域层唯一日期权威）
+- [x] 同一天不能既是假期又是补班：加到一边自动从另一边摘掉 —— 否则留下一条永远不生效的补班（ScheduleEngine 里假期限优先）
+- [x] **至少保留一个工作日**：最后一个开关置灰 —— `workdays: []` 是自相矛盾的日历，会在排期时撞 ScheduleEngine 的扫描上限
+- [x] 每项改动可撤销（`settings.patch` 的逆 patch 整字段回滚）；点当前值不发命令（撤销栈卫生） —— 单测断言 `undoDepth`
+- [x] 中英双语文案齐备（en 缺键即 tsc 报错）—— 尾部追加 `newTask.*` 与 `settingsPanel.*`
+
+**实施注记（T35 发现）**：
+1. **`patchSettingsCommand` 对空 patch 抛错**，因此每个写入口（`patchLocale` / `patchGanttScale` / `patchCalendar`）都先做等值判定，返回「是否真的落了命令」。点已选中的语言不该在撤销栈里留一条空操作——这是 filters.ts / topicActions.ts 立下的先例。
+2. **日历改动用整块 `calendar` 覆盖**而不是逐字段 patch：逆 patch 会把整个对象还原，撤销一步就是一步，不会出现「工作日回退了、假期没回退」的中间态。
+3. **`tz` 无关的纯函数**：日期校验、工作日开关、日期增删全在 controllers/settingsActions.ts，视图零领域逻辑——面板只需渲染 + 转发。
+
+**预估：** 0.5d
+
+---
+
 ## 完成记录（只追加）
 
 <!-- 格式：
@@ -1052,3 +1108,6 @@ tests/**                         与 src 镜像
 - [2026-10-17] 收尾（T30 密度复核补做 + T32 漏勾补记） | agent: workbuddy:sess-1017c | commit: "T30/T32 closeout: density re-audit against spec section 7, check off export e2e" | 验收: 补勾 2 项，T01–T33 全部验收项至此闭合 | 备注: ①**T30 密度复核**（原受阻于 T15/T17，均已合入）：卡片（TaskCard）恰 6 项信息——话题色点+名 / 标题 / 类别 chip / 优先级点 / 到期日 / 依赖角标；另两个附加元素（右上琥珀阻塞标记、有笔记的线性文档图标）为 **spec 6.1 明文点名、不在 6 项计数内**，实现与 spec 逐句对应，极值态不越界。列头（BoardColumn）恰 3 项：列名 + 计数 + 完成比（平均完成度口径，done 恒 100% 自洽）。抽屉（TaskDrawer）恰 5 分区：标题 / 属性 / 日期 / 依赖 / 笔记，无第 6 区。②顺带核销 visual-audit.md 第 6 节另两处受阻项：完成绿 `--oe-done` 已被 TaskCard P2 优先级点与 MilestonePanel 完成态消费；NoteEditor 12 处 `var(--oe-*)` 零硬编码 hex。③**T32 补记**：导出 e2e 用例在 wave-4 集成时已转正为浏览器下载断言并跑绿，task.md 当时漏勾本行，现补勾。④复核结果写入 `docs/visual-audit.md` 第 6 节（受阻表改合规表）；第 5 节「待裁决三处」维持待裁决、未擅自实现。⑤验证（复核不改源码，跑基线确认零回归）: `npx tsc --noEmit` 0 / `npm test` 713 passed / `npm run e2e` 25 passed + 1 skipped / `npm run build` 10/10 | 遗留: spec §7 相关仅剩「设计稿优先级彩点 / 正常态日期琥珀点」两处 spec 与设计稿冲突待产品裁决（第 5 节），不阻塞收尾
 \n
 - [2026-10-17] 交付收尾（遗留项闭环 + 交付产物） | agent: workbuddy:sess-1017d | commits: b60ffae(.gitattributes) / 待补(integration: closeout — export popover Esc, wiki menu Esc, choose-other-backup wiring) | 验收: tsc 0 / 717 passed (41 files) / e2e 25 passed + 1 skipped / build 10-10 | 备注: ①**甘特导出弹层**（T23 遗留）：补 Esc 与点击外部关闭，用 `exportMenuRef` 判「不在容器内」；按钮在容器内，再点仍走既有 toggle。②**双链菜单 Esc**（T24 遗留）：菜单开着时 `event.stopPropagation()` 截住原生事件，不再冒泡到 TaskDrawer 在 window 上的 Esc 监听（此前表现是「菜单与抽屉一起关」）；菜单关掉后 Esc 恢复冒泡，抽屉照常可关。③**「选择其他备份」转正**（T28/T29 遗留）：只读相位带会话 → 恢复走 `loader.restoreSnapshot`（内部留底 + 解除只读）；**safe-mode 无会话** → 拿 dir 现场 `createSnapshotStore(dir)` 列 `.backup/`，恢复后重新 `openDir` 建会话（磁盘已被覆盖，重新加载即健康库）；`BackupPanel` 挂载条件从 `session !== null` 放宽为「有会话或有恢复端口」，各端口缺失时对应分区自动置灰。④**端口类型放宽**：`BackupSnapshotPort.snapshot/restore` 的返回由 `SnapshotInfo` 改 `unknown`——两者返回值本就不被消费，而只读相位的 `loader.restoreSnapshot` 返回 `{vault, safetySnapshotId}`，不该逼调用方造假对象。⑤**`.gitattributes`**：`*.svg text eol=lf`（+ png/ico binary + `* text=auto`）——品牌 SVG 在 `core.autocrlf=true` 的机器上被 checkout 成 CRLF（379 字节）与产物内联 data URI（LF 372 字节）不一致，导致 verify 的 favicon 项在 worktree 里误报 FAIL；实测 worktree 加属性后重返 372 字节。⑥**测试**: `ganttExporter` +2（Esc 关 / 点外关 + 再点按钮仍 toggle）、`NoteEditor` +1（菜单开时 Esc 不冒泡、关后恢复冒泡）、`App` +1（safe-mode 无会话时经备份面板挑快照恢复 → 重走启动 → 回到可写，并断言 vault.json 字节等于快照）——合计 **717 passed**（基线 713 + 4）。⑦**交付物**: `dist/OffEarly.html` **1095737 字节**（单文件、零外链、`file://` 直开），附 `docs/delivery.md`（交付说明：是什么 / 三步上手 / 验收证据 / 本轮收尾 / 已知限制 / 仓库速览） | 遗留（刻意在交付说明里如实标注，不掩饰）: ①侧栏「设置」仍是占位（T01–T33 范围内无设置面板任务）；②拖拽换列 e2e 仍 fixme（dnd-kit 指针序列在 headless+file:// 下不稳定，组件级 24 条已覆盖）；③gc 只回收 assets 表内附件，不收表外孤儿文件；④设计稿优先级彩点与正常态琥珀点两处与 spec 语义色冲突，待产品裁决
+
+- [2026-10-17] T34 | agent: workbuddy:sess-1017e | commit: "T34/T35: board inline task creation and settings panel with work calendar" | 验收: 6/6 全部勾选 | 备注: ①**缺口定性**：`task.create` 命令与 `createTaskCommand` 自 T10 就在，但没有任何任务的产出清单包含「新建任务」的 UI 入口——不是坏，是缺。②**产出**：`src/controllers/taskCreate.ts`（`pickDefaultTopicId` 四级优先链 / `nextOrderFor` 只看未归档同列 / `buildNewTask` 构造并摆正 status=done 的进度 / `planCreateTask` + `applyCreateTask`）、`src/views/BoardColumn.tsx` 的 `AddTaskRow`（三态：按钮 / 输入框 / 灰行说明）、`src/views/BoardView.tsx` 只外送 `(status, title)`、`src/App.tsx` 的 `Workspace.createTask` 用 `store.getVault()` 读实时库。③**接线理由**：BoardView 的契约是「不读 store」（T15 头部注释），而新建必须读实时库算排序键，否则连续回车会算出重复 order——所以命令在 Workspace 落，BoardView 保持纯投影。④**不破密度线**：入口放列**体**底部，列头仍是「列名 / 计数 / 完成比」三项。⑤**测试**：`tests/controllers/taskCreate.test.ts` 18 条 + `tests/views/BoardView.test.tsx` 新增 7 条 + `tests/App.test.tsx` 新增 1 条（真 repository + mock fs，验到 vault.json 字节）+ e2e 新增 2 条（含空库「先建一个话题」路径） | 遗留: 无
+- [2026-10-17] T35 | agent: workbuddy:sess-1017e | commit: "T34/T35: board inline task creation and settings panel with work calendar" | 验收: 10/10 全部勾选 | 备注: ①**缺口定性**：T14 交付的侧栏四入口里，里程碑 / 筛选器 / 备份分别在 T18/T16/T28 接真面板，只有「设置」一直停在 `panelPlaceholder`（点击提示「设置 面板尚未实现」），且 `settings.calendar` 自 T11 起被 ScheduleEngine 消费却无编辑入口。②**产出**：`src/controllers/settingsActions.ts`（`WEEK_ORDER` 周一→周日 / `isCalendarDate` 复用 ScheduleEngine 的 `toDateKey` / `toggleWorkday` + `canToggleWorkday` / `addCalendarDate` 跨表去冲突 / `sameCalendar` / 三个「空操作不发命令」的写入口）、`src/views/SettingsPanel.tsx`（语言 / 主题只读 / 甘特刻度 / 工作日历 / 关于，Esc + 背板关闭，贴侧栏浮层与 FilterBar 同形）、`src/locales/{zh,en}.ts` 尾部追加 `settingsPanel.*`（en 用扁平键，zh 用嵌套块，均自带闭合 `},`——避开 T21 记录过的 zh 尾追加丢闭合括号的坑）、`src/App.tsx` 挂载并把 `panelPlaceholder` 整体删除（已无调用方，留着会撞 `noUnusedLocals`）。③**两个刻意决定**：日历改动整块覆盖（逆 patch 一步整块回滚）；最后一个工作日开关置灰（空 workdays 会让排期撞扫描上限）。④**测试**：`tests/controllers/settingsActions.test.ts` 15 条 + `tests/views/SettingsPanel.test.tsx` 17 条 + `tests/App.test.tsx` 新增 2 条（改语言落盘、改日历落盘）+ e2e 新增 2 条。⑤**文档同步**：`docs/user-guide.md` 第 6/9/12 项此前仍写着设置面板 / 备份面板 / 图表导出「尚未实现」（T23/T28 已实现但手册未更新），本次一并改写，并补「新建任务」「设置」两行；`docs/visual-audit.md` 第 5 节的底部入口行同步。⑥**全量验证**：`tsc` 0 / `npm test` **777 passed (44 files)** / `npm run e2e` **29 passed + 1 skipped** / `npm run build` **10/10**（产物 1111401 字节，上限 1677721） | 遗留: 无

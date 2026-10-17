@@ -299,3 +299,87 @@ describe('应用外壳：保存指示、Ctrl+S 与 locale 源', () => {
     expect(screen.queryByText('待办')).toBeNull()
   })
 })
+
+/**
+ * T34/T35：新建任务入口与设置面板在**真实会话**里的接线。
+ * 用真 VaultStore + 真 VaultRepository + mock 文件系统，因此「能不能创建」「设置改没改」
+ * 一路验到磁盘字节上（而不是验某个回调被调了几次）。
+ */
+describe('应用外壳：新建任务与设置面板', () => {
+  async function openBoard() {
+    const dir = dirWith({ vault: vaultJson() })
+    const captured: Session[] = []
+    await renderApp(ports({ dir }), (session) => captured.push(session))
+    await waitFor(() => expect(screen.getByTestId('board')).toBeTruthy())
+    const session = captured[0]
+    if (session === undefined) throw new Error('会话未建立')
+    return { dir, session }
+  }
+
+  it('无话题时列底给提示；建话题后可在列内新建任务，并随 Ctrl+S 落盘', async () => {
+    const { dir } = await openBoard()
+
+    // 新库没有话题：topicId 是必填字段，此时不提供可点的入口
+    expect(screen.getByTestId('board-add-task-blocked-todo').textContent).toBe('先建一个话题，再新建任务')
+    expect(screen.queryByTestId('board-add-task-todo')).toBeNull()
+
+    // 侧栏建一个话题
+    fireEvent.click(screen.getByTestId('topic-add-root'))
+    const nameInput = screen.getByTestId('topic-name-input')
+    fireEvent.change(nameInput, { target: { value: '支付重构' } })
+    fireEvent.keyDown(nameInput, { key: 'Enter' })
+
+    // 入口出现 → 列内新建
+    fireEvent.click(await screen.findByTestId('board-add-task-doing'))
+    const input = screen.getByTestId('board-new-task-input-doing')
+    fireEvent.change(input, { target: { value: '接入支付回调' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    // 立刻出现在看板：卡片 + 列计数
+    await waitFor(() => expect(screen.getByText('接入支付回调')).toBeTruthy())
+    expect(screen.getByTestId('board-column-count-doing').textContent).toBe('1')
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+
+    const saved = decodeVault(dir)
+    expect(saved.tasks.map((task) => task.title)).toEqual(['接入支付回调'])
+    expect(saved.tasks[0]?.status).toBe('doing')
+    expect(saved.tasks[0]?.topicId).toBe(saved.topics[0]?.id)
+  })
+
+  it('侧栏「设置」打开真面板（不再是「面板尚未实现」占位），改语言即时生效并落盘', async () => {
+    const { dir } = await openBoard()
+
+    fireEvent.click(screen.getByTestId('sidebar-open-settings'))
+    expect(await screen.findByTestId('settings-panel')).toBeTruthy()
+    // 占位提示不再出现
+    expect(screen.queryByTestId('shell-notice')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('settings-locale-en'))
+    await waitFor(() => expect(screen.getByText('To Do')).toBeTruthy())
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(screen.getByText('Saved')).toBeTruthy())
+    expect(decodeVault(dir).settings.locale).toBe('en')
+  })
+
+  it('设置面板改工作日历：工作日与假期都写进 vault.json', async () => {
+    const { dir } = await openBoard()
+
+    fireEvent.click(screen.getByTestId('sidebar-open-settings'))
+    await screen.findByTestId('settings-panel')
+
+    fireEvent.click(screen.getByTestId('settings-workday-6'))
+    fireEvent.change(screen.getByTestId('settings-holidays-input'), { target: { value: '2026-10-01' } })
+    fireEvent.click(screen.getByTestId('settings-holidays-add'))
+    expect(screen.getByTestId('settings-holidays-item-2026-10-01')).toBeTruthy()
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+
+    const saved = decodeVault(dir)
+    expect(saved.settings.calendar.workdays).toEqual([1, 2, 3, 4, 5, 6])
+    expect(saved.settings.calendar.holidays).toEqual(['2026-10-01'])
+  })
+})

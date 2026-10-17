@@ -9,17 +9,20 @@
 // 列内卡片由 SortableContext 管理同列换序。归档任务不渲染、筛选结果驱动列内容
 // 都由 BoardView 在上游保证（QueryEngine 默认排除归档）。
 
+import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
 import type { Status, Task, Topic } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
+import { Icon } from './IconSprite'
 import { TaskCard } from './TaskCard'
 
 const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
 const MUTED = 'var(--oe-text-muted)'
+const INDIGO = 'var(--oe-accent)'
 
 /** 列 droppable 的 id 前缀；与任务 id 空间隔离，避免误判成卡片。 */
 export const COLUMN_DROPPABLE_PREFIX = 'column:'
@@ -39,6 +42,112 @@ export interface BoardColumnProps {
   today: string
   t: (key: MsgKey, params?: TranslateParams) => string
   onOpenTask?: (taskId: string) => void
+  /**
+   * 列内新建任务：回车提交标题，提交后输入框**保持展开**（连续录入，Trello 手法），
+   * Esc / 失焦收起。省略即视为「当前不可创建」，此时只渲染 createHint 灰行。
+   */
+  onCreateTask?: (title: string) => void
+  /** 不可创建时的说明（如库里一个可用话题都没有）。 */
+  createHint?: string
+}
+
+/**
+ * 新建任务行（三态）：可创建且未展开 → 「+ 新建任务」按钮；展开 → 标题输入框；
+ * 不可创建 → 灰行说明。状态是纯 UI 态，命令构造全部交给 BoardView（见 controllers/taskCreate.ts）。
+ */
+function AddTaskRow(props: {
+  status: Status
+  t: (key: MsgKey, params?: TranslateParams) => string
+  onCreateTask?: ((title: string) => void) | undefined
+  createHint?: string | undefined
+}) {
+  const { status, t, onCreateTask, createHint } = props
+  const [adding, setAdding] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  if (onCreateTask === undefined) {
+    return createHint === undefined ? null : (
+      <div
+        data-testid={`board-add-task-blocked-${status}`}
+        title={createHint}
+        style={{ padding: '6px 4px', fontSize: 11, color: MUTED, textAlign: 'center' }}
+      >
+        {createHint}
+      </div>
+    )
+  }
+
+  if (!adding) {
+    return (
+      <button
+        type="button"
+        data-testid={`board-add-task-${status}`}
+        aria-label={t('newTask.label')}
+        onClick={() => {
+          setAdding(true)
+        }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 4,
+          padding: '6px 4px',
+          fontSize: 12,
+          color: MUTED,
+          background: 'transparent',
+          border: `1px dashed ${BORDER}`,
+          borderRadius: 'var(--oe-radius-control)',
+          cursor: 'pointer',
+        }}
+      >
+        <Icon name="plus" size={13} />
+        <span>{t('newTask.label')}</span>
+      </button>
+    )
+  }
+
+  return (
+    <div>
+      <input
+        data-testid={`board-new-task-input-${status}`}
+        aria-label={t('newTask.placeholder')}
+        placeholder={t('newTask.placeholder')}
+        value={draft}
+        autoFocus
+        onChange={(event) => {
+          setDraft(event.currentTarget.value)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            const title = draft.trim()
+            if (title === '') return
+            onCreateTask(title)
+            setDraft('')
+          }
+          if (event.key === 'Escape') {
+            setDraft('')
+            setAdding(false)
+          }
+        }}
+        onBlur={() => {
+          setDraft('')
+          setAdding(false)
+        }}
+        style={{
+          width: '100%',
+          padding: '5px 7px',
+          fontSize: 12,
+          color: TEXT,
+          background: 'var(--oe-surface)',
+          border: `1px solid ${INDIGO}`,
+          borderRadius: 'var(--oe-radius-control)',
+          outline: 'none',
+          boxSizing: 'border-box',
+        }}
+      />
+      <div style={{ padding: '3px 2px 0', fontSize: 11, color: MUTED }}>{t('newTask.hint')}</div>
+    </div>
+  )
 }
 
 /** 该列平均完成度（0-100 整数）；空列返回 null（列头显示 —）。 */
@@ -149,6 +258,14 @@ export function BoardColumn(props: BoardColumnProps) {
             {t('board.emptyColumn')}
           </div>
         ) : null}
+
+        {/* 列底新建入口：贴在看板列体内，不占列头的三项信息位（spec 7「列头 3 项」） */}
+        <AddTaskRow
+          status={status}
+          t={t}
+          onCreateTask={props.onCreateTask}
+          createHint={props.createHint}
+        />
       </div>
     </section>
   )
