@@ -23,14 +23,17 @@
 // T47 交互层（跨父拖拽 move + 图管理工具条）：
 //   · 拖拽 move：节点 pointerdown（同帧完成选中）布防；同一指针移动 >4px 进入拖拽——阈值前
 //     viewport 纹丝不动（节点 pointerdown 已 stopPropagation，平移链路根本不布防）。命中检测 =
-//     屏幕坐标反变换 content=(screen-pan)/zoom 落进某**可见**节点矩形；候选排除根、自身、
-//     自身后代（isDescendant）。合法候选才亮 data-mindmap-drop-target；pointerup 命中 →
-//     applyMoveNode(…, index = 目标 children.length 尾插)；非法/未命中静默取消零写；命令抛错
-//     （stale snapshot 竞态）try/catch 兜住——抛错在 bus.apply 之前，undo 栈必然干净。
+//     屏幕坐标反变换 content=(screen-pan)/zoom 落进某**可见**节点矩形；候选只排除自身与
+//     自身后代（isDescendant）——**中心主题（根）是合法落点**（把子树回挂第一层 / 重排一级分支），
+//     根作为拖拽源天然无候选（树上其余节点全是它的后代）。合法候选才亮 data-mindmap-drop-target；
+//     pointerup 命中 → applyMoveNode(…, index = 目标 children.length 尾插)；非法/未命中静默取消零写；
+//     命令抛错（stale snapshot 竞态）try/catch 兜住——抛错在 bus.apply 之前，undo 栈必然干净。
 //   · 图管理工具条：重命名 = inline input（Enter/blur 提交 applyRenameMap，空 trim 不提交，
 //     Esc 取消）；删除 = 两段确认钮（首点切 mindmap.deleteConfirm 文案，二次 applyDeleteMap；
-//     外点/切图复位，删除后选中回退表首由既有 selectedMapId 悬空兜底承担）；折叠全部/展开全部 =
-//     单 toggle 走 buildMindMapModel(map,{foldAll:true}) 的**纯视图本地态**（不写库、零 undo）。
+//     **确认态钉在 armed 的图 id 上**——选中图换了别的图时首点只重新布防，二次点不会误删新图；
+//     外点复位 + selectedMap.id 变化即整体复位本地图态；删除后选中回退表首由既有
+//     selectedMapId 悬空兜底承担）；折叠全部/展开全部 = 单 toggle 走
+//     buildMindMapModel(map,{foldAll:true}) 的**纯视图本地态**（不写库、零 undo）。
 //
 // IME 手动验证项：jsdom 能模拟 compositionstart/end 与 isComposing，但真实中文输入法
 // （组词 Enter 上屏 vs 提交）的行为必须在浏览器里人工回归一遍。导图跨父拖拽同理——
@@ -134,7 +137,9 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
   const renamingRef = useRef(false)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   // T47 · 删除两段确认：首点进确认态，二次点才落命令；外点/切图复位。
-  const [deleteConfirming, setDeleteConfirming] = useState(false)
+  // 确认态**钉在 armed 的图 id** 上（不是布尔）：布防后当前选中图被外部改动换成了另一张图时，
+  // 二次点击绝不能把删除落到新图上——见 handleDeleteMap。
+  const [deleteConfirmingFor, setDeleteConfirmingFor] = useState<string | null>(null)
   // T47 · 节点拖拽：ref 持指针跟踪态（move/up 判定用），state 只承载渲染所需的
   // ghost id + 落点高亮 id（每次 pointermove 重算后同步进 state 触发重渲染）。
   const nodeDragRef = useRef<{
@@ -152,16 +157,24 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
     [selectedMap, foldAllView],
   )
 
-  /** 切图/新建的统一复位：选中/编辑/重命名/删除确认/拖拽态都隶属于旧图，不带进新图。 */
+  /** 本地图态复位体：选中/编辑/重命名/删除布防/拖拽都隶属于旧图的树，不带进新图。 */
   const resetMapLocalState = useCallback(() => {
     setSelectedNodeId(null)
     setEditing(null)
-    setDeleteConfirming(false)
+    setDeleteConfirmingFor(null)
     renamingRef.current = false
     setRenaming(false)
     nodeDragRef.current = null
     setNodeDrag(null)
   }, [setEditing])
+
+  // 换图 = 本地图态整体换代：选中节点 / 编辑 / 重命名 / 删除布防 / 拖拽都隶属于旧图的树。
+  // 单一复位入口（T47 修复轮）：外部改动让选中图落到另一张图（如当前图被 undo/删除，
+  // selectedMapId 悬空 → 回退表首）时同样触发，两段删除的确认态因此永远不会跨图存活。
+  // foldAllView 是全局展示口径（与图无关），刻意不在复位范围内。
+  useEffect(() => {
+    resetMapLocalState()
+  }, [selectedMap?.id, resetMapLocalState])
 
   // 注入尺寸优先（照 GanttView：props 缺省时 setViewportSize 是 no-op，沿用控制器默认值）
   useEffect(() => {
@@ -187,15 +200,15 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
     }
   }, [viewport])
 
-  /** 建图并选中新图（空态引导卡与工具条共用；vault 事件时刻现值，deps 缺省 id/时钟走 nanoid/Date）。 */
+  /** 建图并选中新图（空态引导卡与工具条共用；vault 事件时刻现值，deps 缺省 id/时钟走 nanoid/Date）。
+   *  本地图态由 selectedMap.id 的复位 effect 统一清理，这里不再单独调一次。 */
   const handleCreate = useCallback(() => {
     const plan = applyCreateMap(bus, vault, {
       fallbackName: t('mindmap.defaultName'),
       rootText: t('mindmap.centerTopic'),
     })
     setSelectedMapId(plan.map.id)
-    resetMapLocalState()
-  }, [bus, vault, t, resetMapLocalState])
+  }, [bus, vault, t])
 
   const handleFit = useCallback(() => {
     if (model !== null) viewport.fitToContent(model.bounds)
@@ -267,7 +280,7 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
   // ---- T47 · 图管理工具条（重命名 / 两段删除 / 全部折叠 toggle） ----------------
 
   const enterRename = useCallback(() => {
-    setDeleteConfirming(false)
+    setDeleteConfirmingFor(null)
     renamingRef.current = true
     setRenaming(true)
   }, [])
@@ -292,21 +305,25 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
     [bus, vault, selectedMap, exitRename],
   )
 
-  /** 删除两段确认：首点只切确认文案；二次点 applyDeleteMap。选中回退表首由 selectedMapId 悬空兜底承担。 */
+  /**
+   * 删除两段确认：首点只切确认文案（布防 = 记住当时的图 id）；二次点且**当前选中图仍是那张图**
+   * 才落 applyDeleteMap。armed id 与当前图不一致时只重新布防——外部改动（undo / 别处删图）让选中
+   * 回退到另一张图时，一次点击绝不允许把删除落到新图上。选中回退表首由 selectedMapId 悬空兜底承担。
+   */
   const handleDeleteMap = useCallback(() => {
     if (selectedMap === null) return
-    if (!deleteConfirming) {
-      setDeleteConfirming(true)
+    if (deleteConfirmingFor !== selectedMap.id) {
+      setDeleteConfirmingFor(selectedMap.id)
       return
     }
     exitRename()
-    setDeleteConfirming(false)
+    setDeleteConfirmingFor(null)
     applyDeleteMap(bus, vault, selectedMap.id)
     setSelectedNodeId(null)
     setEditing(null)
     nodeDragRef.current = null
     setNodeDrag(null)
-  }, [bus, vault, selectedMap, deleteConfirming, setEditing, exitRename])
+  }, [bus, vault, selectedMap, deleteConfirmingFor, setEditing, exitRename])
 
   // 重命名输入自动聚焦并全选（与节点编辑 overlay 同款手感）。
   useEffect(() => {
@@ -414,10 +431,16 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
 
   // ---- T46 · 指针/滚轮层（画布表面） ----------------------------------------
 
+  /** 当前档缩放：canvas 投影、overlay 定位与拖拽命中反变换共用同一个数（单一事实源）。 */
+  const zoom = mindmapZoomFactorAt(state.zoomIndex)
+
   const panRef = useRef<{ pointerId: number; x: number; y: number } | null>(null)
 
   function handleSurfacePointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
     if (event.button !== 0) return
+    // 背景按下 = 旧手势一律作废：清掉可能残留的节点拖拽跟踪态，避免上一轮 pointerup
+    // 丢失（真实浏览器丢事件 / 指针 id 变化）后，下一次背景平移期间拖拽分支抢先命中。
+    nodeDragRef.current = null
     const element = event.currentTarget
     // jsdom 未实现 setPointerCapture：typeof 守卫，真实浏览器捕获后拖拽可越出画布继续
     if (typeof element.setPointerCapture === 'function') element.setPointerCapture(event.pointerId)
@@ -426,18 +449,19 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
 
   /**
    * T47 命中检测：屏幕坐标反变换成内容坐标（content = (screen - pan) / zoom，与 <g transform>
-   * 同一投影）后落进某**可见**节点矩形。候选排除（裁决）：根（parentId null）、自身、自身后代
-   * （isDescendant）——在命中层过滤，不靠命令抛错兜底。矩形纯模型驱动：jsdom 下 surface 的
-   * getBoundingClientRect 全 0，clientX 即 surface 局部屏幕坐标，测试零 DOM 依赖。
+   * 同一投影）后落进某**可见**节点矩形。候选排除（修复轮裁决）：自身、自身后代（isDescendant）
+   * ——在命中层过滤，不靠命令抛错兜底。**中心主题（根）是合法落点**：把子树回挂第一层 /
+   * 重排一级分支都靠它，reducer 的 insertChild 对根 id 天然成立；根作为拖拽源也无需额外拦截
+   * ——树上其余节点全是它的后代，isDescendant 直接清空候选（命令层另有移根抛错兜底）。
+   * 矩形纯模型驱动：jsdom 下 surface 的 getBoundingClientRect 全 0，clientX 即 surface 局部
+   * 屏幕坐标，测试零 DOM 依赖。
    */
   function resolveDropTargetId(clientX: number, clientY: number, nodeId: string): string | null {
     if (selectedMap === null || model === null) return null
     const rect = surfaceRef.current?.getBoundingClientRect()
-    const zoomFactor = mindmapZoomFactorAt(state.zoomIndex)
-    const contentX = (clientX - (rect?.left ?? 0) - state.panX) / zoomFactor
-    const contentY = (clientY - (rect?.top ?? 0) - state.panY) / zoomFactor
+    const contentX = (clientX - (rect?.left ?? 0) - state.panX) / zoom
+    const contentY = (clientY - (rect?.top ?? 0) - state.panY) / zoom
     for (const view of model.nodes) {
-      if (view.parentId === null) continue // 根不作落点（T47 裁决）
       if (view.id === nodeId) continue
       if (isDescendant(selectedMap.root, nodeId, view.id)) continue // 自己的子树 = 环
       if (
@@ -510,7 +534,7 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
   function handleRootPointerDownCapture(event: ReactPointerEvent<HTMLDivElement>): void {
     const target = event.target as Element | null
     if (target !== null && target.closest('[data-testid="mindmap-delete-map"]') !== null) return
-    setDeleteConfirming(false)
+    setDeleteConfirmingFor(null)
   }
 
   /** 手势被打断（pointercancel）：拖拽与平移一律作废——cancel 不是 pointerup，绝不落 move。 */
@@ -554,8 +578,6 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
     element.focus()
     element.select()
   }, [editingNodeId])
-
-  const zoom = mindmapZoomFactorAt(state.zoomIndex)
 
   // overlay 输入框定位需要节点矩形；被折叠藏掉的节点不渲染输入框（模型里没有它的视图）。
   const editingView =
@@ -613,10 +635,10 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
               aria-label={t('shell.viewMindmap')}
               value={selectedMap.id}
               onChange={(event) => {
-                // T45 遗留修复（T46 落地）：切图必须清选中/编辑，选中 id 属于旧图的树；
-                // T47 起同口径复位重命名/删除确认/拖拽态（都隶属于旧图）。
+                // T45 遗留修复（T46 落地）：切图必须清选中/编辑，选中 id 属于旧图的树。
+                // T47 修复轮起复位由 selectedMap.id 的 effect 单点承担（切图 / 新建 / 外部改动
+                // 导致选中换图，走同一条路），这里只改选中。
                 setSelectedMapId(event.target.value)
-                resetMapLocalState()
               }}
               style={selectStyle}
             >
@@ -656,9 +678,10 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
                 {t('mindmap.renameMap')}
               </button>
             )}
-            {/* T47 · 删除：两段确认，首点只切文案（外点/切图复位见 handleRootPointerDownCapture）。 */}
+            {/* T47 · 删除：两段确认，首点只切文案并记住 armed 图 id（外点复位见 handleRootPointerDownCapture，
+                换图复位见 selectedMap.id 的 effect；armed ≠ 当前图时二次点击只会重新布防，不会误删）。 */}
             <button type="button" data-testid="mindmap-delete-map" onClick={handleDeleteMap} style={chipStyle}>
-              {t(deleteConfirming ? 'mindmap.deleteConfirm' : 'mindmap.deleteMap')}
+              {t(deleteConfirmingFor === selectedMap.id ? 'mindmap.deleteConfirm' : 'mindmap.deleteMap')}
             </button>
             <span style={{ flex: 1, minWidth: 8 }} />
             {/* T47 · 全部折叠/展开：单 toggle 走视图本地 foldAll 态，不写库、零 undo。 */}

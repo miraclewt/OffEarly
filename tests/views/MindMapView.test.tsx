@@ -554,6 +554,24 @@ describe('T46-3 · 折叠徽标 + 指针层（拖拽平移 / 滚轮）', () => {
     expect(m.selected()).toBe('a')
   })
 
+  it('背景按下清掉残留的节点拖拽布防（T47 修复轮）：同一指针 id 复用时平移不被拖拽分支劫持', () => {
+    const m = mountT46()
+    const surface = m.view.getByTestId('mindmap-viewport')
+    // 节点 pointerdown 只布防（未越过 4px、也从未 pointerup——真实浏览器丢事件的病态路径）
+    fireEvent.pointerDown(m.nodeEl('a'), { pointerId: 1, clientX: 0, clientY: 0 })
+    // 同一 id 的背景按下重新布防平移
+    fireEvent.pointerDown(surface, { pointerId: 1, clientX: 10, clientY: 10 })
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 40, clientY: 10 })
+    expect(m.viewport.getState().panX).toBe(30) // 走的是平移，不是拖拽
+    expect(m.view.container.querySelector('[data-mindmap-dragging]')).toBeNull()
+    expect(m.view.container.querySelector('[data-mindmap-drop-target]')).toBeNull()
+    expect(m.bus.undoDepth()).toBe(0)
+    fireEvent.pointerUp(surface, { pointerId: 1 })
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 200, clientY: 200 })
+    expect(m.viewport.getState().panX).toBe(30) // 抬起后平移也停手
+    expect(m.bus.undoDepth()).toBe(0)
+  })
+
   it('切换导图清掉 selectedNodeId（T45 遗留修复）', () => {
     const m = mountT46([editTree(), map('m2', '第二图', node('r2', '第二中心'))])
     fireEvent.pointerDown(m.nodeEl('a'))
@@ -668,11 +686,15 @@ describe('T46-4 · 修复轮：键位表控件守卫 / 零变更提交跳过 / �
 // ============================================================================
 // T47 · 跨父拖拽 move + 图管理工具条（重命名 / 两段删除 / 全部折叠 toggle）。
 //
-// 拖拽裁决（binding）：pointerdown 于节点（同帧完成选中）→ 移动超过 4px 阈值进入拖拽；
-// ghost = 原节点 opacity 0.4 + data-mindmap-dragging；命中 = 屏幕坐标反变换
-// content=(screen-pan)/zoom 落进可见节点矩形；候选排除根、自身、自身后代（isDescendant）；
+// 拖拽裁决（binding，修复轮更正）：pointerdown 于节点（同帧完成选中）→ 移动超过 4px 阈值进入
+// 拖拽；ghost = 原节点 opacity 0.4 + data-mindmap-dragging；命中 = 屏幕坐标反变换
+// content=(screen-pan)/zoom 落进可见节点矩形；候选只排除**自身与自身后代**（isDescendant）——
+// 中心主题（根）是合法落点：子树回挂第一层、一级分支重排都靠它，落点 index = 根 children.length
+// 尾插。根作为拖拽源无需特判：树上其余节点全是它的后代，isDescendant 直接清空候选。
 // 合法候选才出 data-mindmap-drop-target={id}；pointerup 命中 → applyMoveNode(尾插 index=
 // target.children.length)，非法/未命中 → 静默取消零写；命令抛错（stale snapshot）try/catch 零崩。
+// 两段删除的确认态钉在 armed 的图 id 上：布防后当前图被他处删除/撤销而回退到另一张图时，
+// 单点只重新布防，删除动作不会落到新图上（本地图态另由 selectedMap.id 的 effect 统一复位）。
 // foldAll 按钮 = 纯视图本地态（buildMindMapModel(map,{foldAll:true})，root-inclusive，模型只剩
 // 中心主题），不写库、零 undo——「展开全部」= 该态置 false。
 //
@@ -680,7 +702,7 @@ describe('T46-4 · 修复轮：键位表控件守卫 / 零变更提交跳过 / �
 // 内容坐标；坐标一律从 buildMindMapModel(dragTree()) 现算。
 // ============================================================================
 
-/** T47 拖拽树：root1 → [ a(a1(a11), a2), b ]——a1 有后代（非法落点），b 空叶子（合法落点）。 */
+/** T47 拖拽树：root1 → [ a(a1(a11), a2), b ]——a1 有后代（非法落点），b 空叶子与 root1（合法落点）。 */
 function dragTree(): MindMap {
   return map('m1', '计划', node('root1', '中心主题', {
     children: [
@@ -742,7 +764,57 @@ describe('T47-1 · 跨父拖拽 move', () => {
     expect(m.bus.undoDepth()).toBe(0)
   })
 
-  it('拖到自己子树 / 落到根 / 未命中：一律无高亮目标，抬起静默取消零写', () => {
+  it('拖 a1 落到中心主题（根）：根是合法落点，高亮出现；抬起后 a1 追加到一级序列尾、undo 一次回原状', () => {
+    const m = mountT46([dragTree()])
+    const at = dragCenters()
+    const surface = m.view.getByTestId('mindmap-viewport')
+
+    fireEvent.pointerDown(m.nodeEl('a1'), { pointerId: 1, clientX: at('a1').x, clientY: at('a1').y })
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: at('root1').x, clientY: at('root1').y })
+    expect(m.view.container.querySelector('[data-mindmap-dragging="true"]')).toBe(m.nodeEl('a1'))
+    // 修复轮裁决：根不再排除——data-mindmap-drop-target="root1" 必须出现
+    expect(m.view.container.querySelector('[data-mindmap-drop-target="root1"]')).toBe(m.nodeEl('root1'))
+    expect(m.bus.undoDepth()).toBe(0)
+
+    fireEvent.pointerUp(surface, { pointerId: 1 })
+    expect(m.bus.undoDepth()).toBe(1)
+    expect(m.view.container.querySelector('[data-mindmap-drop-target]')).toBeNull()
+    m.refresh()
+    const rootNow = m.store.getVault().mindmaps[0]!.root
+    // 尾插 = 落下那一刻根 children.length（2）：remove a1 → [a, b] → splice(2) → [a, b, a1]
+    expect(rootNow.children.map((c) => c.id)).toEqual(['a', 'b', 'a1'])
+    expect(findNode(rootNow, 'a')!.children.map((c) => c.id)).toEqual(['a2'])
+    expect(findNode(rootNow, 'a1')!.children.map((c) => c.id)).toEqual(['a11']) // 子树随行
+
+    m.bus.undo()
+    m.refresh()
+    const undone = m.store.getVault().mindmaps[0]!.root
+    expect(undone.children.map((c) => c.id)).toEqual(['a', 'b'])
+    expect(findNode(undone, 'a')!.children.map((c) => c.id)).toEqual(['a1', 'a2'])
+    expect(m.bus.undoDepth()).toBe(0)
+  })
+
+  it('一级分支拖回中心主题 = 首层重排：a 落到根尾 → 一级序列变 [b, a]，undo 回 [a, b]', () => {
+    const m = mountT46([dragTree()])
+    const at = dragCenters()
+    const surface = m.view.getByTestId('mindmap-viewport')
+
+    // 根作落点带来的能力：一级分支重排。index = 落下那一刻根 children.length（2），
+    // remove a → [b]（长度 1），splice(2) 越界即尾插 → [b, a]。
+    fireEvent.pointerDown(m.nodeEl('a'), { pointerId: 1, clientX: at('a').x, clientY: at('a').y })
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: at('root1').x, clientY: at('root1').y })
+    expect(m.view.container.querySelector('[data-mindmap-drop-target="root1"]')).toBe(m.nodeEl('root1'))
+    fireEvent.pointerUp(surface, { pointerId: 1 })
+    expect(m.bus.undoDepth()).toBe(1)
+    m.refresh()
+    expect(m.store.getVault().mindmaps[0]!.root.children.map((c) => c.id)).toEqual(['b', 'a'])
+
+    m.bus.undo()
+    m.refresh()
+    expect(m.store.getVault().mindmaps[0]!.root.children.map((c) => c.id)).toEqual(['a', 'b'])
+  })
+
+  it('拖到自己子树 / 未命中 / 拖根：一律无高亮目标，抬起静默取消零写', () => {
     const m = mountT46([dragTree()])
     const at = dragCenters()
     const surface = m.view.getByTestId('mindmap-viewport')
@@ -755,25 +827,19 @@ describe('T47-1 · 跨父拖拽 move', () => {
     fireEvent.pointerUp(surface, { pointerId: 1 })
     expect(m.bus.undoDepth()).toBe(0)
 
-    // ② a1 → 根矩形：候选目标排除根
-    fireEvent.pointerDown(m.nodeEl('a1'), { pointerId: 2, clientX: at('a1').x, clientY: at('a1').y })
-    fireEvent.pointerMove(surface, { pointerId: 2, clientX: at('root1').x, clientY: at('root1').y })
+    // ② a → 画布空白（越出所有矩形）：未命中
+    fireEvent.pointerDown(m.nodeEl('a'), { pointerId: 2, clientX: at('a').x, clientY: at('a').y })
+    fireEvent.pointerMove(surface, { pointerId: 2, clientX: 9999, clientY: 9999 })
     expect(m.view.container.querySelector('[data-mindmap-drop-target]')).toBeNull()
     fireEvent.pointerUp(surface, { pointerId: 2 })
     expect(m.bus.undoDepth()).toBe(0)
 
-    // ③ a → 画布空白（越出所有矩形）：未命中
-    fireEvent.pointerDown(m.nodeEl('a'), { pointerId: 3, clientX: at('a').x, clientY: at('a').y })
-    fireEvent.pointerMove(surface, { pointerId: 3, clientX: 9999, clientY: 9999 })
+    // ③ 拖根自身：根不可移动，且树上其余节点全是它的后代 → isDescendant 清空候选，任何指针下
+    //    都没有合法落点（命令层的移根抛错只是兜底，走不到）
+    fireEvent.pointerDown(m.nodeEl('root1'), { pointerId: 3, clientX: at('root1').x, clientY: at('root1').y })
+    fireEvent.pointerMove(surface, { pointerId: 3, clientX: at('a').x, clientY: at('a').y })
     expect(m.view.container.querySelector('[data-mindmap-drop-target]')).toBeNull()
     fireEvent.pointerUp(surface, { pointerId: 3 })
-    expect(m.bus.undoDepth()).toBe(0)
-
-    // ④ 拖根自身：根不可移动，任何指针下都没有合法候选
-    fireEvent.pointerDown(m.nodeEl('root1'), { pointerId: 4, clientX: at('root1').x, clientY: at('root1').y })
-    fireEvent.pointerMove(surface, { pointerId: 4, clientX: at('a').x, clientY: at('a').y })
-    expect(m.view.container.querySelector('[data-mindmap-drop-target]')).toBeNull()
-    fireEvent.pointerUp(surface, { pointerId: 4 })
     expect(m.bus.undoDepth()).toBe(0)
 
     m.refresh()
@@ -889,6 +955,41 @@ describe('T47-2 · 图管理工具条', () => {
     fireEvent.change(m.view.getByTestId('mindmap-select'), { target: { value: 'm2' } })
     expect(del().textContent).toBe('删除此图')
     expect(m.store.getVault().mindmaps).toHaveLength(2)
+  })
+
+  it('删除两段确认钉在 armed 的图上：布防后当前图被他处删除（选中回退另一张），单点不误删新图', () => {
+    const m = mountT46([
+      map('m1', '第一图', node('r1', '第一中心')),
+      map('m2', '第二图', node('r2', '第二中心')),
+    ])
+    fireEvent.change(m.view.getByTestId('mindmap-select'), { target: { value: 'm2' } })
+    const del = () => m.view.getByTestId('mindmap-delete-map')
+    fireEvent.pointerDown(m.nodeEl('r2'))
+    expect(m.selected()).toBe('r2')
+    fireEvent.click(del())
+    expect(del().textContent).toBe('删除整张思维导图？') // 已对 m2 布防
+
+    // 外部删除当前图（不经视图）：selectedMapId 悬空 → 视图回退表首 m1
+    applyDeleteMap(m.bus, m.store.getVault(), 'm2')
+    expect(m.bus.undoDepth()).toBe(1)
+    m.refresh()
+    expect((m.view.getByTestId('mindmap-select') as HTMLSelectElement).value).toBe('m1')
+    // 本地图态随 selectedMap.id 换图整体复位：旧图的选中节点不再残留，按钮退回未布防
+    expect(m.selected()).toBeNull()
+    expect(del().textContent).toBe('删除此图')
+
+    // 单点 = 对新图（m1）重新布防，零写入，m1 还活着
+    fireEvent.click(del())
+    expect(del().textContent).toBe('删除整张思维导图？')
+    expect(m.bus.undoDepth()).toBe(1)
+    expect(m.store.getVault().mindmaps.map((x) => x.id)).toEqual(['m1'])
+
+    // 只有二次点才真的删掉当前图
+    fireEvent.click(del())
+    expect(m.bus.undoDepth()).toBe(2)
+    expect(m.store.getVault().mindmaps).toHaveLength(0)
+    m.refresh()
+    expect(m.view.getByTestId('mindmap-empty')).toBeTruthy()
   })
 
   it('下拉切换选中图渲染对应根文本（表首默认 + 来回切）', () => {
