@@ -37,8 +37,19 @@
 //
 // T48 交互层（导出菜单，照 GanttView）：工具条右侧 PNG/SVG × 仅可见区/全图 弹层，
 //   Esc/外点关闭与 R3 PNG 探针同甘特口径；导出喂的是**当前显示模型**——「全部折叠」开着时
-//   导出的就是折叠后的图（所见即所导）。文案复用 ganttExport.* 键，范围反算与 PNG 管线在
-//   MindMapExporter（probePngSupport / svgToPngBlob / triggerDownload 由 GanttExporter 共用）。
+//   导出的就是折叠后的图（所见即所导）。范围/按钮等导出语汇复用 ganttExport.* 键，唯一例外是
+//   PNG 不可用提示走 mindmap.exportPngUnsupported（甘特那句写着「请改用 SVG 或 CSV」，而导图
+//   没有 CSV 导出——T48 终审修复轮）；范围反算与 PNG 管线在 MindMapExporter
+//   （probePngSupport / svgToPngBlob / triggerDownload 由 GanttExporter 共用）。
+//
+// T48 终审修复轮（whole-branch review）三条：
+//   · Critical · 幽灵编辑态锁死键盘：编辑中的节点不在显示模型里时输入框不渲染，而键位表的
+//     「编辑中」早退又挡在 Escape 之前。修法两层——editingView 为空即自动解除编辑态（兜底），
+//     startAddChild 在「全部折叠」开着时先揭示折叠再进编辑（加出来的子就在眼前）。
+//   · Important · 进入导图/切图 fitToContent（spec 5 的第二处调用点），fittedMapIdRef 保证
+//     每张图只 fit 一次，重命名等重渲染不把用户调好的 pan/zoom 抹掉。
+//   · Important · 拖拽落到折叠目标由 applyMoveNode 先展开目的地（见 controllers/mindmapActions），
+//     视图侧的落点逻辑不变。
 //
 // IME 手动验证项：jsdom 能模拟 compositionstart/end 与 isComposing，但真实中文输入法
 // （组词 Enter 上屏 vs 提交）的行为必须在浏览器里人工回归一遍。导图跨父拖拽同理——
@@ -89,7 +100,9 @@ const MINDMAP_DRAG_THRESHOLD = 4
 
 /**
  * T48 导出菜单的常量顺序与文案键：格式 PNG/SVG × 范围 可见/全图。
- * 文案复用甘特弹层的 ganttExport.* 键（裁决：同一套导出语汇，不新增 locale 键）。
+ * 格式与范围沿用甘特弹层同一套导出语汇；范围键走 mindmap.exportVisible / exportFull，
+ * PNG 不可用提示走导图自己的 mindmap.exportPngUnsupported（T48 终审修复轮：甘特文案里的
+ * 「或 CSV」对导图不成立）。
  */
 const EXPORT_FORMAT_ORDER: MindMapExportFormat[] = ['png', 'svg']
 const EXPORT_FORMAT_LABEL: Record<MindMapExportFormat, MsgKey> = {
@@ -311,6 +324,25 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
     if (model !== null) viewport.fitToContent(model.bounds)
   }, [viewport, model])
 
+  // T48 终审修复轮（Important 2）· 进入导图 / 切图自动适应画布：spec 5 点名的第二处
+  // fitToContent 调用点（另一处就是上面的「适应画布」按钮）。此前打开导图页或换图都停在
+  // 默认 pan/zoom，宽树直接切出屏幕外。
+  // fittedMapIdRef 保证「每张图只 fit 一次」：重命名、折叠、加删节点都会重建 model，
+  // 没有这道守卫的话用户手动调好的 pan/zoom 会被反复抹掉。
+  // 视口尺寸未知（0/NaN——注入值缺省且容器还没测到）时跳过：那种尺寸只会算出退化 pan/zoom；
+  // 等尺寸到位，同一条 effect 会补上这次 fit（守卫尚未占用该图 id）。
+  const fittedMapIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (selectedMap === null || model === null) return
+    // 尺寸读控制器现值而不是这一帧的 state 快照：同一批 effect 里「注入尺寸」那条可能刚把
+    // 0×0 落库，本帧闭包里的 state 还是控制器初值——读现值才不会拿退化尺寸去 fit。
+    const size = viewport.getState()
+    if (!(size.width > 0) || !(size.height > 0)) return
+    if (fittedMapIdRef.current === selectedMap.id) return
+    fittedMapIdRef.current = selectedMap.id
+    viewport.fitToContent(model.bounds)
+  }, [selectedMap?.id, model, viewport, state.width, state.height])
+
   /** 节点 pointerdown：选中即刻完成（T46 口径）；附带落点时布防 T47 拖拽（>4px 才升级为 drag）。 */
   const handleSelect = useCallback((nodeId: string, point?: MindMapPointerPoint) => {
     setSelectedNodeId(nodeId)
@@ -360,7 +392,12 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
     [bus, vault, selectedMap, t, setEditing],
   )
 
-  /** 在 parentId 下加子（Tab/Enter 共用出口）：落库 → 选中新节点 → 立即进入编辑。 */
+  /**
+   * 在 parentId 下加子（Tab/Enter 共用出口）：落库 → 选中新节点 → 立即进入编辑。
+   * T48 终审修复轮（Critical）：「全部折叠」开着时新子不在显示模型里——直接进编辑 = 编辑一个
+   * 看不见的节点（还会连带锁死键盘）。所以先揭示折叠视图（纯展示态，不写库）再进编辑：
+   * 加出来的子就在眼前。数据折叠的父由 applyAddNode 自己展开，两条命令两条 undo。
+   */
   const startAddChild = useCallback(
     (parentId: string) => {
       if (selectedMap === null) return
@@ -368,10 +405,11 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
         fallbackText: t('mindmap.branch'),
       })
       if (created === null) return
+      if (foldAllView) setFoldAllView(false)
       setSelectedNodeId(created.id)
       setEditing(created.id)
     },
-    [bus, vault, selectedMap, t, setEditing],
+    [bus, vault, selectedMap, t, setEditing, foldAllView],
   )
 
   // ---- T47 · 图管理工具条（重命名 / 两段删除 / 全部折叠 toggle） ----------------
@@ -615,7 +653,9 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
               applyMoveNode(bus, vault, selectedMap.id, drag.nodeId, drag.targetId, target.children.length)
             }
           } catch {
-            // stale snapshot 竞态：命令层在 bus.apply 之前抛错——静默取消，不崩、undo 栈干净
+            // 拖拽的 race-cancel 路径（与 spec 8 的「id 找不到 → 全局 notice 呈现」不是一条）：
+            // 视图持的是事件时刻的 vault 快照，落点/被拖节点在他处已不存在时命令层在 bus.apply
+            // 之前抛错——这里静默取消即可，不崩、undo 栈干净，也不该弹 notice 打断手势。
           }
         }
       }
@@ -678,6 +718,19 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
     editingNodeId === null || model === null
       ? null
       : model.nodes.find((candidate) => candidate.id === editingNodeId) ?? null
+
+  // T48 终审修复轮（Critical）· 幽灵编辑态兜底：编辑态存在但目标节点不在显示模型里 = 输入框
+  // 不会渲染，而 handleRootKeyDown 的「编辑中」早退又排在 Escape 分支之前——键盘整条死掉，
+  // 直到换图或鼠标点开才恢复。这里主动解除，键位表立刻回生活。
+  // （F2 落在被折叠藏起的节点上就是这条路径：编辑态被解除，不落任何写入。）
+  // 守卫只认「数据树里查得到、显示模型里查不到」的目标：树里也查不到 = vault 快照还在途
+  // （视图刚 bus.apply 完、新节点还没顺着 props 传进来），那一刻清编辑态会把「加子即进编辑」抹平。
+  useEffect(() => {
+    if (editingNodeId === null || editingView !== null) return
+    if (selectedMap === null) return // 图刚被删/空库：resetMapLocalState 那条 effect 负责整体复位
+    if (findNode(selectedMap.root, editingNodeId) !== null) setEditing(null)
+  }, [editingNodeId, editingView, selectedMap, setEditing])
+
   // 预填走 vault 数据树里的未截断原文（模型 text 已被 MINDMAP_MAX_TEXT_WIDTH 截断）。
   const editingRawText =
     editingNodeId === null || selectedMap === null
@@ -882,7 +935,7 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
 
                   {pngSupported === false ? (
                     <div data-testid="mindmap-export-png-hint" style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--oe-blocked)' }}>
-                      {t('ganttExport.pngUnsupported')}
+                      {t('mindmap.exportPngUnsupported')}
                     </div>
                   ) : null}
 

@@ -6,12 +6,16 @@
 // 模型比对，不硬编码坐标。桩 i18n 用 createI18n 固定 zh。store/bus 用真实实现
 // （createCommandBus + createVaultStore），只测视图确实「只读」——除新建外零命令。
 // jsdom 无 ResizeObserver：实现里 typeof 守卫直接跳过测量，视口沿用控制器默认尺寸。
+// T48 终审修复轮起「进入导图/切图」会自动 fitToContent 一次（spec 5）——既有坐标断言都以默认
+// 视口（pan 0 / zoom 1，屏幕坐标 == 内容坐标）为前提，故统一走 pinnedViewport()；fit-on-entry
+// 自己由「T48 修复轮-2」两段用例用真实控制器 + spy 覆盖。
 
-import { cleanup, fireEvent, render } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { applyDeleteMap, applyDeleteNode } from '../../src/controllers/mindmapActions'
+import { applyDeleteMap, applyDeleteNode, applyRenameMap } from '../../src/controllers/mindmapActions'
 import { createMindmapViewport, MINDMAP_FIT_PADDING, MINDMAP_ZOOM_STEPS } from '../../src/controllers/mindmapViewport'
+import type { MindMapViewportController } from '../../src/controllers/mindmapViewport'
 import { createCommandBus } from '../../src/domain/commandBus'
 import type { CommandBus } from '../../src/domain/commandBus'
 import { buildMindMapModel, MINDMAP_FONT_SIZE } from '../../src/domain/mindmapModel'
@@ -69,6 +73,19 @@ function seeded(mindmaps: MindMap[]): { store: VaultStore; bus: CommandBus; vaul
   const vault = vaultWith(mindmaps)
   const store = createVaultStore(vault)
   return { store, bus: createCommandBus(store), vault }
+}
+
+/**
+ * 把视口钉在默认档（pan 0 / zoom 1）的控制器：本文件绝大多数既有用例的坐标断言建立在
+ * 「jsdom 下 surface rect 全 0 + 默认档 → 屏幕坐标 == 内容坐标」这条前提上。
+ * T48 终审修复轮起「进入导图/切图」会走一次 fitToContent（spec 5 的第二处调用点），会破坏该
+ * 前提，故这批用例统一用这里的控制器；fit-on-entry 本身由「T48 修复轮-2」两段用例用真实
+ * 控制器 + spy 单独覆盖。
+ */
+function pinnedViewport(): MindMapViewportController {
+  const viewport = createMindmapViewport()
+  viewport.fitToContent = () => {}
+  return viewport
 }
 
 /** 基础树：中心主题 → 分支A（与 mindmapModel 测试同口径，几何从模型现算）。 */
@@ -155,7 +172,7 @@ describe('T45-2 · 画布只读投影', () => {
   it('渲染根标签与一条子边；节点组前序 = 模型序；transform 走 translate/scale 契约', () => {
     const { store, bus } = seeded([simpleMap()])
     const model = buildMindMapModel(store.getVault().mindmaps[0]!)
-    const view = render(<MindMapView vault={store.getVault()} bus={bus} t={t} />)
+    const view = render(<MindMapView vault={store.getVault()} bus={bus} t={t} viewport={pinnedViewport()} />)
 
     expect(view.container.textContent).toContain('中心主题')
     const edges = view.container.querySelectorAll('path[data-mindmap-edge]')
@@ -166,7 +183,8 @@ describe('T45-2 · 画布只读投影', () => {
     const groups = [...view.container.querySelectorAll('[data-mindmap-node]')]
     expect(groups.map((g) => g.getAttribute('data-mindmap-node'))).toEqual(model.nodes.map((n) => n.id))
 
-    // 初始视口：pan 0、zoom 1（MINDMAP_DEFAULT_ZOOM_INDEX 档）
+    // 投影契约：pan 0 / zoom 1 时 <g transform> 就是 translate(0 0) scale(1)
+    // （这里用 pinnedViewport 钉住默认档——进入导图会自动 fit 一次，见 T48 修复轮-2）
     const world = view.container.querySelector('[data-mindmap-world]')
     expect(world?.getAttribute('transform')).toBe('translate(0 0) scale(1)')
   })
@@ -254,8 +272,12 @@ function editTree(): MindMap {
   )
 }
 
-function mountT46(maps: MindMap[] = [editTree()]) {
-  const viewport = createMindmapViewport()
+function mountT46(
+  maps: MindMap[] = [editTree()],
+  /** T48 修复轮：fit-on-entry 的用例要自己拿住真实控制器（并在挂载前挂 spy），故允许注入。 */
+  viewportOverride?: MindMapViewportController,
+) {
+  const viewport = viewportOverride ?? pinnedViewport()
   const h = seeded(maps)
   const jsx = () => <MindMapView vault={h.store.getVault()} bus={h.bus} t={t} viewport={viewport} />
   const view = render(jsx())
@@ -1051,6 +1073,165 @@ describe('T47-2 · 图管理工具条', () => {
     expect(m.bus.undoDepth()).toBe(0)
     expect(findNode(m.store.getVault().mindmaps[0]!.root, 'a')!.folded).toBe(false)
     expect(m.view.container.querySelectorAll('[data-mindmap-node]')).toHaveLength(6)
+  })
+})
+
+// ============================================================================
+// T48 终审修复轮（whole-branch review）：
+//   ① Critical · 幽灵编辑态锁死键盘——handleRootKeyDown 的 `editingNodeId !== null` 早退发生在
+//      Escape 分支之前，而 overlay 输入框只在 editingView（显示模型里找得到）时渲染。于是
+//      「编辑一个看不见的节点」= 键盘整条死掉。两条可达路径：
+//        (a) 全部折叠开着时对一级分支按 Tab：新子写进库却不在模型里 → 编辑态悬空；
+//        (b) 方向键走到被折叠藏起的节点再按 F2：同样悬空，直到换图或鼠标点开才恢复。
+//      裁决：1a 加 auto-clear effect 兜底（编辑目标在数据树里但显示模型里没有 → 清编辑态）；
+//            1b startAddChild 在 foldAllView 开着时先揭示（置 false）再进编辑，让加出来的子可见。
+//   ② Important · 进入导图/切图未 fitToContent（spec 5 点名两处调用点：按钮 + tab 切入）。
+//   ③ Important · PNG 不可用提示借用了甘特文案「请改用 SVG 或 CSV」——导图没有 CSV 导出。
+//
+// 手法与既有段一致：真实 store/bus、事件后 refresh() 复现 App 的 store→props 传导。
+// ============================================================================
+
+describe('T48 修复轮-1 · 幽灵编辑态不再锁死键盘（Critical）', () => {
+  it('全部折叠下对一级分支按 Tab：折叠被揭示、新子可见并进编辑，键盘不悬空', () => {
+    const m = mountT46([dragTree()])
+    fireEvent.pointerDown(m.nodeEl('a'))
+    expect(m.selected()).toBe('a')
+
+    // 全部折叠：模型只剩中心主题，a 仍在选中态里（数据树游走不受显示折叠约束）
+    fireEvent.click(m.view.getByTestId('mindmap-fold-all'))
+    expect(m.view.container.querySelectorAll('[data-mindmap-node]')).toHaveLength(1)
+
+    fireEvent.keyDown(m.root(), { key: 'Tab' })
+    expect(m.bus.undoDepth()).toBe(1) // 加子照常落库
+    const created = findNode(m.store.getVault().mindmaps[0]!.root, 'a')!.children[2]!
+    m.refresh()
+
+    // 修复后的终态：折叠视图已揭示（不是「写进库却看不见」的幽灵节点），编辑框有落点
+    expect(m.view.getByTestId('mindmap-fold-all').textContent).toBe('全部折叠')
+    expect(m.view.container.querySelectorAll('[data-mindmap-node]')).toHaveLength(7)
+    const input = m.view.getByTestId('mindmap-input') as HTMLInputElement
+    expect(input.getAttribute('data-mindmap-input')).toBe(created.id)
+    expect(input.value).toBe('分支')
+
+    // 键盘活着：编辑框内 Escape 退编辑（零写入），根容器 Escape 再清选中——
+    // 编辑态若悬空在看不见的节点上，这两步都不会发生（正是 Critical 的现场）。
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(m.view.queryByTestId('mindmap-input')).toBeNull()
+    expect(m.bus.undoDepth()).toBe(1)
+    fireEvent.keyDown(m.root(), { key: 'Escape' })
+    expect(m.selected()).toBeNull()
+  })
+
+  it('F2 落在被「全部折叠」藏起的节点上：编辑态自动解除，Space/Escape 照常工作', () => {
+    const m = mountT46([dragTree()])
+    fireEvent.pointerDown(m.nodeEl('a'))
+    fireEvent.click(m.view.getByTestId('mindmap-fold-all'))
+    expect(m.view.container.querySelector('[data-mindmap-node="a"]')).toBeNull()
+    expect(m.selected()).toBe('a')
+
+    fireEvent.keyDown(m.root(), { key: 'F2' })
+    // 隐藏节点没有 overlay 落点：编辑态必须由 auto-clear 解除，而不是悬空
+    expect(m.view.queryByTestId('mindmap-input')).toBeNull()
+
+    // 键盘没被锁死：Space 仍轮到折叠分支（写库一条），Escape 仍清选中
+    fireEvent.keyDown(m.root(), { key: ' ' })
+    expect(m.bus.undoDepth()).toBe(1)
+    expect(findNode(m.store.getVault().mindmaps[0]!.root, 'a')!.folded).toBe(true)
+    fireEvent.keyDown(m.root(), { key: 'Escape' })
+    expect(m.selected()).toBeNull()
+  })
+
+  it('方向键走到数据折叠藏起的子节点后按 F2：同样不留悬空编辑态', () => {
+    const m = mountT46([editTree()])
+    fireEvent.pointerDown(m.nodeEl('a'))
+    fireEvent.keyDown(m.root(), { key: ' ' }) // 折叠 a（写库）→ a1/a2 从模型消失
+    expect(m.bus.undoDepth()).toBe(1)
+    m.refresh()
+    expect(m.view.container.querySelector('[data-mindmap-node="a1"]')).toBeNull()
+
+    fireEvent.keyDown(m.root(), { key: 'ArrowRight' }) // 游走读数据树 → 选中隐藏的 a1
+    expect(m.selected()).toBe('a1')
+
+    fireEvent.keyDown(m.root(), { key: 'F2' })
+    expect(m.view.queryByTestId('mindmap-input')).toBeNull()
+    fireEvent.keyDown(m.root(), { key: 'Escape' })
+    expect(m.selected()).toBeNull()
+    expect(m.bus.undoDepth()).toBe(1) // F2 全程零写入
+  })
+})
+
+describe('T48 修复轮-2 · 进入导图/切图自动适应画布（spec 5 第二处调用点）', () => {
+  /** 高到默认档放不下的一级分支树：fit 后必然脱离「pan 0 / 默认档」。 */
+  function tallMap(id: string, name: string, count: number): MindMap {
+    return map(
+      id,
+      name,
+      node('r-' + id, '中心主题', {
+        children: Array.from({ length: count }, (_unused, i) => node(`${id}-c${i}`, `分支${i}`)),
+      }),
+    )
+  }
+
+  it('挂载即 fit 一次；切到另一张图再 fit 一次；重命名引起的重渲染不重复 fit', () => {
+    const first = map('m1', '第一图', node('r1', '第一中心'))
+    const second = tallMap('m2', '第二图', 30)
+    const viewport = createMindmapViewport()
+    const fit = vi.spyOn(viewport, 'fitToContent')
+    const m = mountT46([first, second], viewport)
+
+    // 进入表首图 = 一次 fit，喂的是当前显示模型的 bounds
+    expect(fit).toHaveBeenCalledTimes(1)
+    expect(fit).toHaveBeenLastCalledWith(buildMindMapModel(first).bounds)
+
+    // 切图 = 再一次 fit，且视口真的落到该图的 fit 目标（与直接驱动一个参考控制器等价）
+    fireEvent.change(m.view.getByTestId('mindmap-select'), { target: { value: 'm2' } })
+    expect(fit).toHaveBeenCalledTimes(2)
+    expect(fit).toHaveBeenLastCalledWith(buildMindMapModel(second).bounds)
+    const reference = createMindmapViewport()
+    reference.fitToContent(buildMindMapModel(second).bounds)
+    expect(viewport.getState()).toEqual(reference.getState())
+    expect(viewport.getState().panY).not.toBe(0)
+
+    // 重命名会重渲染模型：fittedMapId 守卫保证不重复 fit
+    applyRenameMap(m.bus, m.store.getVault(), 'm2', '改名')
+    m.refresh()
+    expect(fit).toHaveBeenCalledTimes(2)
+
+    // 切回第一图 = 换图，重新 fit 一次
+    fireEvent.change(m.view.getByTestId('mindmap-select'), { target: { value: 'm1' } })
+    expect(fit).toHaveBeenCalledTimes(3)
+  })
+
+  it('空库（无模型）挂载不 fit；视口尺寸未知（0×0）时跳过 fit', () => {
+    const viewport = createMindmapViewport()
+    const fit = vi.spyOn(viewport, 'fitToContent')
+    const empty = seeded([])
+    render(<MindMapView vault={empty.store.getVault()} bus={empty.bus} t={t} viewport={viewport} />)
+    expect(fit).not.toHaveBeenCalled()
+
+    const zero = createMindmapViewport()
+    const zeroFit = vi.spyOn(zero, 'fitToContent')
+    const h = seeded([simpleMap()])
+    render(<MindMapView vault={h.store.getVault()} bus={h.bus} t={t} viewport={zero} width={0} height={0} />)
+    expect(zeroFit).not.toHaveBeenCalled()
+  })
+})
+
+describe('T48 修复轮-3 · 导图 PNG 不可用文案不再提 CSV（导图无 CSV 导出）', () => {
+  it('PNG 探针失败时的提示只说 SVG，不出现「CSV」', async () => {
+    const spy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+    try {
+      const m = mountT46()
+      fireEvent.click(m.view.getByTestId('mindmap-export-button'))
+      await waitFor(() => expect(m.view.queryByTestId('mindmap-export-png-hint')).toBeTruthy())
+      const hint = m.view.getByTestId('mindmap-export-png-hint').textContent ?? ''
+      expect(hint).toContain('PNG')
+      expect(hint).toContain('SVG')
+      expect(hint).not.toContain('CSV')
+      expect(hint).toBe(t('mindmap.exportPngUnsupported'))
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 

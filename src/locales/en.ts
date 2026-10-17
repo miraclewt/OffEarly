@@ -345,11 +345,8 @@ export const en: Record<MsgKey, string> = {
   'mindmap.foldAll': 'Collapse all',
   'mindmap.unfoldAll': 'Expand all',
   'mindmap.fit': 'Fit to canvas',
-  'mindmap.export': 'Export',
-  'mindmap.exportPng': 'Export PNG',
-  'mindmap.exportSvg': 'Export SVG',
   'mindmap.exportVisible': 'Visible area',
   'mindmap.exportFull': 'Full map',
-  'mindmap.cancel': 'Cancel',
+  'mindmap.exportPngUnsupported': 'PNG export is not supported in this environment; use SVG instead',
   'mindmap.deleteConfirm': 'Delete the entire mind map?',
 }

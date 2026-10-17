@@ -393,12 +393,11 @@ export const zh = {
     foldAll: '全部折叠',
     unfoldAll: '全部展开',
     fit: '适应画布',
-    export: '导出',
-    exportPng: '导出 PNG',
-    exportSvg: '导出 SVG',
     exportVisible: '仅可见区',
     exportFull: '全图',
-    cancel: '取消',
+    // T48 终审修复轮：导图的 PNG 降级提示不能再借甘特文案（甘特确有 CSV 导出，导图没有），
+    // 也不能借「SVG 或 CSV」把用户引向不存在的出口。
+    exportPngUnsupported: '当前环境不支持 PNG 导出，请改用 SVG',
     deleteConfirm: '删除整张思维导图？',
   },
 } as const

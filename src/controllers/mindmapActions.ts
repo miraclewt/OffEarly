@@ -24,7 +24,9 @@
 //     移根 / 移入自身或子树 → 命令层抛错**原样上抛**（T47 拖拽层先做命中过滤），
 //     但抛错发生在 bus.apply 之前，undo 栈必然干净；
 //   - 折叠父上加子 → 展开 + 加子两条命令、两条 undo 记录（裁决：xmind 折叠父上直接建子本就
-//     两步，保持命令简单，不造组合命令类型）。
+//     两步，保持命令简单，不造组合命令类型）；
+//   - 拖拽落到折叠目标上 → 同样「先展开目的地再 move」（两条命令、两条 undo）：move 不展开的话，
+//     搬过去的是**一整棵看不见的子树**，画布上只有目标的 +N 徽标在涨（T48 终审修复轮）。
 
 import { nanoid } from 'nanoid'
 
@@ -206,6 +208,9 @@ export function applyDeleteNode(
  * 负 index → TypeError（splice 负索引陷阱在构造层拦截，零写入）。
  * 非法结构（移根 / 自父 / 后代目标 / id 不存在）由 moveNodeCommand 工厂抛错并原样上抛——
  * T47 拖拽层先做命中过滤；抛错发生在 bus.apply 之前，undo 栈不落脏。成功返回 true。
+ * T48 终审修复轮（Important 3）：目的地是折叠节点 → 先 patch 展开再 move（两条命令、两条 undo，
+ * 与 applyAddNode 的「折叠父上加子」同口径）——否则整棵子树被搬进看不见的地方，画布上只剩
+ * 目标的 +N 徽标在涨。命令工厂**先构造后落库**，所以非法结构连展开补丁都不会写。
  */
 export function applyMoveNode(
   bus: CommandBus,
@@ -216,7 +221,14 @@ export function applyMoveNode(
   index: number,
 ): boolean {
   if (index < 0) throw new TypeError(`mindmapActions: 移动下标不能为负（${index}）`)
-  bus.apply(moveNodeCommand(vault, mapId, nodeId, newParentId, index))
+  // 构造即校验：抛错时一次写入都没有（undo 栈干净），下面的展开也因此不会被半途落库。
+  const move = moveNodeCommand(vault, mapId, nodeId, newParentId, index)
+  const map = locateMap(vault, mapId)
+  const target = map === undefined ? null : findNode(map.root, newParentId)
+  if (target?.folded === true) {
+    bus.apply(patchNodeCommand(vault, mapId, newParentId, { folded: false }))
+  }
+  bus.apply(move)
   return true
 }
 

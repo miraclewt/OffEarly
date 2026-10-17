@@ -353,30 +353,42 @@ describe('思维导图命令', () => {
     return map.root
   }
 
-  it('addNodeCommand + undo 还原树', () => {
+  // ── T48 终审修复轮（Important 4）：既有 7 个导图 case 只断言了 undo 对称，
+  //    这里逐一补 bus.redo() → 必须回到 apply 之后的状态（undo/redo 往返闭合）。
+  it('addNodeCommand + undo 还原树 + redo 回到加子之后', () => {
     const map = seedMap() // root 'r'，子 ['a','b']
     const before = structuredClone(store.getVault())
     const node: MindNode = { id: 'c', text: 'C', order: 'w', folded: false, children: [] }
 
     bus.apply(addNodeCommand(map.id, 'r', node, null))
+    const after = structuredClone(store.getVault())
     expect(mapRoot(store).children.map((n) => n.id)).toEqual(['a', 'b', 'c'])
 
     bus.undo()
     expect(mapRoot(store).children.map((n) => n.id)).toEqual(['a', 'b'])
     expect(store.getVault()).toEqual(before)
+
+    expect(bus.redo()).toBe(true)
+    expect(store.getVault()).toEqual(after)
+    expect(mapRoot(store).children.map((n) => n.id)).toEqual(['a', 'b', 'c'])
   })
 
-  it('deleteNodeCommand 逆元携完整子树复原位置', () => {
+  it('deleteNodeCommand 逆元携完整子树复原位置；redo 再删一次', () => {
     seedMap()
     const before = structuredClone(store.getVault())
 
     bus.apply(deleteNodeCommand(store.getVault(), 'map-1', 'a')) // 删 a（有子 a1）
+    const after = structuredClone(store.getVault())
     expect(mapRoot(store).children.map((n) => n.id)).toEqual(['b'])
 
     bus.undo()
     expect(mapRoot(store).children.map((n) => n.id)).toEqual(['a', 'b'])
     expect(mapRoot(store).children[0]!.children.map((n) => n.id)).toEqual(['a1']) // a 回 index 0 且 a1 仍在
     expect(store.getVault()).toEqual(before)
+
+    expect(bus.redo()).toBe(true)
+    expect(store.getVault()).toEqual(after)
+    expect(mapRoot(store).children.map((n) => n.id)).toEqual(['b'])
   })
 
   it('deleteNodeCommand 删根抛错、不压 undo 栈', () => {
@@ -385,11 +397,12 @@ describe('思维导图命令', () => {
     expect(bus.undoDepth()).toBe(0)
   })
 
-  it('patchNodeCommand 字段级逆（text/folded）', () => {
+  it('patchNodeCommand 字段级逆（text/folded）；redo 重放同一 patch', () => {
     seedMap()
     const before = structuredClone(store.getVault())
 
     bus.apply(patchNodeCommand(store.getVault(), 'map-1', 'a', { text: '改过', folded: true }))
+    const after = structuredClone(store.getVault())
     const patched = mapRoot(store).children[0]!
     expect({ text: patched.text, folded: patched.folded }).toEqual({ text: '改过', folded: true })
 
@@ -397,20 +410,29 @@ describe('思维导图命令', () => {
     const restored = mapRoot(store).children[0]!
     expect({ text: restored.text, folded: restored.folded }).toEqual({ text: 'A', folded: false })
     expect(store.getVault()).toEqual(before)
+
+    expect(bus.redo()).toBe(true)
+    expect(store.getVault()).toEqual(after)
     expect(() => patchNodeCommand(store.getVault(), 'map-1', 'a', {})).toThrow(/空 patch/)
   })
 
-  it('moveNodeCommand 跨父移动 + 逆元回原父原下标', () => {
+  it('moveNodeCommand 跨父移动 + 逆元回原父原下标；redo 按记录的下标再移一次', () => {
     seedMap()
     const before = structuredClone(store.getVault())
 
     bus.apply(moveNodeCommand(store.getVault(), 'map-1', 'a1', 'b', 0)) // a1: a→b index0
+    const after = structuredClone(store.getVault())
     expect(mapRoot(store).children.map((n) => n.id)).toEqual(['a', 'b'])
     expect(mapRoot(store).children[0]!.children).toEqual([])
     expect(mapRoot(store).children[1]!.children.map((n) => n.id)).toEqual(['a1'])
 
     bus.undo()
     expect(store.getVault()).toEqual(before)
+
+    // redo = 重新执行 forward（payload 里的 index 是「remove 之后」的下标）→ 与 apply 后逐字节相同
+    expect(bus.redo()).toBe(true)
+    expect(store.getVault()).toEqual(after)
+    expect(mapRoot(store).children[1]!.children.map((n) => n.id)).toEqual(['a1'])
   })
 
   it('moveNodeCommand 移入自身子树抛错、不压 undo 栈', () => {
@@ -425,7 +447,8 @@ describe('思维导图命令', () => {
     expect(store.getVault()).toEqual(before)
   })
 
-  it('createMapCommand / patchMapCommand 往返，空 patch 抛错', () => {
+  it('createMapCommand / patchMapCommand 往返，空 patch 抛错；redo 逐级重放', () => {
+    const initial = structuredClone(store.getVault())
     const created: MindMap = {
       id: 'map-new',
       name: '新图',
@@ -435,29 +458,46 @@ describe('思维导图命令', () => {
       root: { id: 'nr', text: '根', order: 'm', folded: false, children: [] },
     }
     bus.apply(createMapCommand(created))
+    const afterCreate = structuredClone(store.getVault())
     expect(store.getVault().mindmaps.map((m) => m.id)).toEqual(['map-new'])
 
     bus.apply(patchMapCommand(store.getVault(), 'map-new', { name: '改名', updatedAt: T1.toISOString() }))
+    const afterPatch = structuredClone(store.getVault())
     expect(store.getVault().mindmaps[0]!.name).toBe('改名')
 
     bus.undo()
     expect(store.getVault().mindmaps[0]!.name).toBe('新图')
+    expect(store.getVault()).toEqual(afterCreate)
     expect(() => patchMapCommand(store.getVault(), 'map-new', {})).toThrow(/空 patch/)
     bus.undo()
     expect(store.getVault().mindmaps).toEqual([])
+    expect(store.getVault()).toEqual(initial)
+
+    // redo 栈序回放：先重建图、再重放 patch
+    expect(bus.redo()).toBe(true)
+    expect(store.getVault()).toEqual(afterCreate)
+    expect(bus.redo()).toBe(true)
+    expect(store.getVault()).toEqual(afterPatch)
+    expect(store.getVault().mindmaps[0]!.name).toBe('改名')
+    expect(bus.canRedo()).toBe(false)
   })
 
-  it('deleteMapCommand undo 后图与原下标复原', () => {
+  it('deleteMapCommand undo 后图与原下标复原；redo 再删同一张', () => {
     const first = seedMap()
     const second: MindMap = { ...first, id: 'map-2', name: '图 2' }
     store.setVault({ ...store.getVault(), mindmaps: [first, second] })
     const before = structuredClone(store.getVault())
 
     bus.apply(deleteMapCommand(store.getVault(), 'map-1')) // 删第一张
+    const after = structuredClone(store.getVault())
     expect(store.getVault().mindmaps.map((m) => m.id)).toEqual(['map-2'])
 
     bus.undo()
     expect(store.getVault()).toEqual(before)
     expect(store.getVault().mindmaps.map((m) => m.id)).toEqual(['map-1', 'map-2'])
+
+    expect(bus.redo()).toBe(true)
+    expect(store.getVault()).toEqual(after)
+    expect(store.getVault().mindmaps.map((m) => m.id)).toEqual(['map-2'])
   })
 })

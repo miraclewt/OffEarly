@@ -309,6 +309,77 @@ describe('mindmapActions · applyMoveNode', () => {
     expect(applyMoveNode(bus, store.getVault(), 'm1', 'a1', 'a', findNode(rootNow(), 'a')!.children.length)).toBe(true)
     expect(findNode(rootNow(), 'a')!.children.map((c) => c.id)).toEqual(['a2', 'a3', 'a1'])
   })
+
+  // T48 终审修复轮（Important 3）：拖拽落到**折叠目标**上时，move 会把整棵子树搬进看不见的
+  // 子树里（只有目标的 +N 徽标在涨）。与 applyAddNode 同口径：目的地先展开再落子——
+  // 两条命令、两条 undo 记录，且展开命令在 move 之前 apply（undo 序：先撤 move、再撤展开）。
+  it('落到折叠目标 = 先展开目的地再移动（照 applyAddNode 口径，两条 undo 记录）', () => {
+    const foldedTarget: MindMap = {
+      id: 'm1',
+      name: '计划',
+      root: node('root1', '中心主题', {
+        children: [
+          node('a', '分支A', { children: [node('a1', '子A1')] }),
+          node('b', '分支B', { folded: true, children: [node('b1', '子B1')] }),
+        ],
+      }),
+      order: mid(undefined, undefined),
+      createdAt: NOW,
+      updatedAt: NOW,
+    }
+    const { store, bus } = world([foldedTarget])
+    const before = structuredClone(store.getVault())
+    const rootNow = () => store.getVault().mindmaps[0]!.root
+
+    expect(applyMoveNode(bus, store.getVault(), 'm1', 'a1', 'b', findNode(rootNow(), 'b')!.children.length)).toBe(true)
+    expect(bus.undoDepth()).toBe(2) // 展开 + 移动
+    const b = findNode(rootNow(), 'b')!
+    expect(b.folded).toBe(false) // 目的地已展开：搬进来的子树看得见
+    expect(b.children.map((c) => c.id)).toEqual(['b1', 'a1'])
+    expect(findNode(rootNow(), 'a')!.children).toHaveLength(0)
+
+    // 撤两条：先回 move（a1 回原父原下标），再回展开（b 恢复折叠）
+    expect(bus.undo()).toBe(true)
+    expect(findNode(rootNow(), 'b')!.folded).toBe(false)
+    expect(findNode(rootNow(), 'a')!.children.map((c) => c.id)).toEqual(['a1'])
+    expect(findNode(rootNow(), 'b')!.children.map((c) => c.id)).toEqual(['b1'])
+    expect(bus.undo()).toBe(true)
+    expect(findNode(rootNow(), 'b')!.folded).toBe(true)
+    expect(store.getVault()).toEqual(before)
+  })
+
+  it('目标未折叠 → 仍是一条命令一条 undo 记录（不多写展开补丁）', () => {
+    const { store, bus } = world([fixtureMap()])
+    expect(applyMoveNode(bus, store.getVault(), 'm1', 'a1', 'b', 0)).toBe(true)
+    expect(bus.undoDepth()).toBe(1)
+    bus.undo()
+    expect(store.getVault()).toEqual(vault([fixtureMap()]))
+  })
+
+  it('折叠目标 + 非法结构：校验先于展开——抛错时零写入、undo 栈干净', () => {
+    const foldedDescendant: MindMap = {
+      id: 'm1',
+      name: '计划',
+      root: node('root1', '中心主题', {
+        children: [node('a', '分支A', { children: [node('a1', '子A1', { folded: true, children: [node('a11', '孙A11')] })] })],
+      }),
+      order: mid(undefined, undefined),
+      createdAt: NOW,
+      updatedAt: NOW,
+    }
+    const { store, bus } = world([foldedDescendant])
+    const before = structuredClone(store.getVault())
+
+    // a 移进自己的后代 a1（折叠）：命令工厂抛错，展开补丁也不该落库
+    expect(() => applyMoveNode(bus, store.getVault(), 'm1', 'a', 'a1', 0)).toThrow(/子树/)
+    expect(bus.undoDepth()).toBe(0)
+    expect(store.getVault()).toEqual(before)
+
+    // 移根：同样零写入
+    expect(() => applyMoveNode(bus, store.getVault(), 'm1', 'root1', 'a1', 0)).toThrow(/根节点不可移动/)
+    expect(bus.undoDepth()).toBe(0)
+    expect(store.getVault()).toEqual(before)
+  })
 })
 
 describe('mindmapActions · applyRenameMap', () => {
