@@ -280,6 +280,35 @@ describe('mindmapActions · applyMoveNode', () => {
     bus.undo()
     expect(findNode(store.getVault().mindmaps[0]!.root, 'a')!.children.map((c) => c.id)).toEqual(['a1'])
   })
+
+  it('T47 拖拽落点口径：index = 目标 children.length 尾插；同父落到尾部、其余兄弟保持原序', () => {
+    const source: MindMap = {
+      id: 'm1',
+      name: '计划',
+      root: node('root1', '中心主题', {
+        children: [
+          node('a', '分支A', { children: [node('a1', '子A1'), node('a2', '子A2'), node('a3', '子A3')] }),
+          node('b', '分支B', { children: [node('b1', '子B1')] }),
+        ],
+      }),
+      order: mid(undefined, undefined),
+      createdAt: NOW,
+      updatedAt: NOW,
+    }
+    const { store, bus } = world([source])
+    const rootNow = () => store.getVault().mindmaps[0]!.root
+
+    // 跨父尾插：UI 传 index = b.children.length（remove 前取值，=1）→ 落 b 尾
+    expect(applyMoveNode(bus, store.getVault(), 'm1', 'a1', 'b', findNode(rootNow(), 'b')!.children.length)).toBe(true)
+    expect(findNode(rootNow(), 'b')!.children.map((c) => c.id)).toEqual(['b1', 'a1'])
+    bus.undo()
+    expect(findNode(rootNow(), 'a')!.children.map((c) => c.id)).toEqual(['a1', 'a2', 'a3'])
+
+    // 同父尾插：index = a.children.length（=3，remove 后仅 2 位，splice 越界即尾插）
+    // → a1 移到尾部，其余兄弟相对序不动（工厂内不做原下标补偿——此测试锁定该语义）
+    expect(applyMoveNode(bus, store.getVault(), 'm1', 'a1', 'a', findNode(rootNow(), 'a')!.children.length)).toBe(true)
+    expect(findNode(rootNow(), 'a')!.children.map((c) => c.id)).toEqual(['a2', 'a3', 'a1'])
+  })
 })
 
 describe('mindmapActions · applyRenameMap', () => {

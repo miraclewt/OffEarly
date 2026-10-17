@@ -1,4 +1,4 @@
-// T45 · MindMapCanvas：MindMapModel 的 SVG 投影（只渲染，零几何计算）。
+// T45-T47 · MindMapCanvas：MindMapModel 的 SVG 投影（只渲染，零几何计算）。
 //
 // 与 GanttCanvas 同一条红线：这里**不排布**——节点矩形 / 贝塞尔 path / bounds 一律来自
 // domain/mindmapModel.buildMindMapModel，视图只做「看哪一段」的变换：外层 <svg> 铺满容器，
@@ -9,16 +9,27 @@
 // （那批常量属 T48 的导出对等层）；T45 不涉导出，一律走内联 style 的 CSS 变量——
 // style 是 CSS，浏览器里能解析 var()，只有呈现属性（fill= / stroke=）不能。故本文件零新增 hex。
 //
+// 指针层口径（T46 裁决 + T47 扩展）：选中走 onPointerDown（平移拖拽的宿主是外层容器，节点必须先行
+// stopPropagation，否则点节点顺带起拖拽）；onSelect 附带指针落点（clientX/clientY/pointerId），
+// 视图层据此做 4px 阈值的跨父拖拽判定。徽标同理——pointerdown 拦在节点与画布之前，
+// 折叠动作仍由 click 语义触发（键盘可达性一致）。
 // 只读边界（T45 遗留注释，T46 起解除）：badge 的 onToggleFold 与节点的 onEdit/onSelect 由
 // 视图层接线；editingId 命中的节点隐掉 <text>（输入框是视图层的 HTML overlay，Canvas 不管）。
-// 指针层口径（T46 裁决）：选中走 onPointerDown（平移拖拽的宿主是外层容器，节点必须先行
-// stopPropagation，否则点节点顺带起拖拽）；徽标同理——pointerdown 拦在节点与画布之前，
-// 折叠动作仍由 click 语义触发（键盘可达性一致）。
+// T47 呈现层新增（视图层算逻辑，这里只画）：draggingId 命中的节点 = 拖拽 ghost（opacity 0.4 +
+// data-mindmap-dragging）；dropTargetId 命中的节点 = 合法落点高亮（data-mindmap-drop-target）。
 
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
 
 import { MINDMAP_FONT_SIZE } from '../domain/mindmapModel'
 import type { MindMapModel, MindMapNodeView } from '../domain/mindmapModel'
+
+/** 节点 pointerdown 的指针落点（屏幕坐标 + 指针 id + 按键）：视图层拖拽阈值的输入。 */
+export interface MindMapPointerPoint {
+  clientX: number
+  clientY: number
+  pointerId: number
+  button: number
+}
 
 /** 节点圆角（与 --oe-radius-control 同值；SVG rx 只收数字，取现量 8）。 */
 const NODE_RADIUS = 8
@@ -38,8 +49,12 @@ export interface MindMapCanvasProps {
   selectedId: string | null
   /** 就地编辑中的节点 id：编辑时隐掉该节点的 <text>（输入框由 T46 的 overlay 承接） */
   editingId: string | null
-  /** 点选节点外送 id（onPointerDown 触发）；T46 视图用它记本地选中态。省略则节点不带指针样式。 */
-  onSelect?(id: string): void
+  /** 拖拽中的源节点 id（T47）：该节点渲染为 ghost（opacity 0.4 + data-mindmap-dragging）。 */
+  draggingId?: string | null
+  /** 当前命中的合法落点 id（T47）：data-mindmap-drop-target + 描边高亮。 */
+  dropTargetId?: string | null
+  /** 点选节点外送 id 与指针落点（onPointerDown 触发）；T47 起落点供视图层判定拖拽阈值。省略则节点不带指针样式。 */
+  onSelect?(id: string, point: MindMapPointerPoint): void
   /** 折叠徽标点击（T46 接线）：click 语义，pointerdown 先行拦截（不选中、不平移）。 */
   onToggleFold?(id: string): void
   /** 双击节点进入就地编辑（T46 接线）；overlay 输入框在视图层，Canvas 只外送 id。 */
@@ -74,13 +89,19 @@ function nodePaint(node: MindMapNodeView): {
 }
 
 export function MindMapCanvas(props: MindMapCanvasProps) {
-  const { model, panX, panY, zoom, selectedId, editingId, onSelect, onToggleFold, onEdit } = props
+  const { model, panX, panY, zoom, selectedId, editingId, draggingId, dropTargetId, onSelect, onToggleFold, onEdit } = props
   const centerY = (node: MindMapNodeView): number => node.y + node.height / 2
 
   const handleNodePointerDown = (event: ReactPointerEvent<SVGGElement>, nodeId: string): void => {
-    // 先于画布拖拽吞掉 pointerdown：点节点 = 选中，绝不起平移（T46 指针层裁决）
+    // 先于画布拖拽吞掉 pointerdown：点节点 = 选中，绝不起平移（T46 指针层裁决）；
+    // T47：落点一并外送，视图层用「同一 pointer 移动是否越过 4px」区分 click-select 与 drag
     event.stopPropagation()
-    onSelect?.(nodeId)
+    onSelect?.(nodeId, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      pointerId: event.pointerId,
+      button: event.button,
+    })
   }
 
   const handleBadgeClick = (event: ReactMouseEvent<SVGGElement>, nodeId: string): void => {
@@ -121,13 +142,22 @@ export function MindMapCanvas(props: MindMapCanvasProps) {
         {model.nodes.map((node) => {
           const paint = nodePaint(node)
           const selected = node.id === selectedId
+          // T47 ghost：拖拽中的源节点半透明留在原位（裁决：除 opacity 外不做吸附动画）
+          const dragging = draggingId === node.id
+          // T47 落点高亮：仅在视图层判定为合法候选时才有 dropTargetId
+          const dropping = dropTargetId === node.id
           return (
             <g
               key={node.id}
               data-mindmap-node={node.id}
+              data-mindmap-dragging={dragging ? 'true' : undefined}
+              data-mindmap-drop-target={dropping ? node.id : undefined}
               onPointerDown={(event) => handleNodePointerDown(event, node.id)}
               onDoubleClick={() => onEdit?.(node.id)}
-              style={{ cursor: onSelect === undefined && onEdit === undefined ? undefined : 'pointer' }}
+              style={{
+                cursor: onSelect === undefined && onEdit === undefined ? undefined : 'pointer',
+                opacity: dragging ? 0.4 : undefined,
+              }}
             >
               <rect
                 x={node.x}
@@ -135,12 +165,12 @@ export function MindMapCanvas(props: MindMapCanvasProps) {
                 width={node.width}
                 height={node.height}
                 rx={NODE_RADIUS}
-                strokeWidth={selected ? 2 : 1}
+                strokeWidth={selected || dropping ? 2 : 1}
                 style={{
                   fill: paint.fill,
-                  // 选中环：accent-deep 描边（根节点 accent 底上仍可见），宽度 2
-                  stroke: selected ? 'var(--oe-accent-deep)' : paint.stroke,
-                  strokeOpacity: selected ? undefined : paint.strokeOpacity,
+                  // 选中环：accent-deep 描边（根节点 accent 底上仍可见），宽度 2；落点高亮同款
+                  stroke: selected || dropping ? 'var(--oe-accent-deep)' : paint.stroke,
+                  strokeOpacity: selected || dropping ? undefined : paint.strokeOpacity,
                 }}
               >
                 <title>{node.text}</title>

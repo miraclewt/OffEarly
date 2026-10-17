@@ -10,7 +10,7 @@
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { applyDeleteMap } from '../../src/controllers/mindmapActions'
+import { applyDeleteMap, applyDeleteNode } from '../../src/controllers/mindmapActions'
 import { createMindmapViewport, MINDMAP_FIT_PADDING, MINDMAP_ZOOM_STEPS } from '../../src/controllers/mindmapViewport'
 import { createCommandBus } from '../../src/domain/commandBus'
 import type { CommandBus } from '../../src/domain/commandBus'
@@ -664,4 +664,293 @@ describe('T46-4 · 修复轮：键位表控件守卫 / 零变更提交跳过 / �
     expect(m.view.queryByLabelText('重命名')).toBeNull()
   })
 })
+
+// ============================================================================
+// T47 · 跨父拖拽 move + 图管理工具条（重命名 / 两段删除 / 全部折叠 toggle）。
+//
+// 拖拽裁决（binding）：pointerdown 于节点（同帧完成选中）→ 移动超过 4px 阈值进入拖拽；
+// ghost = 原节点 opacity 0.4 + data-mindmap-dragging；命中 = 屏幕坐标反变换
+// content=(screen-pan)/zoom 落进可见节点矩形；候选排除根、自身、自身后代（isDescendant）；
+// 合法候选才出 data-mindmap-drop-target={id}；pointerup 命中 → applyMoveNode(尾插 index=
+// target.children.length)，非法/未命中 → 静默取消零写；命令抛错（stale snapshot）try/catch 零崩。
+// foldAll 按钮 = 纯视图本地态（buildMindMapModel(map,{foldAll:true})，root-inclusive，模型只剩
+// 中心主题），不写库、零 undo——「展开全部」= 该态置 false。
+//
+// 几何断言依旧零 DOM：默认视口 pan 0 / zoom 1 + jsdom 下 surface rect 全 0 → 屏幕坐标 ==
+// 内容坐标；坐标一律从 buildMindMapModel(dragTree()) 现算。
+// ============================================================================
+
+/** T47 拖拽树：root1 → [ a(a1(a11), a2), b ]——a1 有后代（非法落点），b 空叶子（合法落点）。 */
+function dragTree(): MindMap {
+  return map('m1', '计划', node('root1', '中心主题', {
+    children: [
+      node('a', '分支A', {
+        children: [node('a1', '子A1', { children: [node('a11', '孙A11')] }), node('a2', '子A2')],
+      }),
+      node('b', '分支B'),
+    ],
+  }))
+}
+
+/** 默认视口（pan 0 / zoom 1 / jsdom surface rect 0）下屏幕坐标 == 内容坐标。 */
+function dragCenters(): (id: string) => { x: number; y: number } {
+  const model = buildMindMapModel(dragTree())
+  return (id: string) => {
+    const n = model.nodes.find((candidate) => candidate.id === id)!
+    return { x: n.x + n.width / 2, y: n.y + n.height / 2 }
+  }
+}
+
+describe('T47-1 · 跨父拖拽 move', () => {
+  it('拖 a1 落到 b：ghost 与目标高亮出现；抬起后 a1 挂 b 尾（子树随行）、undo 一次回原状', () => {
+    const m = mountT46([dragTree()])
+    const at = dragCenters()
+    const surface = m.view.getByTestId('mindmap-viewport')
+    const from = at('a1')
+    const to = at('b')
+
+    fireEvent.pointerDown(m.nodeEl('a1'), { pointerId: 1, clientX: from.x, clientY: from.y })
+    expect(m.selected()).toBe('a1') // 选中在 pointerdown 完成（拖拽不重复选中逻辑）
+
+    // 阈值内（<4px）：不进入拖拽、不动 viewport
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: from.x + 2, clientY: from.y + 2 })
+    expect(m.view.container.querySelector('[data-mindmap-dragging]')).toBeNull()
+    expect(m.viewport.getState().panX).toBe(0)
+
+    // 越过阈值并落入 b 矩形：ghost + 合法目标高亮
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: to.x, clientY: to.y })
+    expect(m.view.container.querySelector('[data-mindmap-dragging="true"]')).toBe(m.nodeEl('a1'))
+    expect(m.nodeEl('a1').getAttribute('style')).toContain('opacity: 0.4')
+    expect(m.view.container.querySelector('[data-mindmap-drop-target="b"]')).toBe(m.nodeEl('b'))
+    expect(m.bus.undoDepth()).toBe(0) // 拖拽全程未落库
+
+    fireEvent.pointerUp(surface, { pointerId: 1 })
+    expect(m.bus.undoDepth()).toBe(1)
+    expect(m.view.container.querySelector('[data-mindmap-dragging]')).toBeNull()
+    expect(m.view.container.querySelector('[data-mindmap-drop-target]')).toBeNull()
+    m.refresh()
+    const rootNow = m.store.getVault().mindmaps[0]!.root
+    expect(findNode(rootNow, 'a')!.children.map((c) => c.id)).toEqual(['a2'])
+    expect(findNode(rootNow, 'b')!.children.map((c) => c.id)).toEqual(['a1']) // 尾插 = children.length
+    expect(findNode(rootNow, 'a1')!.children.map((c) => c.id)).toEqual(['a11']) // 子树随行
+
+    m.bus.undo()
+    m.refresh()
+    const undone = m.store.getVault().mindmaps[0]!.root
+    expect(findNode(undone, 'a')!.children.map((c) => c.id)).toEqual(['a1', 'a2'])
+    expect(findNode(undone, 'b')!.children).toHaveLength(0)
+    expect(m.bus.undoDepth()).toBe(0)
+  })
+
+  it('拖到自己子树 / 落到根 / 未命中：一律无高亮目标，抬起静默取消零写', () => {
+    const m = mountT46([dragTree()])
+    const at = dragCenters()
+    const surface = m.view.getByTestId('mindmap-viewport')
+
+    // ① a1 → 自己的后代 a11：候选排除自身子树
+    fireEvent.pointerDown(m.nodeEl('a1'), { pointerId: 1, clientX: at('a1').x, clientY: at('a1').y })
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: at('a11').x, clientY: at('a11').y })
+    expect(m.view.container.querySelector('[data-mindmap-dragging="true"]')).toBe(m.nodeEl('a1'))
+    expect(m.view.container.querySelector('[data-mindmap-drop-target]')).toBeNull()
+    fireEvent.pointerUp(surface, { pointerId: 1 })
+    expect(m.bus.undoDepth()).toBe(0)
+
+    // ② a1 → 根矩形：候选目标排除根
+    fireEvent.pointerDown(m.nodeEl('a1'), { pointerId: 2, clientX: at('a1').x, clientY: at('a1').y })
+    fireEvent.pointerMove(surface, { pointerId: 2, clientX: at('root1').x, clientY: at('root1').y })
+    expect(m.view.container.querySelector('[data-mindmap-drop-target]')).toBeNull()
+    fireEvent.pointerUp(surface, { pointerId: 2 })
+    expect(m.bus.undoDepth()).toBe(0)
+
+    // ③ a → 画布空白（越出所有矩形）：未命中
+    fireEvent.pointerDown(m.nodeEl('a'), { pointerId: 3, clientX: at('a').x, clientY: at('a').y })
+    fireEvent.pointerMove(surface, { pointerId: 3, clientX: 9999, clientY: 9999 })
+    expect(m.view.container.querySelector('[data-mindmap-drop-target]')).toBeNull()
+    fireEvent.pointerUp(surface, { pointerId: 3 })
+    expect(m.bus.undoDepth()).toBe(0)
+
+    // ④ 拖根自身：根不可移动，任何指针下都没有合法候选
+    fireEvent.pointerDown(m.nodeEl('root1'), { pointerId: 4, clientX: at('root1').x, clientY: at('root1').y })
+    fireEvent.pointerMove(surface, { pointerId: 4, clientX: at('a').x, clientY: at('a').y })
+    expect(m.view.container.querySelector('[data-mindmap-drop-target]')).toBeNull()
+    fireEvent.pointerUp(surface, { pointerId: 4 })
+    expect(m.bus.undoDepth()).toBe(0)
+
+    m.refresh()
+    const rootNow = m.store.getVault().mindmaps[0]!.root
+    expect(findNode(rootNow, 'a')!.children.map((c) => c.id)).toEqual(['a1', 'a2'])
+    expect(findNode(rootNow, 'b')!.children).toHaveLength(0)
+  })
+
+  it('stale snapshot：拖起后目标被他处删除，抬起时命令抛错被 catch——零崩、move 不落 undo 栈', () => {
+    const m = mountT46([dragTree()])
+    const at = dragCenters()
+    const surface = m.view.getByTestId('mindmap-viewport')
+    fireEvent.pointerDown(m.nodeEl('a1'), { pointerId: 1, clientX: at('a1').x, clientY: at('a1').y })
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: at('b').x, clientY: at('b').y })
+    expect(m.view.container.querySelector('[data-mindmap-drop-target="b"]')).toBeTruthy()
+
+    // 外部改动推进 store，但不 refresh——视图仍持旧 vault 快照，以为 b 还在
+    applyDeleteNode(m.bus, m.store.getVault(), 'm1', 'b')
+    expect(m.bus.undoDepth()).toBe(1)
+
+    expect(() => fireEvent.pointerUp(surface, { pointerId: 1 })).not.toThrow()
+    expect(m.bus.undoDepth()).toBe(1) // 只有外删那一条；move 抛错发生在 bus.apply 之前，栈干净
+    expect(m.view.container.querySelector('[data-mindmap-dragging]')).toBeNull()
+    expect(m.view.container.querySelector('[data-mindmap-drop-target]')).toBeNull()
+    m.refresh()
+    expect(findNode(m.store.getVault().mindmaps[0]!.root, 'a')!.children.map((c) => c.id)).toEqual(['a1', 'a2'])
+  })
+})
+
+describe('T47-2 · 图管理工具条', () => {
+  it('重命名：点钮切 inline input；空/纯空白不提交；Enter 与 blur 走 applyRenameMap；Escape 零写', () => {
+    const m = mountT46([dragTree()])
+    fireEvent.click(m.view.getByTestId('mindmap-rename-map'))
+    const input = m.view.getByTestId('mindmap-rename-input') as HTMLInputElement
+    expect(input.value).toBe('计划')
+    expect(input.getAttribute('aria-label')).toBe('重命名')
+
+    // 纯空白提交 = 不提交（零写入），编辑态照常退出
+    fireEvent.change(input, { target: { value: '   ' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(m.view.queryByTestId('mindmap-rename-input')).toBeNull()
+    expect(m.bus.undoDepth()).toBe(0)
+    expect(m.store.getVault().mindmaps[0]!.name).toBe('计划')
+
+    // Enter 提交路：trim 后落库，undoDepth +1（applyRenameMap 的 patch），select 文案跟新
+    fireEvent.click(m.view.getByTestId('mindmap-rename-map'))
+    fireEvent.change(m.view.getByTestId('mindmap-rename-input'), { target: { value: ' 新名字 ' } })
+    fireEvent.keyDown(m.view.getByTestId('mindmap-rename-input'), { key: 'Enter' })
+    expect(m.bus.undoDepth()).toBe(1)
+    expect(m.store.getVault().mindmaps[0]!.name).toBe('新名字')
+    m.refresh()
+    expect([...(m.view.getByTestId('mindmap-select') as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(['新名字'])
+
+    // blur 提交路
+    fireEvent.click(m.view.getByTestId('mindmap-rename-map'))
+    fireEvent.change(m.view.getByTestId('mindmap-rename-input'), { target: { value: 'blur 名' } })
+    fireEvent.blur(m.view.getByTestId('mindmap-rename-input'))
+    expect(m.bus.undoDepth()).toBe(2)
+    expect(m.store.getVault().mindmaps[0]!.name).toBe('blur 名')
+
+    // Escape 取消：改值后 Esc，零写入、input 退出
+    m.refresh()
+    fireEvent.click(m.view.getByTestId('mindmap-rename-map'))
+    fireEvent.change(m.view.getByTestId('mindmap-rename-input'), { target: { value: '不提交' } })
+    fireEvent.keyDown(m.view.getByTestId('mindmap-rename-input'), { key: 'Escape' })
+    expect(m.view.queryByTestId('mindmap-rename-input')).toBeNull()
+    expect(m.bus.undoDepth()).toBe(2)
+    expect(m.store.getVault().mindmaps[0]!.name).toBe('blur 名')
+  })
+
+  it('删除两段确认：首点切确认文案零写，二次点删图、选中回退表首、undo 恢复', () => {
+    const m = mountT46([
+      map('m1', '第一图', node('r1', '第一中心')),
+      map('m2', '第二图', node('r2', '第二中心')),
+      map('m3', '第三图', node('r3', '第三中心')),
+    ])
+    fireEvent.change(m.view.getByTestId('mindmap-select'), { target: { value: 'm2' } })
+    const del = () => m.view.getByTestId('mindmap-delete-map')
+    expect(del().textContent).toBe('删除此图')
+
+    fireEvent.click(del())
+    expect(del().textContent).toBe('删除整张思维导图？') // mindmap.deleteConfirm 确认态
+    expect(m.bus.undoDepth()).toBe(0)
+    expect(m.store.getVault().mindmaps).toHaveLength(3)
+
+    fireEvent.click(del())
+    expect(m.bus.undoDepth()).toBe(1)
+    expect(m.store.getVault().mindmaps.map((x) => x.id)).toEqual(['m1', 'm3'])
+    m.refresh()
+    // 回退表首 = T45 既有 selectedMapId 悬空 → maps[0] 兜底，确认仍生效
+    expect((m.view.getByTestId('mindmap-select') as HTMLSelectElement).value).toBe('m1')
+    expect(m.view.container.textContent).toContain('第一中心')
+
+    m.bus.undo()
+    m.refresh()
+    expect(m.store.getVault().mindmaps.map((x) => x.id)).toEqual(['m1', 'm2', 'm3'])
+  })
+
+  it('删除确认态复位：外点（画布 pointerdown）与切图都退回「删除此图」，不误删', () => {
+    const m = mountT46([dragTree(), map('m2', '第二图', node('r2', '第二中心'))])
+    const del = () => m.view.getByTestId('mindmap-delete-map')
+    fireEvent.click(del())
+    expect(del().textContent).toBe('删除整张思维导图？')
+
+    // 外点：画布表面按下 → 复位
+    fireEvent.pointerDown(m.view.getByTestId('mindmap-viewport'))
+    expect(del().textContent).toBe('删除此图')
+    expect(m.bus.undoDepth()).toBe(0)
+
+    // 再进确认态后切图 → 同样复位
+    fireEvent.click(del())
+    expect(del().textContent).toBe('删除整张思维导图？')
+    fireEvent.change(m.view.getByTestId('mindmap-select'), { target: { value: 'm2' } })
+    expect(del().textContent).toBe('删除此图')
+    expect(m.store.getVault().mindmaps).toHaveLength(2)
+  })
+
+  it('下拉切换选中图渲染对应根文本（表首默认 + 来回切）', () => {
+    const m = mountT46([dragTree(), map('m2', '第二图', node('r2', '第二中心'))])
+    expect(m.view.container.textContent).toContain('中心主题')
+    const select = m.view.getByTestId('mindmap-select')
+    fireEvent.change(select, { target: { value: 'm2' } })
+    expect(m.view.container.textContent).toContain('第二中心')
+    expect(m.view.container.textContent).not.toContain('孙A11')
+    fireEvent.change(select, { target: { value: 'm1' } })
+    expect(m.view.container.textContent).toContain('孙A11')
+    expect(m.bus.undoDepth()).toBe(0)
+  })
+
+  it('全部折叠/展开 toggle：视图本地态（模型只剩中心主题），零写零 undo，数据 folded 原样', () => {
+    const m = mountT46([dragTree()])
+    const btn = () => m.view.getByTestId('mindmap-fold-all')
+    expect(btn().textContent).toBe('全部折叠')
+    expect(m.view.container.querySelectorAll('[data-mindmap-node]')).toHaveLength(6)
+
+    fireEvent.click(btn())
+    // T43 root-inclusive 口径：foldAll 命中「有子节点」的一律按折叠排布 → 只剩中心主题一枚
+    const nodes = m.view.container.querySelectorAll('[data-mindmap-node]')
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]!.getAttribute('data-mindmap-node')).toBe('root1')
+    expect(m.view.container.querySelectorAll('path[data-mindmap-edge]')).toHaveLength(0)
+    expect(btn().textContent).toBe('全部展开')
+    expect(m.bus.undoDepth()).toBe(0)
+
+    fireEvent.click(btn()) // 展开全部 = 本地态置 false
+    expect(m.view.container.querySelectorAll('[data-mindmap-node]')).toHaveLength(6)
+    expect(btn().textContent).toBe('全部折叠')
+    expect(m.bus.undoDepth()).toBe(0)
+
+    // 数据一个字节没动：折叠态全在视图层
+    const root = m.store.getVault().mindmaps[0]!.root
+    expect(findNode(root, 'a')!.folded).toBe(false)
+    expect(findNode(root, 'a1')!.folded).toBe(false)
+  })
+
+  it('空态与工具条互斥：空库只渲染引导卡（无工具条、无 fold-all）', () => {
+    const { store, bus } = seeded([])
+    const view = render(<MindMapView vault={store.getVault()} bus={bus} t={t} />)
+    expect(view.getByTestId('mindmap-empty')).toBeTruthy()
+    expect(view.queryByTestId('mindmap-toolbar')).toBeNull()
+    expect(view.queryByTestId('mindmap-fold-all')).toBeNull()
+    expect(view.queryByTestId('mindmap-rename-map')).toBeNull()
+    expect(view.queryByTestId('mindmap-delete-map')).toBeNull()
+  })
+
+  it('键位表守卫覆盖新按钮：焦点在「全部折叠」上按 Enter/Space 不写库也不吞默认动作', () => {
+    const m = mountT46([dragTree()])
+    fireEvent.pointerDown(m.nodeEl('a'))
+    expect(m.selected()).toBe('a')
+    const fold = m.view.getByTestId('mindmap-fold-all')
+    fold.focus()
+    expect(fireEvent.keyDown(fold, { key: 'Enter' })).toBe(true)
+    expect(fireEvent.keyDown(fold, { key: ' ' })).toBe(true)
+    expect(m.bus.undoDepth()).toBe(0)
+    expect(findNode(m.store.getVault().mindmaps[0]!.root, 'a')!.folded).toBe(false)
+    expect(m.view.container.querySelectorAll('[data-mindmap-node]')).toHaveLength(6)
+  })
+})
+
 
