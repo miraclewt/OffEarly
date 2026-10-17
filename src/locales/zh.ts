@@ -370,6 +370,13 @@ export const zh = {
     aboutVersion: '版本',
     aboutCounts: '{tasks} 个任务 · {topics} 个话题 · {milestones} 个里程碑',
   },
+
+  // T39 尾部追加：甘特图左侧任务表的折叠竖轨（只增不改，既有键一律不动）
+  ganttTable: {
+    rail: '任务表',
+    collapse: '收起任务表',
+    expand: '展开任务表',
+  },
 } as const
 
 export type MsgKey = NestedKeyOf<typeof zh>

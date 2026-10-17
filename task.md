@@ -162,6 +162,7 @@ tests/**                         与 src 镜像
 - [x] **T36** 任务详情改居中弹窗（呈现层重写 + 弹窗语义 / 焦点交接 / 遮罩关闭三出路） → done (2026-10-17, workbuddy:sess-1017f, commit: "T36: task details as a centred modal instead of a right side drawer")
 - [x] **T37** 交付收尾：示例库复位到默认 + 面板形态裁决（任务详情弹窗，里程碑 / 筛选 / 设置维持浮层） → done (2026-10-17, workbuddy:sess-1017g, commit: "docs: record panel-form decision and restore example vault to default")
 - [x] **T38** 全局视觉重设计（macOS 通透：振镜材质 / 发丝线分级 / 分段控件 / token 换值） → done (2026-10-17, qoder:sess-1017h, commit: "T38: macOS-translucent visual redesign")
+- [x] **T39** 甘特任务名标签（条内 + 深浅自适应）+ 左侧任务表可折叠 / 未排期为空自动收 → done (2026-10-17, qoder:sess-1017h, commit: "T39: gantt task-name labels and collapsible left table / unscheduled panel")
 
 ---
 
@@ -1073,6 +1074,38 @@ tests/**                         与 src 镜像
 
 ---
 
+### T39 · 甘特任务名标签 + 左侧任务表与未排期面板折叠
+
+**背景：** 用户拿甘特实拍（左右两块各画了红框）提出「这两部分是不是可以允许折叠，并且甘特图上最好显示一下任务名字吧」。按仓库惯例先澄清两个关键取舍，用户选定：① 任务名 = **A 条内 + 深浅自适应**（名字写在任务条内部，深色进度盖掉标签一半以上时标签翻成白字）；② 折叠 = **左表可折叠 + 未排期为空自动收**。仍是呈现层 + 视图层变更：领域模型、命令、持久化零改动。
+
+**依赖：** T19（`buildGanttModel` 拥有几何）/ T20（GanttView 投影）/ T22（未排期侧栏既有折叠）/ T23（GanttExporter 重投影同一张图）/ T38（色档与甘特左表列宽）
+
+**产出：** `src/controllers/ganttViewport.ts`（标签宽度 / 截断 / 深浅三个纯函数 + 折叠竖轨宽度常量）、`src/views/GanttCanvas.tsx`（`<text>` 标签层）、`src/views/GanttExporter.ts`（导出同一套标签）、`src/views/GanttView.tsx`（左表折叠状态 + 竖轨 + 未排期自动收）、`src/locales/{zh,en}.ts`（`ganttTable.*` 三键尾追加）、`tests/controllers/ganttLabels.test.ts`（新增 10 条）+ 三份既有视图测试、`e2e/04-gantt.spec.ts`（+3 条）
+
+**验收标准：**
+- [x] 任务条上显示任务名：条内为主，宽度不够时整条标签移到条右侧，**不留孤立省略号**（一个词都放不下时宁可移出也不截成 `…`）
+- [x] 深浅自适应：深色进度矩形横向盖过标签中点时标签用白字（`#FFFFFF`），否则用近黑（`#1D1D1F`）；里程碑与泳道菱形一律条外侧近黑
+- [x] 左侧任务表可折叠：工具栏单个 `gantt-table-toggle`（`aria-expanded` 驱动），折叠后留 30px 竖排「任务表」竖轨，画布当场拿回 314px 宽度
+- [x] 未排期为空时自动收成竖轨；**一旦用户手动展开，此后模型重算不再把它自动收回去**（覆盖态与派生态分离）
+- [x] 屏幕与导出一致：同一套标签函数被 `GanttCanvas` 与 `GanttExporter` 复用，导出 SVG 里同样有 `data-gantt-label`，且产物仍零 `var(` 引用
+- [x] 既有契约零破坏：虚拟化节点上限、`data-gantt-*` 选择器、任务条 `rx` / 描边、hover 淡出、`未排期` 面板既有 testid 全部保持
+- [x] `tsc` 0 / `npm test` **805 passed（45 files）** / `npm run e2e` **36 passed + 1 skipped** / `npm run build` **10/10**（产物 1119144 字节）
+- [x] 真 Chromium 实拍三屏目视核对（展开态 / 两侧全折叠 / 放大读标签）
+
+**实施注记（T39）**
+1. **标签的判定住在 controller，不住在视图**：宽度估算、截断、深浅三档判断都是 `ganttViewport.ts` 的纯函数，`GanttCanvas` 只负责摆 `<text>`。这样 `GanttExporter` 能原样复用——否则「屏幕上有名字、导出没名字」必然发生（导出是另写一遍 SVG 投影，T23 的固有结构）。
+2. **中文宽度用「宽字符 = 1 em，拉丁 = 0.55 em」估算**，不引 canvas `measureText`：导出路径跑在字符串拼接里拿不到 2D 上下文，jsdom 更没有（本仓库 `probePngSupport()` 已经因此打印过 "Not implemented"）。估算只服务「放得下吗 / 移到哪」，不参与布局契约，容得下偏差。
+3. **深浅判定的口径是"盖过一半"而不是"盖住多少"）**：`labelOverProgress(progressPx, labelPx)` 只比 `progressPx > labelPx / 2`。按百分比阈值会在标签移出条外（placement=outside）时误判，按像素则天然处理零宽与负宽（`labelPx <= 0` 直接返回 false）。
+4. **两条标签预算路径共用同一个 `resolveTaskLabel`**：先试条内（`barX + PAD` 起，预算 `barWidth - 2*PAD`），`truncateGanttLabel` 返回空串则退条外（`barX + barWidth + GAP`）。导出与画布得到的 `placement` 一致，e2e 因此能断言 `data-placement`。
+5. **折叠只有一个按钮，不是两个**：左表折叠放在工具栏最左（未排期面板自己已有折叠头），避免 `getByTestId` 与键盘焦点出现同名歧义。折叠后的 30px 竖轨是**装饰件**（`writing-mode: vertical-rl` + 表头高度的空白占位），不重复挂交互。
+6. **「自动收」与「手动展开」必须分开存**：未排期用 `unscheduledOverride: boolean | null`——`null` 表示跟随派生态（`model.unscheduled.length > 0`），非 `null` 表示用户已表态。写成 `useState(isEmpty)` 的话，加一条未排期任务就会把用户手动摊开的面板重新收掉；测试用 `view.rerender` 专门钉住这条。
+7. **折叠改变了 viewport 的可用宽度，必须让 ResizeObserver 依赖它**：`viewport.setViewportSize` 的 effect 从 `[viewport]` 改为 `[viewport, tablePanelWidth, unscheduledPanelWidth]`，否则收起来后画布右侧留一段无人认领的死区。列数在折叠后只会增不会减，e2e 用这个不变式兜住。
+8. **两个新增字面量色** `#1D1D1F` / `#FFFFFF` 是 SVG 呈现属性（`fill`），不解析 `var()`，与 `GANTT_*` 同族——已登记进 `docs/visual-audit.md` §3。
+
+**预估：** 0.5d（实际：同日完成）
+
+---
+
 ## 完成记录（只追加）
 
 <!-- 格式：
@@ -1177,3 +1210,5 @@ tests/**                         与 src 镜像
 - [2026-10-17] T37 | agent: workbuddy:sess-1017g | commit: "docs: record panel-form decision and restore example vault to default" | 验收: 2/2 | 备注: ①**背景**：T36 结尾留了两个待用户决定的问题，本次照用户回复收口（回复原文「1改过的就丢弃就好，回复到默认；2 维持浮层即可」）。②**示例库复位**：`git checkout -- example.vault/vault.json` 把用户上次用应用打开保存留下的版本（被压成一行、locale=en、留了一个筛选、ganttScale=week）恢复到 HEAD 默认（5 话题 / 15 任务 / 3 里程碑 / 7 依赖 / 1 张配图，locale=zh、day 刻度、无筛选）；同时删掉两处未跟踪产物——4 份 `.backup/vault-20261017-*.json` 自动快照与粘贴进来的 38KB 图 `assets/dJX1-bs9W9aNuGXyp7jmR.png`。删前已把这三样连同改前 vault.json 复制到 `%TEMP%/taskdone-discard-20261017/` 兜底（不随仓库提交）。③**只复位数据、不动夹具策略**：T36 给 `e2e/fixtures/exampleVault.ts` 加的 settings 覆写（locale/theme/ganttScale/lastFilter）与 `e2e/06` 的「新附件」现采基线**保留**——示例库虽已干净，但它仍是「会被应用真的打开保存的活文件」，夹具侧确定化是防复发，不该跟着数据一起撤。④**面板形态裁决**：里程碑 / 筛选 / 设置三面维持贴侧边浮层（`MilestonePanel` fixed+right:0；`FilterBar` 与 `SettingsPanel` 均「背板 fixed/inset:0/z-19 + 面板 fixed」），与任务详情的居中弹窗并存；已把 `docs/delivery.md` 已知限制第 5 节那条从「两者风格不同是有意为之」升级为「2026-10-17 产品方裁决，不再变更」，`docs/visual-audit.md` 第 5 节比对表同步。⑤**验证（复位后复跑）**：`tsc` 0 / `npm test` **785 passed (44 files)** / `npm run e2e` **33 passed + 1 skipped** / `npm run build` **10/10**——全绿说明夹具确实已与「用户库当前状态」解耦（复位前那种「用户玩过一次就 24/34 崩」的情形不会再现）。⑥**顺带**：`test-results/` 累积到 503 个文件（21M）触发环境批量删除护栏，已整体挪到系统临时区，未提交也无需提交（`.gitignore` 第 9 行本就忽略） | 遗留: 工作区仅剩一处未跟踪遗留 `scripts/resolve-conflict.mjs`（此前车道冲突并集工具，用户未要求处理，保留）
 
 - [2026-10-17] T38 | agent: qoder:sess-1017h | commit: "T38: macOS-translucent visual redesign" | 验收: 6/6 全部勾选 | 备注: ①**方向先裁决再动手**：按用户既有偏好（评审视觉先要效果图），先出同屏三案对比 + 推荐特写，用户定 **方案 A · macOS 通透** 与强调色 **系统靛 `#5E5CE6`**，之后才改代码。②**改动性质**：纯呈现层。领域 / 命令 / 持久化 / 契约四层零改动，`data-testid` 与 aria 属性一个没动。③**杠杆在 token**：换值全部集中在 `src/styles/theme.css`（含新增 `--oe-separator` / `--oe-card-border` / 三档 `--oe-material-*` / `--oe-accent-deep` / `--oe-focus-ring` 与圆角第三档、阴影四档），视图层只补「材质 / 分级 / 控件统一」三类；原生控件（select / range / checkbox / 滚动条 / `:focus-visible`）在全局 CSS 一次性收敛，不给每个下拉包自定义组件。④**刻意不 token 化的两类值**：`TOPIC_PALETTE` 12 色是用户库数据；SVG 呈现属性不解析 `var()`，`GANTT_*` 只同步字面量值、机制不动。⑤**顺带修的布局缺陷**：`BackupPanel` 原本是随流块排在 App 根（无遮罩、挤压主区）→ 补居中弹窗壳，新增 `backup-backdrop`、原 `backup-panel` 保留。⑥**实拍发现并修掉的排版问题**：甘特左表 `YYYY-MM-DD` 在 58px 列里溢出粘连 → 日期列 74（含 10 列距）、任务表 320→344、日期与进度加 `tabular-nums`。⑦**测试改动三处**（`GanttView` 的 `rx` 3→6、`ganttUnscheduled` 的分隔 token、`BoardView` 用例标题里过期 hex），前两条钉的正是被改掉的视觉契约，属预期。⑧**文档**：`docs/visual-audit.md` §2/§3/§4/§5 换值 + 新增 §8（诊断表、守住的约束、验证数字），spec §7 顶部加变更注记（字面色值 / 圆角 / 阴影档位由 token 取代，语义色仅三处等硬约束仍成立）。⑨**全量验证**：`tsc` 0 / `npm test` **785 passed (44 files)** / `npm run e2e` **33 passed + 1 skipped** / `npm run build` **10/10**（产物 1116201 字节，上限 1677721）+ 真 Chromium 五屏实拍目视核对 | 遗留: 深色主题未做（`--oe-material-*` 与阴影均为浅色值，切深色需另开任务）；`.oe-seg` 是本项目第一处样式语义 class，若后续要引入组件库需先约定它的去留
+
+- [2026-10-17] T39 | agent: qoder:sess-1017h | commit: "T39: gantt task-name labels and collapsible left table / unscheduled panel" | 验收: 8/8 全部勾选 | 备注: ①**方向先裁决再动手**：用户红框指出左表与未排期两块，按既有偏好先 AskUserQuestion 定两格——标签走 **条内 + 深浅自适应**、折叠走 **左表可折叠 + 未排期为空自动收**，然后才写测试。②**TDD 全程**：先落 `tests/controllers/ganttLabels.test.ts`（10 条，RED 报 9 个 "is not a function"）与三份视图测试（RED 报 null 标签查找 / 折叠宽度不符），实现后逐轮转绿。③**一条规则只写一遍**：标签宽度估算与截断进 `controllers/ganttViewport.ts` 纯函数，`GanttCanvas`（SVG `<text>`）与 `GanttExporter`（字符串投影）共用；顺带删掉 exporter 私有的 `approxTextWidth` / `truncateLabel`，全库从此只有一套截断口径。④**不用 `measureText`**：导出路径是字符串拼接、jsdom 无 2D 上下文，改用「宽字符 1 em / 拉丁 0.55 em」估算，估算只服务「放得下吗」，不进布局契约。⑤**RED 逼出的两个边界**：`truncateGanttLabel` 在放不下一个字符时曾返回孤零零一个 `…`（补用例后改返回空串，让标签整体退到条外）；深浅判定按「像素盖过中点」而非「进度百分比」，否则标签在条外时会误判成白字。⑥**折叠态与派生态分离**：未排期存 `unscheduledOverride: boolean | null`，`null` 跟随「有没有未排期任务」，用户手动表态后不再被模型重算收回；测试用 `view.rerender` 钉住。左表折叠只在工具栏放**一个** `gantt-table-toggle`（`aria-expanded`），折叠后是 30px 装饰竖轨，画布拿回 314px。⑦**ResizeObserver 依赖补全**：`setViewportSize` 的 effect 加上两个面板宽度，否则收起后画布右侧留死区；顺带把该 effect 移到 `model` memo 之后（原先引用了尚未声明的派生量）。⑧**i18n**：`ganttTable.*` 三键在 `zh.ts` 嵌套表与 `en.ts` 扁平表**尾部各追加一次**（两侧缺一即 tsc 报错）。⑨**顺带处理夹具污染**：e2e 会把 `example.vault/vault.json` 存成单行 minified（revision 7→12）并生成 `.backup/`，收尾时核对备份内容与 HEAD 逐字节相同后复位库文件、删除 `.backup/`（**不改 `loadExampleVaultFs()` 的覆写策略**——那是 T38 定的「夹具只覆写 settings 四个相位字段、不动磁盘」）| 遗留: ①e2e 跑完必然污染 `example.vault/`，根因是应用真的会 autosave 这个活夹具，后续可考虑给 e2e 挂临时目录副本；②标签估算系数按中文/拉丁两档，混排长英句会略偏窄（宁可提前退到条外）；③折叠状态不持久化（刷新回默认：左表展开、未排期跟随数据） | 全量验证: `tsc` 0 / `npm test` **805 passed (45 files)**（785 + 本任务 20）/ `npm run build` **10/10**（产物 1119144 字节，上限 1677721）/ `npm run e2e` **36 passed + 1 skipped**（新增 3 条：标签与左表文本一致且 `pointer-events: none`、折叠后 `gantt-canvas-scroll` 变宽 ≥280 且列数不减、未排期默认展开与手动折叠）+ 真 Chromium 三屏实拍（展开 / 两侧全折叠 / 放大读标签）

@@ -10,7 +10,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 
-import { clipArrows, clipHeaderCells, GANTT_HEADER_HEIGHT } from '../controllers/ganttViewport'
+import {
+  clipArrows,
+  clipHeaderCells,
+  estimateGanttLabelWidth,
+  GANTT_HEADER_HEIGHT,
+  labelOverProgress,
+  truncateGanttLabel,
+} from '../controllers/ganttViewport'
 import type { GanttColumnWindow, GanttRowWindow } from '../controllers/ganttViewport'
 import type { DependencyArrow, GanttBar, GanttModel, GanttRow } from '../domain/ganttModel'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
@@ -55,7 +62,7 @@ const ARROW_GAP = 10
 const TEXT_MUTED = 'var(--oe-text-muted)'
 const TEXT = 'var(--oe-text-secondary)'
 const DEFAULT_TOPIC_COLOR = '#5E5CE6'
-const MILESTONE_SIZE = 12
+export const MILESTONE_SIZE = 12
 export const GANTT_ARROW_MARKER_ID = 'oe-gantt-arrow-head'
 export const GANTT_ARROW_MARKER_CRITICAL_ID = 'oe-gantt-arrow-head-critical'
 export const GANTT_ARROW_MARKER_CYCLE_ID = 'oe-gantt-arrow-head-cycle'
@@ -91,6 +98,58 @@ export function topicBarFill(color: string | null): string {
 /** 进度内条：topic 色压暗 35%。 */
 export function topicProgressFill(color: string | null): string {
   return mixColor(topicBarFill(color), GANTT_PROGRESS_MIX)
+}
+
+/**
+ * T39 · 任务名标签。条内为主：进度深色盖掉标签一半以上时用纯白，否则用正文色；
+ * 条窄到连省略号都放不下时，整条标签挪到条右侧（与里程碑同一出路）。
+ *
+ * 两个色值同样是**字面 hex**（理由见文件头：SVG 呈现属性不解析 `var()`），
+ * 其中深色与 `--oe-text` 同值，改主题时两处一起改。
+ */
+export const GANTT_LABEL_FONT_SIZE = 11
+export const GANTT_LABEL_PAD_X = 6
+/** 条外标签与条右缘（或菱形右尖）的水平间距。 */
+export const GANTT_LABEL_OUTSIDE_GAP = 6
+export const GANTT_LABEL_FILL = '#1D1D1F'
+export const GANTT_LABEL_ON_PROGRESS_FILL = '#FFFFFF'
+
+export interface GanttLabelPlacement {
+  text: string
+  x: number
+  fill: string
+  placement: 'inside' | 'outside'
+}
+
+/** 输入坐标一律是已按 zoom 缩放后的画布像素。 */
+export function resolveTaskLabel(
+  label: string,
+  barX: number,
+  barWidth: number,
+  progressWidth: number,
+): GanttLabelPlacement {
+  const inner = barWidth - GANTT_LABEL_PAD_X * 2
+  const inside = truncateGanttLabel(label, inner, GANTT_LABEL_FONT_SIZE)
+  if (inside !== '') {
+    const width = Math.min(estimateGanttLabelWidth(inside, GANTT_LABEL_FONT_SIZE), inner)
+    return {
+      text: inside,
+      x: barX + GANTT_LABEL_PAD_X,
+      fill: labelOverProgress(progressWidth, width) ? GANTT_LABEL_ON_PROGRESS_FILL : GANTT_LABEL_FILL,
+      placement: 'inside',
+    }
+  }
+  return {
+    text: label,
+    x: barX + barWidth + GANTT_LABEL_OUTSIDE_GAP,
+    fill: GANTT_LABEL_FILL,
+    placement: 'outside',
+  }
+}
+
+/** 菱形右侧的标签起点 x。 */
+export function milestoneLabelX(cx: number): number {
+  return cx + MILESTONE_SIZE / 2 + GANTT_LABEL_OUTSIDE_GAP
 }
 
 /** 折线拐点（模型坐标）。 */
@@ -242,6 +301,29 @@ export function GanttArrowsLayer(props: GanttArrowsLayerProps) {
         )
       })}
     </g>
+  )
+}
+
+/**
+ * T39 · 标签文本：`pointer-events="none"`，不吃掉条体的 hover 命中（T21 的前后一跳高亮靠
+ * 事件目标最近的 `[data-gantt-bar]` 祖先判定，标签插在中间会让高亮失灵）。
+ * 淡出透明度与所在条一致，hover 时整行一起退到背景。
+ */
+function GanttBarLabel(props: GanttLabelPlacement & { id: string; y: number; opacity?: number }) {
+  return (
+    <text
+      data-gantt-label={props.id}
+      data-placement={props.placement}
+      x={props.x}
+      y={props.y}
+      fontSize={GANTT_LABEL_FONT_SIZE}
+      fill={props.fill}
+      opacity={props.opacity}
+      pointerEvents="none"
+      dominantBaseline="central"
+    >
+      {props.text}
+    </text>
   )
 }
 
@@ -564,14 +646,23 @@ export function GanttCanvas(props: GanttCanvasProps) {
                 />
                 {props.lane.map((row) =>
                   row.bar === null ? null : (
-                    <MilestoneDiamond
-                      key={`lane-${row.id}`}
-                      id={row.id}
-                      cx={(row.bar.x + row.bar.width / 2) * zoom}
-                      cy={laneHeight / 2}
-                      fill={topicBarFill(row.color)}
-                      title={row.label}
-                    />
+                    <g key={`lane-${row.id}`}>
+                      <MilestoneDiamond
+                        id={row.id}
+                        cx={(row.bar.x + row.bar.width / 2) * zoom}
+                        cy={laneHeight / 2}
+                        fill={topicBarFill(row.color)}
+                        title={row.label}
+                      />
+                      <GanttBarLabel
+                        id={row.id}
+                        text={row.label}
+                        x={milestoneLabelX((row.bar.x + row.bar.width / 2) * zoom)}
+                        y={laneHeight / 2}
+                        fill={GANTT_LABEL_FILL}
+                        placement="outside"
+                      />
+                    </g>
                   ),
                 )}
               </g>
@@ -633,6 +724,17 @@ export function GanttCanvas(props: GanttCanvasProps) {
                             pointerEvents="none"
                           />
                         ) : null}
+                        <GanttBarLabel
+                          id={row.id}
+                          y={row.bar.y + offset + row.bar.height / 2}
+                          opacity={dimOpacity}
+                          {...resolveTaskLabel(
+                            row.label,
+                            row.bar.x * zoom,
+                            row.bar.width * zoom,
+                            row.bar.progressWidth * zoom,
+                          )}
+                        />
                         {props.baselineVisible && row.baseline !== null ? (
                           <rect
                             data-gantt-baseline={row.id}
@@ -649,13 +751,23 @@ export function GanttCanvas(props: GanttCanvasProps) {
                       </>
                     ) : null}
                     {row.bar !== null && row.kind === 'milestone' ? (
-                      <MilestoneDiamond
-                        id={row.id}
-                        cx={(row.bar.x + row.bar.width / 2) * zoom}
-                        cy={row.bar.y + row.bar.height / 2 + offset}
-                        fill={topicBarFill(row.color)}
-                        title={row.label}
-                      />
+                      <>
+                        <MilestoneDiamond
+                          id={row.id}
+                          cx={(row.bar.x + row.bar.width / 2) * zoom}
+                          cy={row.bar.y + row.bar.height / 2 + offset}
+                          fill={topicBarFill(row.color)}
+                          title={row.label}
+                        />
+                        <GanttBarLabel
+                          id={row.id}
+                          text={row.label}
+                          x={milestoneLabelX((row.bar.x + row.bar.width / 2) * zoom)}
+                          y={row.bar.y + row.bar.height / 2 + offset}
+                          fill={GANTT_LABEL_FILL}
+                          placement="outside"
+                        />
+                      </>
                     ) : null}
                   </g>
                 )

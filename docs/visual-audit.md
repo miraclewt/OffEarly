@@ -55,7 +55,7 @@
 | 界面 chrome 色 | 20 个不同值 | 全部收敛为上表 token |
 | 语义色（仅三处） | 逾期红 / 阻塞橙 / 完成绿 | ✅ 红仅用于逾期与错误态；橙仅用于阻塞与安全模式；**没有第四种语义色**（T38 换档为 Apple 系统色，档位与数量不变） |
 | 话题分类色 `TOPIC_PALETTE` | 12 色 | **保持字面量**：写进 `vault.json` 的用户数据，且被测试断言长度与成员 |
-| SVG 呈现属性锁定的字面量 | 9 处 | **必须保持字面量**（见 §4） |
+| SVG 呈现属性锁定的字面量 | 9 处 → **11 处**（T39 新增任务名标签两档） | **必须保持字面量**（见 §4） |
 
 ### 为什么有一批色值不能 token 化
 
@@ -71,6 +71,7 @@ SVG 的**呈现属性**（`fill=` / `stroke=` 这类 XML attribute，区别于�
 | `LANE_FILL` / `TOPIC_ROW_FILL` | `#F7F7FA` / `#FAFAFC` | SVG `fill` |
 | `DEFAULT_TOPIC_COLOR` | `#5E5CE6` | 话题数据兜底色（与 `--oe-accent` 同值，但必须是字面量） |
 | 里程碑菱形 `stroke="#FFFFFF"` | `#FFFFFF` | SVG 呈现属性 |
+| `GANTT_LABEL_FILL` / `GANTT_LABEL_ON_PROGRESS_FILL`（T39 任务名标签） | `#1D1D1F` / `#FFFFFF` | SVG `fill`；浅底用近黑、深色进度盖过半时用白字，两档都是 `GanttCanvas` 与 `GanttExporter` 共用的常量（导出 markup 不得出现 `var(`，由测试钉住） |
 | `mixColor(..., target='#000000')` | `#000000` | 颜色计算基色，非样式 |
 
 已在 `GanttCanvas.tsx` 顶部写明这段约束，避免后来者「顺手改成变量」而让甘特图变黑。
@@ -179,3 +180,25 @@ SVG 的**呈现属性**（`fill=` / `stroke=` 这类 XML attribute，区别于�
 - `npm run e2e` → **33 passed + 1 skipped**（跳过项为既有的 dnd-kit `file://` 拖拽不稳定用例，与本次无关）
 - `npm run build` → **10/10**，产物 `dist/OffEarly.html` **1116201 字节**（上限 1677721）
 - 真 Chromium（`file://` + example.vault 夹具）实拍五屏目视核对：看板 / 甘特 / 任务详情弹窗 / 筛选浮层 / 设置浮层
+
+## 9. T39 · 甘特任务名标签与两块面板折叠（2026-10-17）
+
+**新增的两档字面量色**（已并入 §3 的「不能 token 化」清单）：标签近黑 `#1D1D1F`、进度上的白 `#FFFFFF`。
+`#1D1D1F` 取的是 `--oe-text` 那一档正文色，`#FFFFFF` 与里程碑菱形描边同值——两者都必须留字面量，因为标签是 SVG `fill` 属性。
+
+**没有破坏的规范**：
+- 语义色仍只有逾期红 / 阻塞橙 / 完成绿三处。标签两档是**正文色与纸白色**，不是第四种语义色。
+- 密度上限不变：标签写在任务条**内部**（11px，`pointer-events: none`），行高、列宽、任务表 344px 一个都没动；折叠只是把左表换成 30px 竖轨，不是新增一层结构。
+- 无左色条 / 顶线 / 渐变：竖轨是 `--oe-surface` 底 + 一条 `--oe-separator` 发丝线，文字用 `--oe-text-muted`。
+
+**折叠后的宽度账**（几何全部住在 `controllers/ganttViewport.ts`，视图只投影）：
+左表 344 → 竖轨 30（画布拿回 314px）；未排期 224 → 竖轨 36（拿回 188px）。
+两者都改变 `setViewportSize` 的可用宽度，所以 ResizeObserver 的依赖里必须带上这两个宽度，否则收起后画布右侧留死区。
+
+### 验证（2026-10-17 T39 后复跑）
+
+- `npx tsc --noEmit` → 0
+- `npx vitest run` → **805 passed（45 files）**
+- `npm run e2e` → **36 passed + 1 skipped**（跳过项同 §8，dnd-kit `file://` 拖拽不稳定）
+- `npm run build` → **10/10**，产物 `dist/OffEarly.html` **1119144 字节**（上限 1677721）
+- 真 Chromium 实拍三屏：默认展开 / 左表与未排期同时折叠 / 放大后读条内标签

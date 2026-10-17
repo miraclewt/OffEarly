@@ -18,6 +18,7 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactElement }
 import {
   GANTT_HEADER_HEIGHT,
   GANTT_OVERSCAN_ROWS,
+  GANTT_TABLE_RAIL_WIDTH,
   GANTT_TABLE_WIDTH,
   computeColumnWindow,
   computeRowWindow,
@@ -42,8 +43,8 @@ const INDIGO = 'var(--oe-accent)'
 const TOOLBAR_HEIGHT = 36
 
 /** T22 未排期侧栏：展开宽度 / 收起宽度；行高与画布行（model.rowHeight = 32）协调。 */
-const UNSCHEDULED_PANEL_WIDTH = 224
-const UNSCHEDULED_PANEL_COLLAPSED_WIDTH = 36
+export const UNSCHEDULED_PANEL_WIDTH = 224
+export const UNSCHEDULED_PANEL_COLLAPSED_WIDTH = 36
 /** topicId 为 null（跨话题/话题已删）时的中性色点，与 TaskCard 的 FAINT 同档。 */
 const NEUTRAL_DOT_COLOR = 'var(--oe-text-faint)'
 
@@ -100,33 +101,18 @@ export function GanttView(props: GanttViewProps) {
 
   const rootRef = useRef<HTMLDivElement | null>(null)
 
-  // T22：未排期侧栏折叠状态。本地 state 即可（不要求持久化）；默认展开，
-  // 让「补排期」入口始终可见（spec 5.4：未排期任务不能从进度视图消失）。
-  // 面板始终占位（展开 / 收起两种宽度），故画布可视宽度要相应扣减。
-  const [unscheduledOpen, setUnscheduledOpen] = useState(true)
-  const unscheduledPanelWidth = unscheduledOpen ? UNSCHEDULED_PANEL_WIDTH : UNSCHEDULED_PANEL_COLLAPSED_WIDTH
+  // T22 / T39：两侧面板的折叠状态，全部留本地 state（不进 vault.json，不跨会话）。
+  //
+  // 未排期面板：`override` 为 null 表示「用户没碰过开关」，此时按数据自动决定——
+  // 有未排期任务就展开（补排期入口不能藏起来，spec 5.4），一条都没有就收成竖轨，
+  // 别用一句「所有任务都已排期」白占 224px。一旦被点过，就永久听用户的，不再自动收。
+  const [unscheduledOverride, setUnscheduledOverride] = useState<boolean | null>(null)
+  // 左侧任务表：默认展开（画布行与表的对应关系是甘特读图的主线，收起是主动换来的宽度）。
+  const [tableOpen, setTableOpen] = useState(true)
 
   useEffect(() => {
     viewport.setViewportSize({ width: props.width, height: props.height })
   }, [viewport, props.width, props.height])
-
-  // 能测到真实容器尺寸就跟它走（file:// 单文件运行时）；测不到（jsdom）沿用注入值
-  useEffect(() => {
-    const element = rootRef.current
-    if (element === null || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver((entries) => {
-      const box = entries[0]?.contentRect
-      if (box === undefined || box.width <= 0) return
-      viewport.setViewportSize({
-        width: Math.max(0, box.width - GANTT_TABLE_WIDTH - unscheduledPanelWidth),
-        height: Math.max(0, box.height - TOOLBAR_HEIGHT),
-      })
-    })
-    observer.observe(element)
-    return () => {
-      observer.disconnect()
-    }
-  }, [viewport, unscheduledPanelWidth])
 
   // T21：「关键路径」开关，默认开。计算在领域层（criticalPath）已完成，这里只做投影与开关——
   // 关闭时不加粗、不展示计算结果。状态留在本组件（基线开关在 viewport 控制器里，两者刻意分开：
@@ -185,6 +171,30 @@ export function GanttView(props: GanttViewProps) {
   const laneHeight = lane.length > 0 ? rowHeight : 0
   const zoom = zoomFactorAt(state.zoomIndex[state.scale])
   const baselineVisible = state.baselineVisible
+
+  // 两侧面板实际占位宽度：收起后各让出一条竖轨，中间画布拿回的全部空间都要如实还给视口，
+  // 否则列窗口会按「表还在」的旧宽度算，画布右侧凭空少几列。
+  const unscheduledOpen = unscheduledOverride ?? model.unscheduled.length > 0
+  const unscheduledPanelWidth = unscheduledOpen ? UNSCHEDULED_PANEL_WIDTH : UNSCHEDULED_PANEL_COLLAPSED_WIDTH
+  const tablePanelWidth = tableOpen ? GANTT_TABLE_WIDTH : GANTT_TABLE_RAIL_WIDTH
+
+  // 能测到真实容器尺寸就跟它走（file:// 单文件运行时）；测不到（jsdom）沿用注入值
+  useEffect(() => {
+    const element = rootRef.current
+    if (element === null || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect
+      if (box === undefined || box.width <= 0) return
+      viewport.setViewportSize({
+        width: Math.max(0, box.width - tablePanelWidth - unscheduledPanelWidth),
+        height: Math.max(0, box.height - TOOLBAR_HEIGHT),
+      })
+    })
+    observer.observe(element)
+    return () => {
+      observer.disconnect()
+    }
+  }, [viewport, tablePanelWidth, unscheduledPanelWidth])
 
   /**
    * T23：三种格式共用一条出口。内容一律从当前模型投影（CSV 的行/日期/进度/依赖也直接读模型），
@@ -281,7 +291,11 @@ export function GanttView(props: GanttViewProps) {
   )
 
   const handleUnscheduledToggle = useCallback(() => {
-    setUnscheduledOpen((open) => !open)
+    setUnscheduledOverride(!unscheduledOpen)
+  }, [unscheduledOpen])
+
+  const handleTableToggle = useCallback(() => {
+    setTableOpen((open) => !open)
   }, [])
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
@@ -344,6 +358,28 @@ export function GanttView(props: GanttViewProps) {
           boxSizing: 'border-box',
         }}
       >
+        {/* T39：左侧任务表的折叠入口。放在工具栏最左（它管的就是这一侧），展开/收起两条出路共用同一个按钮，
+            收起后画布左缘只剩一条竖轨，竖轨本身不再放按钮——两个同名开关会让键盘焦点来回跳。 */}
+        <button
+          type="button"
+          data-testid="gantt-table-toggle"
+          aria-expanded={tableOpen}
+          aria-label={tableOpen ? t('ganttTable.collapse') : t('ganttTable.expand')}
+          onClick={handleTableToggle}
+          style={iconButtonStyle}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              display: 'inline-flex',
+              transform: tableOpen ? 'rotate(180deg)' : 'none',
+              transition: 'transform 120ms ease',
+            }}
+          >
+            <Icon name="chevron-right" />
+          </span>
+        </button>
+
         <div className="oe-seg">
           {scaleButton('day', t('gantt.scale.day'))}
           {scaleButton('week', t('gantt.scale.week'))}
@@ -529,18 +565,22 @@ export function GanttView(props: GanttViewProps) {
       </div>
 
       <div style={{ display: 'flex', height: canvasHeight, minHeight: 0 }}>
-        <GanttTable
-          lane={lane}
-          rows={visibleRows}
-          window={rowWindow}
-          rowHeight={rowHeight}
-          laneHeight={laneHeight}
-          bodyRowCount={body.length}
-          scrollTop={state.scrollTop}
-          width={GANTT_TABLE_WIDTH}
-          height={canvasHeight}
-          t={t}
-        />
+        {tableOpen ? (
+          <GanttTable
+            lane={lane}
+            rows={visibleRows}
+            window={rowWindow}
+            rowHeight={rowHeight}
+            laneHeight={laneHeight}
+            bodyRowCount={body.length}
+            scrollTop={state.scrollTop}
+            width={GANTT_TABLE_WIDTH}
+            height={canvasHeight}
+            t={t}
+          />
+        ) : (
+          <GanttTableRail label={t('ganttTable.rail')} height={canvasHeight} />
+        )}
         <GanttCanvas
           model={model}
           rows={visibleRows}
@@ -566,6 +606,45 @@ export function GanttView(props: GanttViewProps) {
           onSelect={handleUnscheduledSelect}
           t={t}
         />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * T39 · 任务表收起后的竖轨：30px 浅底 + 竖排「任务表」，顶部仍按表头高度留白，
+ * 这样收起 / 展开来回切时画布的横向起点不会跳。展开入口在工具栏，这里不放第二个开关。
+ */
+function GanttTableRail(props: { label: string; height: number }): ReactElement {
+  return (
+    <div
+      data-testid="gantt-table-rail"
+      style={{
+        flex: `0 0 ${GANTT_TABLE_RAIL_WIDTH}px`,
+        width: GANTT_TABLE_RAIL_WIDTH,
+        height: props.height,
+        display: 'flex',
+        flexDirection: 'column',
+        boxSizing: 'border-box',
+        background: 'var(--oe-surface)',
+        borderRight: '1px solid var(--oe-separator)',
+      }}
+    >
+      <div
+        style={{
+          height: GANTT_HEADER_HEIGHT,
+          flex: `0 0 ${GANTT_HEADER_HEIGHT}px`,
+          borderBottom: '1px solid var(--oe-separator)',
+          boxSizing: 'border-box',
+        }}
+      />
+      <div style={{ flex: 1, minHeight: 0, display: 'grid', placeItems: 'center' }}>
+        <span
+          aria-hidden="true"
+          style={{ writingMode: 'vertical-rl', fontSize: 11, letterSpacing: 2, color: TEXT_MUTED }}
+        >
+          {props.label}
+        </span>
       </div>
     </div>
   )

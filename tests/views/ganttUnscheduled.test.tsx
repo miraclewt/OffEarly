@@ -179,11 +179,48 @@ describe('T22-1 · 右侧折叠面板列出 unscheduled（标题 + topic 色点�
     expect(panel.getAttribute('style')).toContain('var(--oe-separator)')
   })
 
-  it('没有未排期任务时给一句空态文案', () => {
+  it('没有未排期任务时给一句空态文案（空面板默认收起，先展开再看）', () => {
     const allScheduled = makeVault([makeTask('s1', 'a', { start: '2026-10-05', due: '2026-10-09' })])
     const view = renderGantt({ vault: allScheduled })
+    fireEvent.click(view.getByTestId('gantt-unscheduled-toggle'))
     expect(view.getByTestId('gantt-unscheduled-empty').textContent).toBe('所有任务都已排期')
     expect(sidebarIds(view)).toEqual([])
+  })
+
+  it('未排期为空时自动收成竖轨；手动展开后不再被自动收回去', () => {
+    const allScheduled = makeVault([makeTask('s1', 'a', { start: '2026-10-05', due: '2026-10-09' })])
+    const view = renderGantt({ vault: allScheduled })
+    const panel = view.getByTestId('gantt-unscheduled-panel')
+
+    expect(panel.getAttribute('data-open')).toBe('false')
+    expect(view.getByTestId('gantt-unscheduled-toggle').getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(view.getByTestId('gantt-unscheduled-toggle'))
+    expect(panel.getAttribute('data-open')).toBe('true')
+
+    // 模型重算（换一份同样没有未排期任务的库）后仍保持手动展开的状态
+    view.rerender(
+      <GanttView
+        vault={makeVault([makeTask('s9', 'a', { start: '2026-10-05', due: '2026-10-09' })])}
+        filter={emptyFilter}
+        scale="day"
+        range={OCTOBER}
+        today={TODAY}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
+        t={t}
+      />,
+    )
+    expect(view.getByTestId('gantt-unscheduled-panel').getAttribute('data-open')).toBe('true')
+
+    // 手动收起后也不会因为「曾经自动收起过」被弹回来
+    fireEvent.click(view.getByTestId('gantt-unscheduled-toggle'))
+    expect(view.getByTestId('gantt-unscheduled-panel').getAttribute('data-open')).toBe('false')
+  })
+
+  it('有未排期任务时默认展开（补排期入口不能藏起来）', () => {
+    const view = renderGantt()
+    expect(view.getByTestId('gantt-unscheduled-panel').getAttribute('data-open')).toBe('true')
   })
 })
 

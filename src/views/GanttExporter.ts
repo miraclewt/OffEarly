@@ -16,7 +16,16 @@
 // 范围（spec 5.5「仅可见区 / 全时间跨度」）：复用 controllers/ganttViewport 的窗口计算
 // （只读引用，不改控制器），「仅可见区」按当前滚动位置与视口尺寸裁行列，缺视口状态时退化为全量。
 
-import { GANTT_HEADER_HEIGHT, clipArrows, clipHeaderCells, computeColumnWindow, computeRowWindow, splitMilestoneLane } from '../controllers/ganttViewport'
+import {
+  GANTT_HEADER_HEIGHT,
+  clipArrows,
+  clipHeaderCells,
+  computeColumnWindow,
+  computeRowWindow,
+  estimateGanttLabelWidth,
+  splitMilestoneLane,
+  truncateGanttLabel,
+} from '../controllers/ganttViewport'
 import type { DependencyArrow, GanttBar, GanttColumn, GanttModel, GanttRow } from '../domain/ganttModel'
 import {
   GANTT_ARROW_COLOR,
@@ -28,9 +37,13 @@ import {
   GANTT_CRITICAL_COLOR,
   GANTT_CRITICAL_STROKE_WIDTH,
   GANTT_CYCLE_COLOR,
+  GANTT_LABEL_FILL,
+  GANTT_LABEL_FONT_SIZE,
   GANTT_OFF_COLUMN_FILL,
   GANTT_TODAY_COLOR,
   dependencyArrowPath,
+  milestoneLabelX,
+  resolveTaskLabel,
   topicBarFill,
   topicProgressFill,
 } from './GanttCanvas'
@@ -267,29 +280,6 @@ function svgText(
   return element
 }
 
-/** 大致文本宽度（CJK 全宽、其余按 0.56em 估）；只用于 gutter 截断，不参与几何。 */
-function approxTextWidth(text: string, fontSize: number): number {
-  let width = 0
-  for (const char of text) {
-    width += (char.codePointAt(0) ?? 0) > 0x2e80 ? fontSize : fontSize * 0.56
-  }
-  return width
-}
-
-/** SVG 没有 text-overflow，gutter 里的长标题在这里按估算宽度截断并补省略号。 */
-function truncateLabel(text: string, maxWidth: number, fontSize: number): string {
-  if (approxTextWidth(text, fontSize) <= maxWidth) return text
-  let out = ''
-  let width = 0
-  for (const char of text) {
-    const charWidth = (char.codePointAt(0) ?? 0) > 0x2e80 ? fontSize : fontSize * 0.56
-    if (width + charWidth > maxWidth - fontSize) break
-    out += char
-    width += charWidth
-  }
-  return `${out}…`
-}
-
 /** 环上依赖（spec 5.3 降级）：两端落在同一个强连通分量里的箭头。 */
 function deriveCycleArrowIds(model: GanttModel): Set<string> {
   const ids = new Set<string>()
@@ -316,7 +306,7 @@ function appendRowSwatch(group: SVGElement, row: GanttRow, centreY: number): voi
 
 function appendRowLabel(group: SVGElement, row: GanttRow, centreY: number): void {
   appendRowSwatch(group, row, centreY)
-  const label = truncateLabel(row.label, EXPORT_GUTTER_WIDTH - 30, EXPORT_FONT_SIZE)
+  const label = truncateGanttLabel(row.label, EXPORT_GUTTER_WIDTH - 30, EXPORT_FONT_SIZE)
   group.appendChild(
     svgText(24, centreY + 4, label, {
       fill: row.kind === 'topic' ? EXPORT_TEXT_SECONDARY : EXPORT_TEXT,
@@ -344,6 +334,35 @@ function appendMilestoneDiamond(group: SVGElement, id: string, cx: number, cy: n
   titleEl.textContent = title
   diamond.appendChild(titleEl)
   group.appendChild(diamond)
+}
+
+/**
+ * T39 · 条内 / 条外标签。判定与画布共用 `resolveTaskLabel`（同一份截断 + 深浅规则），
+ * 否则「屏幕上有色块没名字，导出图上有名字」两边会各说各话。
+ * SVG 没有 dominant-baseline 的跨渲染器保证，这里沿用本文件既有写法：基线取行中心 +4。
+ */
+function appendBarLabel(group: SVGElement, row: GanttRow): void {
+  if (row.bar === null) return
+  const label = resolveTaskLabel(row.label, row.bar.x, row.bar.width, row.bar.progressWidth)
+  group.appendChild(
+    svgText(label.x, row.bar.y + row.bar.height / 2 + 4, label.text, {
+      'data-gantt-label': row.id,
+      'data-placement': label.placement,
+      'font-size': GANTT_LABEL_FONT_SIZE,
+      fill: label.fill,
+    }),
+  )
+}
+
+function appendMilestoneLabel(group: SVGElement, row: GanttRow, cx: number, cy: number): void {
+  group.appendChild(
+    svgText(milestoneLabelX(cx), cy + 4, row.label, {
+      'data-gantt-label': row.id,
+      'data-placement': 'outside',
+      'font-size': GANTT_LABEL_FONT_SIZE,
+      fill: GANTT_LABEL_FILL,
+    }),
+  )
 }
 
 /**
@@ -420,7 +439,7 @@ export function buildGanttSvgMarkup(model: GanttModel, options: GanttSvgOptions)
   const todayCentre = todayColumn === undefined ? null : todayColumn.x + todayColumn.width / 2
   const todayInScope = todayCentre !== null && todayCentre >= scope.originX && todayCentre <= scope.originX + scope.contentWidth
   if (todayCentre !== null && todayInScope) {
-    const labelWidth = approxTextWidth(todayLabel, EXPORT_HEADER_FONT_SIZE) + 10
+    const labelWidth = estimateGanttLabelWidth(todayLabel, EXPORT_HEADER_FONT_SIZE) + 10
     header.appendChild(
       svgEl('rect', { 'data-gantt-today-label': 'true', x: toX(todayCentre) - labelWidth / 2, y: 2, width: labelWidth, height: 16, rx: 6, fill: GANTT_TODAY_COLOR }),
     )
@@ -439,14 +458,10 @@ export function buildGanttSvgMarkup(model: GanttModel, options: GanttSvgOptions)
     lane.appendChild(svgEl('rect', { 'data-gantt-lane': 'true', x: 0, y: GANTT_HEADER_HEIGHT, width, height: scope.laneHeight, fill: EXPORT_LANE_FILL }))
     for (const row of scope.lane) {
       if (row.bar === null) continue
-      appendMilestoneDiamond(
-        lane,
-        row.id,
-        toX(row.bar.x + row.bar.width / 2),
-        GANTT_HEADER_HEIGHT + scope.laneHeight / 2,
-        topicBarFill(row.color),
-        row.label,
-      )
+      const cx = toX(row.bar.x + row.bar.width / 2)
+      const cy = GANTT_HEADER_HEIGHT + scope.laneHeight / 2
+      appendMilestoneDiamond(lane, row.id, cx, cy, topicBarFill(row.color), row.label)
+      appendMilestoneLabel(lane, row, cx, cy)
     }
     root.appendChild(lane)
   }
@@ -485,14 +500,10 @@ export function buildGanttSvgMarkup(model: GanttModel, options: GanttSvgOptions)
     if (row.bar === null) continue
 
     if (row.kind === 'milestone') {
-      appendMilestoneDiamond(
-        body,
-        row.id,
-        row.bar.x + row.bar.width / 2,
-        row.bar.y + row.bar.height / 2,
-        topicBarFill(row.color),
-        row.label,
-      )
+      const cx = row.bar.x + row.bar.width / 2
+      const cy = row.bar.y + row.bar.height / 2
+      appendMilestoneDiamond(body, row.id, cx, cy, topicBarFill(row.color), row.label)
+      appendMilestoneLabel(body, row, cx, cy)
       continue
     }
 
@@ -528,6 +539,7 @@ export function buildGanttSvgMarkup(model: GanttModel, options: GanttSvgOptions)
         }),
       )
     }
+    appendBarLabel(body, row)
 
     if (baselineVisible && row.baseline !== null) {
       body.appendChild(

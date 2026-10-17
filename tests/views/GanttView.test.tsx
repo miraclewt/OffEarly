@@ -8,10 +8,12 @@
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import dayjs from 'dayjs'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   GANTT_OVERSCAN_ROWS,
+  GANTT_TABLE_RAIL_WIDTH,
+  GANTT_TABLE_WIDTH,
   GANTT_ZOOM_STEPS,
   computeRowWindow,
   createGanttViewport,
@@ -25,10 +27,16 @@ import type { Dependency, Milestone, Task, Topic, Vault, WorkCalendar } from '..
 import { createI18n } from '../../src/locales/i18n'
 import {
   GANTT_BASELINE_FILL,
+  GANTT_HOVER_DIM_OPACITY,
+  GANTT_LABEL_FILL,
+  GANTT_LABEL_ON_PROGRESS_FILL,
+  GANTT_LABEL_OUTSIDE_GAP,
+  GANTT_LABEL_PAD_X,
   GANTT_OFF_COLUMN_FILL,
   GANTT_TODAY_COLOR,
+  MILESTONE_SIZE,
 } from '../../src/views/GanttCanvas'
-import GanttViewDefault, { GanttView } from '../../src/views/GanttView'
+import GanttViewDefault, { GanttView, UNSCHEDULED_PANEL_WIDTH } from '../../src/views/GanttView'
 
 const t = createI18n({ getLocale: () => 'zh', subscribe: () => () => {} }).t
 
@@ -422,6 +430,98 @@ describe('T20-3 · 任务条 / 里程碑 / 跨 topic 轨道', () => {
   })
 })
 
+describe('T39 · 任务名标签（条内为主，深浅自适应）', () => {
+  it('任务条内画任务名，且文本不抢 hover 命中', () => {
+    const view = renderGantt()
+    const bar = view.container.querySelector('[data-gantt-bar="t1"]')!
+    const label = view.container.querySelector('[data-gantt-label="t1"]')!
+
+    expect(label.textContent).toBe('任务 t1')
+    expect(label.getAttribute('pointer-events')).toBe('none')
+    expect(label.getAttribute('data-placement')).toBe('inside')
+    expect(Number(label.getAttribute('x'))).toBe(Number(bar.getAttribute('x')) + GANTT_LABEL_PAD_X)
+  })
+
+  it('进度铺满时标签用纯白，进度为零时用正文色', () => {
+    const filled = makeVault(
+      [
+        makeTask('full', 'a', { order: 'a0', start: '2026-10-05', due: '2026-10-20', progress: 100 }),
+        makeTask('zero', 'a', { order: 'b0', start: '2026-10-05', due: '2026-10-20', progress: 0 }),
+      ],
+      [],
+      [],
+    )
+    const view = render(
+      <GanttView
+        vault={filled}
+        filter={filter}
+        scale="day"
+        range={OCTOBER}
+        today={TODAY}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
+        t={t}
+      />,
+    )
+
+    expect(view.container.querySelector('[data-gantt-label="full"]')!.getAttribute('fill')).toBe(
+      GANTT_LABEL_ON_PROGRESS_FILL,
+    )
+    expect(view.container.querySelector('[data-gantt-label="zero"]')!.getAttribute('fill')).toBe(GANTT_LABEL_FILL)
+  })
+
+  it('条太窄放不下标签时移到条右侧，里程碑同理', () => {
+    const view = renderGantt()
+    const bar = view.container.querySelector('[data-gantt-bar="t3"]')!
+    const narrow = makeVault([makeTask('tiny', 'b', { order: 'a0', start: '2026-10-13', due: '2026-10-13' })], [], [])
+    const narrowView = render(
+      <GanttView
+        vault={narrow}
+        filter={filter}
+        scale="day"
+        range={OCTOBER}
+        today={TODAY}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
+        t={t}
+      />,
+    )
+
+    // 正常条仍然在条内
+    expect(bar).not.toBeNull()
+    expect(view.container.querySelector('[data-gantt-label="t3"]')!.getAttribute('data-placement')).toBe('inside')
+
+    const tinyBar = narrowView.container.querySelector('[data-gantt-bar="tiny"]')!
+    const tinyLabel = narrowView.container.querySelector('[data-gantt-label="tiny"]')!
+    expect(tinyLabel.getAttribute('data-placement')).toBe('outside')
+    expect(Number(tinyLabel.getAttribute('x'))).toBeGreaterThan(Number(tinyBar.getAttribute('x')) + Number(tinyBar.getAttribute('width')))
+  })
+
+  it('里程碑名画在菱形右侧', () => {
+    const view = renderGantt()
+    const label = view.container.querySelector('[data-gantt-label="m-topic"]')!
+    const row = modelOf().rows.find((r) => r.id === 'm-topic')!
+    const cx = row.bar!.x + row.bar!.width / 2
+
+    expect(label.textContent).toBe('话题内里程碑')
+    expect(label.getAttribute('data-placement')).toBe('outside')
+    expect(Number(label.getAttribute('x'))).toBe(cx + MILESTONE_SIZE / 2 + GANTT_LABEL_OUTSIDE_GAP)
+  })
+
+  it('标签跟随 hover 淡出', () => {
+    const view = renderGantt()
+    const body = view.getByTestId('gantt-canvas-svg').querySelector('[data-gantt-body]')!
+    const bar = view.container.querySelector('[data-gantt-bar="t1"]')!
+    const farLabel = view.container.querySelector('[data-gantt-label="t3"]')!
+    expect(farLabel.getAttribute('opacity')).toBeNull()
+
+    fireEvent.mouseOver(bar, { bubbles: true })
+    expect(body).toBeDefined()
+    expect(view.container.querySelector('[data-gantt-label="t1"]')!.getAttribute('opacity')).toBeNull()
+    expect(farLabel.getAttribute('opacity')).toBe(String(GANTT_HOVER_DIM_OPACITY))
+  })
+})
+
 describe('T20-4 · 基线开关', () => {
   it('默认不渲染基线；开启后任务条下方出现细灰条，关闭后消失', () => {
     const view = renderGantt()
@@ -515,6 +615,58 @@ describe('T20-6 · 可挂载性与外部 props', () => {
     expect(view.getByTestId('gantt-view')).toBeDefined()
     expect(view.container.querySelectorAll('[data-gantt-row]')).toHaveLength(0)
     expect(view.getByTestId('gantt-empty')).toBeDefined()
+  })
+})
+
+describe('T39 · 左侧任务表折叠', () => {
+  it('折叠后任务表整块消失，只剩一条竖轨上的开关', () => {
+    const view = renderGantt()
+    expect(view.getByTestId('gantt-table')).toBeDefined()
+
+    fireEvent.click(view.getByTestId('gantt-table-toggle'))
+    expect(view.queryByTestId('gantt-table')).toBeNull()
+    expect(view.getByTestId('gantt-table-toggle').getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(view.getByTestId('gantt-table-toggle'))
+    expect(view.getByTestId('gantt-table')).toBeDefined()
+    expect(view.getByTestId('gantt-table-toggle').getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('折叠让画布变宽：视口宽度按竖轨而不是任务表宽扣减', () => {
+    type RectEntry = { contentRect: { width: number; height: number } }
+    const callbacks: ((entries: RectEntry[]) => void)[] = []
+    class FakeObserver {
+      private readonly callback: (entries: RectEntry[]) => void
+      constructor(callback: (entries: RectEntry[]) => void) {
+        this.callback = callback
+        callbacks.push(callback)
+      }
+
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {
+        const index = callbacks.indexOf(this.callback)
+        if (index >= 0) callbacks.splice(index, 1)
+      }
+    }
+    vi.stubGlobal('ResizeObserver', FakeObserver)
+
+    const viewport = createGanttViewport({ scale: 'day' })
+    const view = renderGantt({ viewport })
+    const fire = (): void => {
+      act(() => {
+        for (const callback of [...callbacks]) callback([{ contentRect: { width: 1000, height: 500 } }])
+      })
+    }
+
+    fire()
+    expect(viewport.getState().width).toBe(1000 - GANTT_TABLE_WIDTH - UNSCHEDULED_PANEL_WIDTH)
+
+    fireEvent.click(view.getByTestId('gantt-table-toggle'))
+    fire()
+    expect(viewport.getState().width).toBe(1000 - GANTT_TABLE_RAIL_WIDTH - UNSCHEDULED_PANEL_WIDTH)
+
+    vi.unstubAllGlobals()
   })
 })
 

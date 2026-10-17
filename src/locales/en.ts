@@ -326,4 +326,8 @@ export const en: Record<MsgKey, string> = {
   'settingsPanel.aboutRevision': 'Revision',
   'settingsPanel.aboutVersion': 'Version',
   'settingsPanel.aboutCounts': '{tasks} tasks · {topics} topics · {milestones} milestones',
+  // T39 尾部追加：甘特图左侧任务表折叠
+  'ganttTable.rail': 'Tasks',
+  'ganttTable.collapse': 'Collapse task table',
+  'ganttTable.expand': 'Expand task table',
 }

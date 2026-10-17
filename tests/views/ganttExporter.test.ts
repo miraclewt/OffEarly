@@ -26,6 +26,8 @@ import {
   GANTT_ARROW_MARKER_ID,
   GANTT_BASELINE_FILL,
   GANTT_CRITICAL_COLOR,
+  GANTT_LABEL_ON_PROGRESS_FILL,
+  GANTT_LABEL_PAD_X,
   GANTT_OFF_COLUMN_FILL,
   GANTT_TODAY_COLOR,
 } from '../../src/views/GanttCanvas'
@@ -210,6 +212,29 @@ describe('buildGanttSvgMarkup', () => {
     const withoutNamespace = markup.replace(/xmlns(:\w+)?="[^"]*"/g, '')
     expect(withoutNamespace).not.toMatch(/https?:\/\//)
     expect(withoutNamespace).not.toContain('blob:')
+  })
+
+  it('T39 · 任务条与里程碑上有名字标签，判定与画布同一套（导出图不再只有色块）', () => {
+    const { markup } = buildGanttSvgMarkup(BASE_MODEL, { range: 'full' })
+    const doc = new DOMParser().parseFromString(markup, 'image/svg+xml')
+    const row = BASE_MODEL.rows.find((r) => r.id === 't1')!
+
+    const label = doc.querySelector('[data-gantt-label="t1"]')
+    expect(label).not.toBeNull()
+    expect(label!.textContent).toBe('任务 t1')
+    expect(label!.getAttribute('data-placement')).toBe('inside')
+    // t1 进度 50%、标签短 → 整段落在深色进度上 → 纯白
+    expect(label!.getAttribute('fill')).toBe(GANTT_LABEL_ON_PROGRESS_FILL)
+    expect(Number(label!.getAttribute('x'))).toBe(row.bar!.x + GANTT_LABEL_PAD_X)
+
+    // 跨话题里程碑：菱形右侧
+    const milestone = doc.querySelector('[data-gantt-label="m1"]')
+    expect(milestone).not.toBeNull()
+    expect(milestone!.getAttribute('data-placement')).toBe('outside')
+    expect(milestone!.textContent).toBe('里程碑 m1')
+
+    // 标签文字同样是内联属性色，不带 var()
+    expect(markup).not.toContain('var(--')
   })
 
   it('把模型投影成图：表头 / 任务条 / 进度 / 今日线 / 菱形里程碑 / 箭头 / 周末底纹', () => {

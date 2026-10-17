@@ -90,3 +90,69 @@ test('未排期任务不画条（进折叠面板而非画布）', async ({ page 
   expect(await page.locator('[data-gantt-row="task-report-14"]').count()).toBe(0)
   expect(await page.locator('[data-gantt-row="task-report-15"]').count()).toBe(0)
 })
+
+test('任务名画在条上，文字与左侧任务表同源', async ({ page }) => {
+  await openGantt(page)
+
+  expect(await page.locator('[data-gantt-label]').count()).toBeGreaterThan(0)
+
+  // 条内标签逐条比对：去掉省略号后的文本必须是左表同一行文字的开头
+  // （两边的文本都来自 GanttRow.label，标签只是按估宽截断）
+  const inside = page.locator('[data-gantt-label][data-placement="inside"]')
+  const count = Math.min(await inside.count(), 5)
+  expect(count).toBeGreaterThan(0)
+  for (let index = 0; index < count; index += 1) {
+    const label = inside.nth(index)
+    const id = await label.getAttribute('data-gantt-label')
+    const text = ((await label.textContent()) ?? '').replace(/…$/, '')
+    const rowText = (await page.locator(`[data-gantt-table-row="${id}"]`).textContent()) ?? ''
+    expect(text.length).toBeGreaterThan(0)
+    expect(rowText.startsWith(text)).toBe(true)
+  }
+
+  // 标签不吃事件：条体的 hover 命中不能被它挡住
+  expect(await inside.first().evaluate((node) => getComputedStyle(node).pointerEvents)).toBe('none')
+})
+
+test('左侧任务表可折叠，收起后画布真的变宽', async ({ page }) => {
+  await openGantt(page)
+
+  const toggle = page.getByTestId('gantt-table-toggle')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByTestId('gantt-table')).toBeVisible()
+
+  // 注意量的必须是**滚动视口**而不是 svg 本身：svg 宽度等于内容宽（model.width × zoom），
+  // 内容比视口宽时它不随容器变宽，只有外层滚动容器会。
+  const before = await page.getByTestId('gantt-canvas-scroll').boundingBox()
+  expect(before).not.toBeNull()
+  const columnsBefore = await page.locator('[data-gantt-col]').count()
+
+  await toggle.click()
+  await expect(page.getByTestId('gantt-table')).toHaveCount(0)
+  await expect(page.getByTestId('gantt-table-rail')).toBeVisible()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+  const after = await page.getByTestId('gantt-canvas-scroll').boundingBox()
+  expect(after).not.toBeNull()
+  // 让出的宽度 = 任务表宽 − 竖轨宽
+  expect(after!.width - before!.width).toBeGreaterThanOrEqual(280)
+
+  // 视口变宽 → 列窗口确实多装了列（虚拟化的列数由视口宽决定）
+  const columnsAfter = await page.locator('[data-gantt-col]').count()
+  expect(columnsAfter).toBeGreaterThanOrEqual(columnsBefore)
+
+  await toggle.click()
+  await expect(page.getByTestId('gantt-table')).toBeVisible()
+  await expect(page.getByTestId('gantt-table-rail')).toHaveCount(0)
+})
+
+test('未排期面板：有未排期任务时默认展开，点一下收成竖轨', async ({ page }) => {
+  await openGantt(page)
+
+  const panel = page.getByTestId('gantt-unscheduled-panel')
+  // example.vault 里确实有未排期任务（上面那条用例刚验过），所以默认必须是展开的
+  await expect(panel).toHaveAttribute('data-open', 'true')
+
+  await page.getByTestId('gantt-unscheduled-toggle').click()
+  await expect(panel).toHaveAttribute('data-open', 'false')
+})

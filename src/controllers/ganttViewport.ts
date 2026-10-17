@@ -21,6 +21,8 @@ export const GANTT_MAX_ZOOM_INDEX = GANTT_ZOOM_STEPS.length - 1
 export const GANTT_HEADER_HEIGHT = 40
 /** 左侧任务表宽度：任务列 144 + 开始/结束各 74 + 进度 52。 */
 export const GANTT_TABLE_WIDTH = 344
+/** T39 · 任务表折叠后留下的竖轨宽度：只够放一条 11px 竖排「任务」，画布在此拿回 314px。 */
+export const GANTT_TABLE_RAIL_WIDTH = 30
 
 export const GANTT_DEFAULT_CANVAS_WIDTH = 960
 export const GANTT_DEFAULT_CANVAS_HEIGHT = 480
@@ -210,6 +212,63 @@ export function splitMilestoneLane(rows: readonly GanttRow[]): { lane: GanttRow[
     else body.push(row)
   }
   return { lane, body }
+}
+
+/**
+ * T39 · 任务名标签的宽度估算。
+ *
+ * 度量走「估」而不是 `getComputedTextLength()`：甘特要在 1000 行规模下每帧投影，
+ * 而且 `GanttExporter` 是脱离 DOM 用 `createElementNS` 重画一遍 SVG 的，那里根本没有可
+ * 度量的挂载点。CJK / 假名 / 谚文 / 全角按 1em，拉丁数字标点按 0.55em，误差在截断
+ * 口径内可接受（截断偏保守，宁可早点加省略号，也不让字溢出条外）。
+ */
+const LABEL_LATIN_RATIO = 0.55
+const LABEL_ELLIPSIS = '…'
+
+function isWideLabelChar(ch: string): boolean {
+  const code = ch.codePointAt(0) ?? 0
+  // 省略号在 CJK 混排里按整宽排，截断预算必须按 1em 留位
+  if (code === 0x2026) return true
+  return (
+    (code >= 0x1100 && code <= 0x115f) ||
+    (code >= 0x2e80 && code <= 0x303e) ||
+    (code >= 0x3041 && code <= 0x33ff) ||
+    (code >= 0x3400 && code <= 0x9fff) ||
+    (code >= 0xa000 && code <= 0xa4cf) ||
+    (code >= 0xac00 && code <= 0xd7a3) ||
+    (code >= 0xf900 && code <= 0xfaff) ||
+    (code >= 0xfe30 && code <= 0xfe4f) ||
+    (code >= 0xff00 && code <= 0xff60) ||
+    (code >= 0xffe0 && code <= 0xffe6) ||
+    code >= 0x20000
+  )
+}
+
+export function estimateGanttLabelWidth(text: string, fontSize: number): number {
+  let units = 0
+  for (const ch of text) units += isWideLabelChar(ch) ? 1 : LABEL_LATIN_RATIO
+  return units * fontSize
+}
+
+/** 超出预算则截断补 `…`；一个词都放不下时返回空串（宁可不画标签，也不留孤立省略号）。 */
+export function truncateGanttLabel(text: string, maxWidthPx: number, fontSize: number): string {
+  if (estimateGanttLabelWidth(text, fontSize) <= maxWidthPx) return text
+  const budget = maxWidthPx - fontSize
+  let used = 0
+  let out = ''
+  for (const ch of text) {
+    const width = isWideLabelChar(ch) ? fontSize : fontSize * LABEL_LATIN_RATIO
+    if (used + width > budget + 1e-9) break
+    used += width
+    out += ch
+  }
+  return out === '' ? '' : `${out}${LABEL_ELLIPSIS}`
+}
+
+/** 深色进度条盖掉标签一半以上时，标签要用浅色字才读得清。 */
+export function labelOverProgress(progressPx: number, labelPx: number): boolean {
+  if (labelPx <= 0) return false
+  return progressPx > labelPx / 2
 }
 
 export function createGanttViewport(options: GanttViewportOptions = {}): GanttViewportController {
