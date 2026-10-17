@@ -2,6 +2,10 @@
 
 > 把事做完，早点下班。 / Finish well. Leave early.
 
+**[在线体验](https://miraclewt.github.io/OffEarly/OffEarly.html)** · **[项目主页](https://miraclewt.github.io/OffEarly/)** · [用户手册](docs/user-guide.md) · [交付说明](docs/delivery.md)
+
+![OffEarly 看板视图](site/assets/board.png)
+
 OffEarly 是一个**单文件、离线、数据自持**的个人任务管理工具：看板 + 甘特图 + 思维导图三视图合一，交付物就是一个 HTML 文件——双击 `dist/OffEarly.html` 即可运行，不需要服务器、不联网、零外部请求，所有数据都存在你自己选定的文件夹里。
 
 ## 特性一览
@@ -44,10 +48,13 @@ npm run dev          # Vite 开发服务器
 npm test             # Vitest 单元测试（tests/ 下，jsdom / node）
 npm run e2e          # Playwright 端到端测试（真实 Chromium 跑 file://）
 npm run build        # 构建：lint:emoji → tsc --noEmit → vite build → 产物校验
+npm run capture      # 刷新落地页素材：抓 4 张真实界面图 + 把产物拷进 site/
 npm run preview      # 预览构建产物
 ```
 
 构建管线内置了十项产物校验（`npm run verify`）：单文件、零外链、favicon 内联、禁 emoji 等，全部通过才产出 `dist/OffEarly.html`。
+
+`npm run capture` 依赖已存在的 `dist/OffEarly.html`，所以先 `npm run build` 再跑它。
 
 ## 项目结构
 
@@ -65,6 +72,9 @@ src/
 └── styles/                   主题与样式（theme.css 为视觉 token 唯一来源）
 tests/                        单元测试（按 domain / controllers / persistence / views 分层）
 e2e/                          Playwright 用例（01 启动 → 09 思维导图）
+capture/                      落地页素材抓取（独立 Playwright 配置，不混进回归套件）
+site/                         落地页：单文件 index.html + 截图 + 随站产物，Pages 发布这个目录
+.github/workflows/            Pages 部署工作流
 scripts/                      构建校验、禁 emoji 检查、冲突处理脚本
 docs/                         交付说明、用户手册、视觉审计、设计稿
 brand/                        图标与 Logo

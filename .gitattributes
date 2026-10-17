@@ -8,6 +8,10 @@
 *.png binary
 *.ico binary
 
+# 随落地页发布的这份产物是 dist/OffEarly.html 的逐字节副本（npm run capture 拷过去的），
+# 换行归一化会让它和 dist 不再一致，按二进制存。
+site/OffEarly.html binary
+
 # 其余文本文件归一化入库为 LF（checkout 行为仍由各机器的 core.autocrlf 决定），
 # 避免不同机器提交时把 CRLF 混进索引。
 * text=auto

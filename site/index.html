@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OffEarly · 把事做完，早点下班</title>
+<meta name="description" content="看板、甘特图、思维导图装进一个 HTML 文件。不联网、不装东西、不交数据，数据全在你自己选的文件夹里。">
+<meta property="og:title" content="OffEarly · 把事做完，早点下班">
+<meta property="og:description" content="单文件、离线、数据自持的看板 + 甘特图 + 思维导图。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://miraclewt.github.io/OffEarly/">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235E5CE6' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M17.34 14.96 A7 7 0 1 1 17.34 9.04'/><path d='M11 12 V7.5'/><path d='M11 12 L12.75 15.03'/><path d='M19 12 H22.5'/><path d='M20.6 10.1 L22.5 12 L20.6 13.9'/></svg>">
+<style>
+:root {
+  --ink: #1d1d1f;
+  --ink-2: #424245;
+  --muted: #6e6e73;
+  --bg: #ffffff;
+  --bg-soft: #f5f5f7;
+  --accent: #5e5ce6;
+  --accent-ink: #41409d;
+  --accent-soft: #ececfb;
+  --hair: rgba(0, 0, 0, .08);
+  --radius: 18px;
+  --shadow-shot: 0 2px 4px rgba(0, 0, 0, .04), 0 18px 40px -12px rgba(0, 0, 0, .14), 0 48px 96px -32px rgba(0, 0, 0, .10);
+  --max: 1120px;
+  --read: 660px;
+}
+
+* { box-sizing: border-box }
+
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto } }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro SC", "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  font-size: 17px;
+  line-height: 1.6;
+  letter-spacing: -.01em;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit }
+
+/* ---------- 顶栏 ---------- */
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 56px;
+  padding: 0 clamp(20px, 4vw, 40px);
+  background: rgba(255, 255, 255, .72);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--hair);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 600;
+  font-size: 16px;
+  text-decoration: none;
+  letter-spacing: -.02em;
+}
+.brand svg { display: block }
+
+.nav-links {
+  display: flex;
+  gap: 26px;
+  margin-left: auto;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.nav-links a { text-decoration: none }
+.nav-links a:hover { color: var(--ink) }
+
+@media (max-width: 860px) { .nav-links { display: none } }
+
+/* ---------- 按钮 ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 22px;
+  border-radius: 980px;
+  font-size: 15px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color .2s ease, color .2s ease, border-color .2s ease;
+}
+.btn-primary { background: var(--accent); color: #fff }
+.btn-primary:hover { background: #4b49d6 }
+.btn-ghost { border: 1px solid var(--hair); color: var(--accent-ink) }
+.btn-ghost:hover { border-color: var(--accent); background: var(--accent-soft) }
+.btn-sm { padding: 7px 16px; font-size: 14px }
+
+/* ---------- 版面 ---------- */
+
+section { padding: clamp(72px, 11vw, 132px) clamp(20px, 4vw, 40px) }
+.wrap { max-width: var(--max); margin: 0 auto }
+.soft { background: var(--bg-soft) }
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 18px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+/* 色点 + 可读文字标签，不用左色条那类通知栏式装饰 */
+.eyebrow::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+h1, h2, h3 { margin: 0; letter-spacing: -.03em; line-height: 1.12; font-weight: 600 }
+h1 { font-size: clamp(42px, 7.2vw, 76px) }
+h2 { font-size: clamp(30px, 4.6vw, 48px) }
+h3 { font-size: 19px; letter-spacing: -.02em; line-height: 1.35 }
+
+.lede {
+  max-width: var(--read);
+  margin: 22px 0 0;
+  font-size: clamp(17px, 2vw, 21px);
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.center { text-align: center }
+.center .lede { margin-left: auto; margin-right: auto }
+
+/* ---------- 首屏 ---------- */
+
+.hero { padding-top: clamp(64px, 9vw, 108px); padding-bottom: 0 }
+.hero .wrap { text-align: center }
+.hero h1 { max-width: 15ch; margin: 0 auto }
+.hero .lede { margin-left: auto; margin-right: auto }
+
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: center;
+  margin-top: 34px;
+}
+
+.fineprint {
+  margin: 18px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.fineprint span + span::before { content: " · "; margin: 0 2px }
+
+/* ---------- 截图框 ---------- */
+
+.shot {
+  margin: clamp(48px, 7vw, 84px) auto 0;
+  max-width: 1080px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--hair);
+  box-shadow: var(--shadow-shot);
+}
+.shot-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--hair);
+  background: var(--bg-soft);
+}
+.shot-bar i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .13);
+}
+.shot-url {
+  flex: 1;
+  margin-left: 8px;
+  padding: 3px 12px;
+  max-width: 320px;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid var(--hair);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shot img { display: block; width: 100%; height: auto }
+
+/* ---------- 三主张 ---------- */
+
+.claims {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: clamp(44px, 6vw, 68px);
+  background: var(--hair);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+@media (max-width: 760px) { .claims { grid-template-columns: 1fr } }
+
+.claim {
+  padding: clamp(26px, 3.4vw, 40px);
+  background: var(--bg);
+}
+.claim b {
+  display: block;
+  font-size: clamp(24px, 3.2vw, 32px);
+  font-weight: 600;
+  letter-spacing: -.03em;
+}
+.claim p { margin: 12px 0 0; font-size: 15px; color: var(--muted); line-height: 1.6 }
+
+/* ---------- 图文段 ---------- */
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 380px) minmax(0, 1fr);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: start;
+}
+@media (max-width: 940px) { .split { grid-template-columns: 1fr } }
+
+.split .copy { position: sticky; top: 96px }
+@media (max-width: 940px) { .split .copy { position: static } }
+
+.split .shot { margin-top: 0 }
+
+.points {
+  margin: 26px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 13px;
+}
+.points li {
+  position: relative;
+  padding-left: 22px;
+  font-size: 15.5px;
+  line-height: 1.62;
+  color: var(--ink-2);
+}
+.points li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: .62em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* 键位表 */
+.keys {
+  margin: 26px 0 0;
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14.5px;
+}
+.keys th, .keys td {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--hair);
+  text-align: left;
+  vertical-align: baseline;
+}
+.keys th { width: 122px; font-weight: 500 }
+.keys td { color: var(--muted) }
+kbd {
+  display: inline-block;
+  padding: 2px 7px 3px;
+  border-radius: 6px;
+  border: 1px solid var(--hair);
+  border-bottom-width: 2px;
+  background: var(--bg-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+/* ---------- 卡片格 ---------- */
+
+.grid-4 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+  margin-top: clamp(40px, 5vw, 60px);
+}
+@media (max-width: 700px) { .grid-4 { grid-template-columns: 1fr } }
+
+.card {
+  padding: clamp(24px, 3vw, 34px);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.card p { margin: 11px 0 0; font-size: 15px; color: var(--muted); line-height: 1.62 }
+
+/* ---------- 步骤 ---------- */
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(24px, 3vw, 40px);
+  margin-top: clamp(44px, 6vw, 68px);
+  counter-reset: step;
+}
+@media (max-width: 820px) { .steps { grid-template-columns: 1fr } }
+
+.step { counter-increment: step }
+.step::before {
+  content: counter(step, cjk-ideographic);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 16px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+.step p { margin: 11px 0 0; font-size: 15px; color: var(--muted); line-height: 1.62 }
+
+.note {
+  max-width: var(--read);
+  margin: clamp(40px, 5vw, 56px) auto 0;
+  padding: 20px 24px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  font-size: 15px;
+  line-height: 1.62;
+  color: var(--accent-ink);
+  text-align: center;
+}
+
+/* ---------- 页脚 ---------- */
+
+footer {
+  padding: 56px clamp(20px, 4vw, 40px) 72px;
+  border-top: 1px solid var(--hair);
+  background: var(--bg-soft);
+  font-size: 14px;
+  color: var(--muted);
+}
+.foot {
+  max-width: var(--max);
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 32px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.foot nav { display: flex; gap: 22px }
+.foot a { color: var(--accent-ink); text-decoration: none }
+.foot a:hover { text-decoration: underline }
+.foot .req { flex-basis: 100%; margin-top: 10px; font-size: 13px }
+
+/* ---------- 入场动效 ----------
+   只给首屏，且用 CSS animation 而非「默认 opacity:0 + JS 点亮」：
+   动画不跑（禁用 JS、打印、prefers-reduced-motion）时元素停在终态，内容不会被藏起来。 */
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(18px) }
+  to { opacity: 1; transform: none }
+}
+
+.hero .eyebrow, .hero h1, .hero .lede, .hero .cta-row, .hero .fineprint, .hero .shot {
+  animation: rise .8s cubic-bezier(.16, 1, .3, 1) both;
+}
+.hero h1 { animation-delay: .06s }
+.hero .lede { animation-delay: .12s }
+.hero .cta-row { animation-delay: .18s }
+.hero .fineprint { animation-delay: .24s }
+.hero .shot { animation-delay: .3s }
+
+@media (prefers-reduced-motion: reduce) {
+  .hero .eyebrow, .hero h1, .hero .lede, .hero .cta-row, .hero .fineprint, .hero .shot {
+    animation: none;
+  }
+}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <a class="brand" href="#top">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#5e5ce6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M17.34 14.96 A7 7 0 1 1 17.34 9.04"/><path d="M11 12 V7.5"/><path d="M11 12 L12.75 15.03"/><path d="M19 12 H22.5"/><path d="M20.6 10.1 L22.5 12 L20.6 13.9"/>
+    </svg>
+    OffEarly
+  </a>
+  <nav class="nav-links">
+    <a href="#gantt">甘特图</a>
+    <a href="#mindmap">思维导图</a>
+    <a href="#detail">任务与笔记</a>
+    <a href="#safety">数据安全</a>
+    <a href="#start">怎么开始</a>
+  </nav>
+  <a class="btn btn-primary btn-sm" href="./OffEarly.html">打开在线版</a>
+</header>
+
+<main id="top">
+
+<section class="hero">
+  <div class="wrap">
+    <p class="eyebrow">单文件 · 离线 · 数据自持</p>
+    <h1>把事做完，<br>早点下班。</h1>
+    <p class="lede">看板、甘特图、思维导图装进一个 HTML 文件。不联网、不装东西、不交数据——点开就能用，资料全在你自己选的文件夹里。</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="./OffEarly.html">打开在线版</a>
+      <a class="btn btn-ghost" href="https://github.com/miraclewt/OffEarly">查看源码</a>
+    </div>
+    <p class="fineprint"><span>约 1.1 MB</span><span>无需安装</span><span>无需账号</span><span>Chrome / Edge 113+</span></p>
+  </div>
+
+  <figure class="shot">
+    <div class="shot-bar"><i></i><i></i><i></i><span class="shot-url">file:///…/OffEarly.html</span></div>
+    <img src="assets/board.png" alt="OffEarly 看板视图：待办、进行中、评审中、已完成四列，卡片上带话题色点、类别、日期与进度" width="2880" height="1800">
+  </figure>
+</section>
+
+<section class="soft">
+  <div class="wrap center">
+    <p class="eyebrow">三个主张</p>
+    <h2>它只做三件事：<br>不去麻烦别人。</h2>
+    <div class="claims">
+      <div class="claim">
+        <b>不联网</b>
+        <p>零外部请求——没有外链的脚本、样式、字体和图片。断网、飞行模式、内网隔离环境，照常打开。</p>
+      </div>
+      <div class="claim">
+        <b>不装东西</b>
+        <p>一个 HTML 文件，双击就跑。没有安装包，没有依赖，不需要管理员权限，也不用求运维开白名单。</p>
+      </div>
+      <div class="claim">
+        <b>不交数据</b>
+        <p>没有账号、没有云端、没有遥测。数据只写进你本机上选定的那个文件夹，拷走文件夹就是全部。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="gantt">
+  <div class="wrap split">
+    <div class="copy">
+      <p class="eyebrow">视图 · 甘特图</p>
+      <h2>谁挡着谁，<br>一眼就看见。</h2>
+      <ul class="points">
+        <li>依赖箭头画出前后置关系，<b>关键路径自动描蓝</b>，不用自己算。</li>
+        <li>工期由<b>工作日历</b>决定——周末、法定假期、调休补班都算得进去。</li>
+        <li>任务条上直接写任务名，进度推过一半自动翻成白字；导出的图里名字也在。</li>
+        <li>左侧任务表、右侧未排期面板都能折成竖轨，把画布让给图本身。</li>
+        <li>导出 <b>PNG / SVG / CSV</b>，范围可选「仅可见区」或「全时间跨度」。</li>
+      </ul>
+    </div>
+    <figure class="shot">
+      <div class="shot-bar"><i></i><i></i><i></i><span class="shot-url">甘特 · 周刻度 · 50%</span></div>
+      <img src="assets/gantt.png" alt="OffEarly 甘特图：周刻度时间轴、今天红线、任务条带名称、依赖箭头与关键路径描边，右侧未排期面板" width="2880" height="1800" loading="lazy">
+    </figure>
+  </div>
+</section>
+
+<section id="mindmap" class="soft">
+  <div class="wrap split">
+    <div class="copy">
+      <p class="eyebrow">视图 · 思维导图</p>
+      <h2>不碰鼠标，<br>把一棵树敲出来。</h2>
+      <table class="keys">
+        <tbody>
+          <tr><th><kbd>Tab</kbd></th><td>加子节点</td></tr>
+          <tr><th><kbd>Enter</kbd></th><td>加同级（根上无效）</td></tr>
+          <tr><th><kbd>F2</kbd></th><td>就地改名，<kbd>Enter</kbd> 提交 <kbd>Esc</kbd> 取消</td></tr>
+          <tr><th><kbd>Space</kbd></th><td>折叠，右缘出现 <b>+N</b> 徽标</td></tr>
+          <tr><th><kbd>↑↓←→</kbd></th><td>树上游走：兄弟、父、首子</td></tr>
+          <tr><th><kbd>Delete</kbd></th><td>删除节点（中心主题受保护）</td></tr>
+        </tbody>
+      </table>
+      <ul class="points">
+        <li>按住拖过 4px 即改挂到落点之下，<b>中心主题也是合法落点</b>。</li>
+        <li>拖空白处平移，<kbd>Ctrl</kbd>+滚轮缩放 50%–300%。</li>
+        <li>导出的是<b>当前显示画面</b>——折叠着导出的就是折叠图。</li>
+      </ul>
+    </div>
+    <figure class="shot">
+      <div class="shot-bar"><i></i><i></i><i></i><span class="shot-url">导图 · 逻辑图 · 向右</span></div>
+      <img src="assets/mindmap.png" alt="OffEarly 思维导图：中心主题 OffEarly 向右展开看板、甘特、思维导图、数据安全、笔记五个分支及其子节点" width="2880" height="1800" loading="lazy">
+    </figure>
+  </div>
+</section>
+
+<section id="detail">
+  <div class="wrap split">
+    <div class="copy">
+      <p class="eyebrow">一处改完</p>
+      <h2>五个分区，<br>一张弹窗。</h2>
+      <ul class="points">
+        <li><b>标题 · 属性 · 日期与进度 · 依赖关系 · 笔记</b>，不用在页面之间跳。</li>
+        <li>依赖用模糊搜索建链，类型与 lag 可改；<b>成环标红但仍允许保存</b>。</li>
+        <li>笔记是 Markdown：图片粘贴拖入即存进 <code>assets/</code>，<code>[[双向链接]]</code> 点了就跳。</li>
+        <li>状态改成「已完成」，进度自动锁到 100%。</li>
+        <li>改动即时生效，<kbd>Ctrl</kbd>+<kbd>Z</kbd> 随时回退。</li>
+      </ul>
+    </div>
+    <figure class="shot">
+      <div class="shot-bar"><i></i><i></i><i></i><span class="shot-url">任务详情 · 支付下单流程重构</span></div>
+      <img src="assets/task-modal.png" alt="OffEarly 任务详情弹窗：依赖关系区显示前置与后置任务，笔记区渲染 Markdown 标题、列表、燃尽图配图与双向链接" width="2880" height="1800" loading="lazy">
+    </figure>
+  </div>
+</section>
+
+<section id="safety" class="soft">
+  <div class="wrap center">
+    <p class="eyebrow">守得住</p>
+    <h2>数据在你手里，<br>也得对得起这份信任。</h2>
+    <div class="grid-4" style="text-align:left">
+      <div class="card">
+        <h3>写前快照</h3>
+        <p>每次保存前，当前 <code>vault.json</code> 会被<b>逐字节</b>复制进 <code>.backup/</code>。不需要你手动备份，也不占第二次写盘。</p>
+      </div>
+      <div class="card">
+        <h3>启动自愈</h3>
+        <p>库文件损坏或校验不过时，应用<b>停止一切写入</b>，自动回退到最近可用快照，进入只读安全模式并挂出横幅。</p>
+      </div>
+      <div class="card">
+        <h3>冲突三选</h3>
+        <p>磁盘被另一端改过时，保存会问你：<b>以我为准</b> / <b>以磁盘为准</b> / <b>导出我的副本</b>。弹窗会先告诉你「以磁盘为准」会丢掉几条任务。</p>
+      </div>
+      <div class="card">
+        <h3>随时可走</h3>
+        <p><code>vault.json</code> 是纯 JSON，任何编辑器都能看能改。没有私有格式、没有加密锁、没有导出付费。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap center">
+    <p class="eyebrow">怎么开始</p>
+    <h2>三步，然后就可以干活。</h2>
+    <div class="steps" style="text-align:left">
+      <div class="step">
+        <h3>打开</h3>
+        <p>点上面的「打开在线版」，或者把那个 HTML 文件下载到本地双击——两条路跑的是同一份代码。</p>
+      </div>
+      <div class="step">
+        <h3>连接文件夹</h3>
+        <p>选一个空目录，确认在此建库，会一并建好 <code>assets/</code> 与 <code>.backup/</code>。已经有库的目录<b>只会被打开，不会被覆盖</b>。</p>
+      </div>
+      <div class="step">
+        <h3>直接干活</h3>
+        <p>改动自动保存，右上角三态指示：<b>已保存 / 未保存 / 保存失败</b>，失败可点重试。要立刻落盘按 <kbd>Ctrl</kbd>+<kbd>S</kbd>。</p>
+      </div>
+    </div>
+    <p class="note">想先看看有数据长什么样：连接仓库里的 <code>example.vault/</code>——5 个话题、15 个任务、3 个里程碑、7 条依赖、1 张配图笔记，覆盖四种状态加逾期、被阻塞、未排期。</p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="foot">
+    <span>OffEarly · 把事做完，早点下班。</span>
+    <nav>
+      <a href="https://github.com/miraclewt/OffEarly">GitHub 仓库</a>
+      <a href="https://github.com/miraclewt/OffEarly/blob/main/docs/user-guide.md">用户手册</a>
+      <a href="https://github.com/miraclewt/OffEarly/blob/main/README.md">项目说明</a>
+    </nav>
+    <span class="req">需要 File System Access API：Chrome / Edge 113+ 支持，Safari 与 Firefox 暂不支持。无账号 · 无云端 · 无遥测。</span>
+  </div>
+</footer>
+
+</body>
+</html>
