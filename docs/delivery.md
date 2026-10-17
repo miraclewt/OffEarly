@@ -1,8 +1,8 @@
 # OffEarly 交付说明
 
 **产品名**：OffEarly（早下班） · tagline「把事做完，早点下班。/ Finish well. Leave early.」
-**交付物**：`dist/OffEarly.html` —— 单文件可执行页，**1,119,144 字节（约 1.07 MB）**
-**交付日期**：2026-10-17 · **范围**：T01–T33 全部完成
+**交付物**：`dist/OffEarly.html` —— 单文件可执行页，**1,150,240 字节（约 1.10 MB）**
+**交付日期**：2026-10-17 · **范围**：T01–T33 全部完成 + 思维导图泳道 T40–T48（含收尾导出/e2e/文档）
 
 ---
 
@@ -12,7 +12,7 @@
 
 - **形态**：单个 `OffEarly.html`，零外部请求（无外链 script / link / module、无 http(s) 资源引用），`file://` 直接打开即可运行
 - **数据自持**：所有数据写进你选中的一个普通文件夹（`vault.json` + `assets/` + `.backup/`），不上传、不依赖云服务，换台电脑拷走文件夹即可
-- **两个视图**：看板（拖拽换列）+ 甘特图（依赖箭头、关键路径、基线、日/周刻度、任务条上直接显示任务名、左侧任务表与右侧未排期面板可折叠、导出 PNG/SVG/CSV）
+- **三个视图**：看板（拖拽换列）+ 甘特图（依赖箭头、关键路径、基线、日/周刻度、任务条上直接显示任务名、左侧任务表与右侧未排期面板可折叠、导出 PNG/SVG/CSV）+ 思维导图（xmind 逻辑图·向右：键盘建树、就地改名、跨父拖拽、折叠徽标、平移缩放、导出 PNG/SVG）
 - **笔记支持**：Markdown 笔记、`[[双链]]` 跳转、图片粘贴/拖入/选择（存进 `assets/`，点开看灯箱）
 - **数据安全**：写前自动快照、启动自愈（库损坏时自动回退最近快照进只读）、外部改动冲突三选、备份面板可导出库副本与导入
 
@@ -22,7 +22,7 @@
 2. 首次打开点「选择文件夹」，选一个空文件夹（或直接用仓库里的 `example.vault/` 试玩）
 3. 之后每次打开会自动记住并连接该文件夹
 
-更多细节见 `docs/user-guide.md`（中英双栏一页纸，16 个主题）；示例数据见 `example.vault/`。
+更多细节见 `docs/user-guide.md`（中英双栏一页纸，17 个主题）；示例数据见 `example.vault/`。
 
 **浏览器要求**：需支持 File System Access API（Chrome / Edge 113+）。Safari、Firefox 不支持。
 
@@ -31,9 +31,9 @@
 | 项目 | 结果 |
 |---|---|
 | `npx tsc --noEmit` | **0 错误** |
-| `npm test`（Vitest） | **805 passed / 45 files** |
-| `npm run e2e`（Playwright，真实 Chromium 跑 `file://`） | **36 passed + 1 skipped**（T39 在 `04-gantt.spec.ts` 新增 3 条） |
-| `npm run build` + 产物校验 | **10/10**（单文件、零外链、favicon 内联、禁 emoji 等十项全过；产物 1119144 字节，上限 1677721） |
+| `npm test`（Vitest） | **931 passed / 51 files**（思维导图泳道 T40–T48 后） |
+| `npm run e2e`（Playwright，真实 Chromium 跑 `file://`） | **38 passed + 1 skipped**（新增 `09-mindmap.spec.ts` 2 条；skipped 仍是既有的 dnd-kit 拖拽换列 `fixme`） |
+| `npm run build` + 产物校验 | **10/10**（单文件、零外链、favicon 内联、禁 emoji 等十项全过；产物 1150240 字节，上限 1677721） |
 | `npm run lint:emoji` | 零命中 |
 
 ## 4. 本次收尾补做的内容（交付前最后一轮）
@@ -52,6 +52,15 @@
 | 双链菜单 Esc | 菜单开着时 Esc 只关菜单，不再把弹窗一起关掉 |
 | 「选择其他备份」 | 只读与安全模式相位下转正：可从 `.backup/` 里挑一份快照恢复并重回可写（此前是占位按钮） |
 | `.gitattributes` | 品牌 SVG 锁 LF，根除 `core.autocrlf` 导致的 favicon 字节校验噪音（worktree 下 379 → 372） |
+| T40 导图数据模型 | `MindNode / MindMap` 进 `vault.json`（schema v1 默认空数组，字段 text/order/folded/children），工厂与夹具同步补齐 |
+| T41 导图命令层 | create/patch 的树操作进命令总线，逆操作不可变（撤销/重做零成本复用既有栈）；删根、移入自身子树在 `bus.apply` 之前抛错，undo 栈必然干净 |
+| T42 mindmapActions | plan→apply 两层：id 注入可测试，新节点尾插（数组序即显示序 = order 升序口径） |
+| T43 布局模型 | `buildMindMapModel`：xmind 逻辑图·向右两趟布局（measure/place，父在子列垂直居中），零 DOM/零 React；兄弟序按 children 下标、折叠（含 foldAll 展示态）按叶子排布并给 `+N` 徽标计数、bounds 供视口 fit 与导出 |
+| T44 视口控制器 | pan/zoom/fit 照甘特手法：离散档位 50%–300%、锚点缩放（Ctrl+滚轮档变内容不动点）、`fitToContent(bounds)` 选最大可容纳档；纯 TS 可在 node 里断言 |
+| T45 画布与 tab | `MindMapCanvas`（模型只读投影，外层 `<g translate·scale>`）+ `MindMapView` + 顶栏「思维导图」tab + 空态引导卡（唯一新建入口）；颜色走 CSS 变量，零新增 hex |
+| T46 编辑交互 | xmind 键位表（Tab 加子 / Enter 加同级 / F2·双击就地改名 / Space 折叠 / Delete 删 / 方向键树游走 / Esc）+ HTML overlay 就地输入（IME 双守卫：isComposing + composition ref）+ 空白拖拽平移与滚轮缩放 |
+| T47 拖拽与图管理 | 节点按住拖 >4px 进入跨父 move：命中 = 屏幕反变换落进合法候选矩形（只排自身与自身后代，**中心主题是合法落点**），ghost + 落点高亮；工具条：图切换 / 新建 / 重命名（inline input）/ 删除（两段确认，确认态钉在 armed 图 id）/ 全部折叠·展开（纯展示态，不写库） |
+| T48 导图导出 + e2e + 文档 | `MindMapExporter`：模型 → 自包含 SVG 字符串（呈现属性全字面量、零 `var(`——由测试钉住，色值与 theme.css/`MindMapCanvas` 同档：accent `#5E5CE6`、近黑 `#1D1D1F`、rgba 令牌拆 hex+opacity），PNG 复用甘特 R3 管线（`svgToPngBlob` / `probePngSupport` / `triggerDownload` import 共用，失败抛错不出空文件）；范围 全图 = bounds+padding 40 / 仅可见区 = 视口反算，坐标序列化收 1 位小数；导出菜单照甘特弹层（格式 × 范围、Esc/外点关闭、PNG 探针降级提示，文案复用 `ganttExport.*` 键）；**导出喂当前显示模型——「全部折叠」开着时导出的就是折叠图**；新增 `e2e/09-mindmap.spec.ts`（双击改名→落盘→重开还在 + PNG/SVG 各下载一个文件）与本节文档 |
 
 ## 5. 已知限制（刻意保留，非缺陷）
 

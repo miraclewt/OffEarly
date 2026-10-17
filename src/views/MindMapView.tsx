@@ -35,6 +35,11 @@
 //     selectedMapId 悬空兜底承担）；折叠全部/展开全部 = 单 toggle 走
 //     buildMindMapModel(map,{foldAll:true}) 的**纯视图本地态**（不写库、零 undo）。
 //
+// T48 交互层（导出菜单，照 GanttView）：工具条右侧 PNG/SVG × 仅可见区/全图 弹层，
+//   Esc/外点关闭与 R3 PNG 探针同甘特口径；导出喂的是**当前显示模型**——「全部折叠」开着时
+//   导出的就是折叠后的图（所见即所导）。文案复用 ganttExport.* 键，范围反算与 PNG 管线在
+//   MindMapExporter（probePngSupport / svgToPngBlob / triggerDownload 由 GanttExporter 共用）。
+//
 // IME 手动验证项：jsdom 能模拟 compositionstart/end 与 isComposing，但真实中文输入法
 // （组词 Enter 上屏 vs 提交）的行为必须在浏览器里人工回归一遍。导图跨父拖拽同理——
 // 真实指针 capture 下越出画布的跟随行为需要浏览器验证。
@@ -67,16 +72,35 @@ import { createI18n } from '../locales/i18n'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { MindMapCanvas } from './MindMapCanvas'
 import type { MindMapPointerPoint } from './MindMapCanvas'
+import { exportMindMap, probePngSupport } from './MindMapExporter'
+import type { MindMapExportFormat, MindMapExportRange } from './MindMapExporter'
+import { Icon } from './IconSprite'
 
 type Translate = (key: MsgKey, params?: TranslateParams) => string
 
 const TEXT = 'var(--oe-text)'
 const TEXT_MUTED = 'var(--oe-text-muted)'
+const INDIGO = 'var(--oe-accent)'
 const BODY_FONT = 'var(--oe-font)'
 /** 工具条高度与甘特一致（36），两套视图的横向节奏对齐。 */
 const TOOLBAR_HEIGHT = 36
 /** 拖拽阈值（px）：节点 pointerdown 后移动超过这个距离才从 click-select 升级为 drag（裁决 4px）。 */
 const MINDMAP_DRAG_THRESHOLD = 4
+
+/**
+ * T48 导出菜单的常量顺序与文案键：格式 PNG/SVG × 范围 可见/全图。
+ * 文案复用甘特弹层的 ganttExport.* 键（裁决：同一套导出语汇，不新增 locale 键）。
+ */
+const EXPORT_FORMAT_ORDER: MindMapExportFormat[] = ['png', 'svg']
+const EXPORT_FORMAT_LABEL: Record<MindMapExportFormat, MsgKey> = {
+  png: 'ganttExport.png',
+  svg: 'ganttExport.svg',
+}
+const EXPORT_RANGE_ORDER: MindMapExportRange[] = ['visible', 'full']
+const EXPORT_RANGE_LABEL: Record<MindMapExportRange, MsgKey> = {
+  visible: 'ganttExport.rangeVisible',
+  full: 'ganttExport.rangeFull',
+}
 
 /** 兜底文案表：与 GanttView 同款，测试或未接线场景也能独立挂载（不依赖 navigator.language）。 */
 const fallbackI18n = createI18n({ getLocale: () => 'zh', subscribe: () => () => {} })
@@ -156,6 +180,79 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
     () => (selectedMap === null ? null : buildMindMapModel(selectedMap, { foldAll: foldAllView })),
     [selectedMap, foldAllView],
   )
+
+  // ---- T48 · 导出菜单（照 GanttView 的弹层交互与 R3 探针） ----------------------
+  // 「全部折叠」开着时 model 就是折叠后的显示模型——导出器喂什么画什么，
+  // 因此**折叠态下导出 PNG/SVG 得到的就是折叠后的图**（刻意行为：所见即所导）。
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [exportFormat, setExportFormat] = useState<MindMapExportFormat>('png')
+  const [exportRange, setExportRange] = useState<MindMapExportRange>('visible')
+  const [pngSupported, setPngSupported] = useState<boolean | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [exportHint, setExportHint] = useState<string | null>(null)
+
+  // 弹层的 Esc / 点击外部关闭（GanttView L125-145 同款）：mousedown 判「不在弹层容器内」，
+  // 按钮本身在容器内，再点按钮仍走既有 toggle，不受影响。
+  const exportMenuRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!exportMenuOpen) return
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setExportMenuOpen(false)
+    }
+    const onMouseDown = (event: MouseEvent): void => {
+      const target = event.target
+      if (target instanceof Node && exportMenuRef.current?.contains(target) !== true) {
+        setExportMenuOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    document.addEventListener('mousedown', onMouseDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('mousedown', onMouseDown)
+    }
+  }, [exportMenuOpen])
+
+  // R3 探针：挂载时跑一次最小 SVG → Canvas → toBlob；不可用就禁用 PNG 选项并提示，
+  // 而不是等用户点下去才失败。jsdom 无真 2d 上下文，探针如常返回 false。
+  useEffect(() => {
+    let alive = true
+    void probePngSupport().then((supported) => {
+      if (alive) setPngSupported(supported)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  /** 当前档缩放（viewport 反算「仅可见区」要用同一个数，与画布投影同源）。 */
+  const zoom = mindmapZoomFactorAt(state.zoomIndex)
+
+  const handleExportConfirm = useCallback(() => {
+    if (selectedMap === null || model === null) return
+    setExportHint(null)
+    setExporting(true)
+    void exportMindMap({
+      model,
+      format: exportFormat,
+      range: exportRange,
+      viewport: { panX: state.panX, panY: state.panY, zoom, width: state.width, height: state.height },
+      fileName: selectedMap.name,
+    })
+      .then((result) => {
+        setExportMenuOpen(false)
+        setExportHint(t('shell.exported', { name: result.filename }))
+      })
+      .catch(() => {
+        if (exportFormat === 'png') setPngSupported(false)
+        setExportHint(t('ganttExport.failed'))
+      })
+      .finally(() => {
+        setExporting(false)
+      })
+  }, [selectedMap, model, exportFormat, exportRange, state.panX, state.panY, state.width, state.height, zoom, t])
+
+  const exportDisabled = exporting || (exportFormat === 'png' && pngSupported === false)
 
   /** 本地图态复位体：选中/编辑/重命名/删除布防/拖拽都隶属于旧图的树，不带进新图。 */
   const resetMapLocalState = useCallback(() => {
@@ -431,9 +528,6 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
 
   // ---- T46 · 指针/滚轮层（画布表面） ----------------------------------------
 
-  /** 当前档缩放：canvas 投影、overlay 定位与拖拽命中反变换共用同一个数（单一事实源）。 */
-  const zoom = mindmapZoomFactorAt(state.zoomIndex)
-
   const panRef = useRef<{ pointerId: number; x: number; y: number } | null>(null)
 
   function handleSurfacePointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
@@ -698,6 +792,126 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
             <button type="button" data-testid="mindmap-fit" onClick={handleFit} style={chipStyle}>
               {t('mindmap.fit')}
             </button>
+            {/* T48 · 导出反馈（成功/失败）与 PNG 不可用的说明放在弹层内靠近该格式处（甘特同款） */}
+            {exportHint === null ? null : (
+              <span
+                data-testid="mindmap-export-hint"
+                style={{ fontSize: 12, color: TEXT_MUTED, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              >
+                {exportHint}
+              </span>
+            )}
+            {/* T48 · 导出入口：格式 PNG/SVG × 范围 仅可见区/全图（弹层交互与文案键复用甘特）。 */}
+            <div ref={exportMenuRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <button
+                type="button"
+                data-testid="mindmap-export-button"
+                aria-label={t('ganttExport.button')}
+                aria-haspopup="dialog"
+                aria-expanded={exportMenuOpen}
+                onClick={() => setExportMenuOpen((open) => !open)}
+                style={iconButtonStyle}
+              >
+                <Icon name="download" />
+              </button>
+
+              {exportMenuOpen ? (
+                <div
+                  data-testid="mindmap-export-menu"
+                  role="dialog"
+                  aria-label={t('ganttExport.button')}
+                  style={{
+                    position: 'absolute',
+                    top: 26,
+                    right: 0,
+                    zIndex: 5,
+                    width: 198,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                    padding: 10,
+                    boxSizing: 'border-box',
+                    background: 'var(--oe-surface)',
+                    border: '1px solid var(--oe-separator)',
+                    borderRadius: 'var(--oe-radius-card)',
+                    boxShadow: 'var(--oe-shadow-hover)',
+                    color: TEXT,
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: TEXT_MUTED }}>{t('ganttExport.format')}</div>
+                  <div role="radiogroup" aria-label={t('ganttExport.format')} style={{ display: 'flex', gap: 6 }}>
+                    {EXPORT_FORMAT_ORDER.map((format) => {
+                      const disabled = format === 'png' && pngSupported === false
+                      return (
+                        <button
+                          key={format}
+                          type="button"
+                          role="radio"
+                          aria-checked={exportFormat === format}
+                          data-testid={`mindmap-export-format-${format}`}
+                          disabled={disabled}
+                          onClick={() => setExportFormat(format)}
+                          style={{
+                            ...exportChipStyle,
+                            ...(exportFormat === format ? exportChipActiveStyle : null),
+                            ...(disabled ? exportChipDisabledStyle : null),
+                          }}
+                        >
+                          {t(EXPORT_FORMAT_LABEL[format])}
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  <div style={{ fontSize: 12, color: TEXT_MUTED }}>{t('ganttExport.range')}</div>
+                  <div role="radiogroup" aria-label={t('ganttExport.range')} style={{ display: 'flex', gap: 6 }}>
+                    {EXPORT_RANGE_ORDER.map((range) => (
+                      <button
+                        key={range}
+                        type="button"
+                        role="radio"
+                        aria-checked={exportRange === range}
+                        data-testid={`mindmap-export-range-${range}`}
+                        onClick={() => setExportRange(range)}
+                        style={{ ...exportChipStyle, ...(exportRange === range ? exportChipActiveStyle : null) }}
+                      >
+                        {t(EXPORT_RANGE_LABEL[range])}
+                      </button>
+                    ))}
+                  </div>
+
+                  {pngSupported === false ? (
+                    <div data-testid="mindmap-export-png-hint" style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--oe-blocked)' }}>
+                      {t('ganttExport.pngUnsupported')}
+                    </div>
+                  ) : null}
+
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      data-testid="mindmap-export-cancel"
+                      onClick={() => setExportMenuOpen(false)}
+                      style={exportChipStyle}
+                    >
+                      {t('ganttExport.cancel')}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="mindmap-export-confirm"
+                      disabled={exportDisabled}
+                      onClick={handleExportConfirm}
+                      style={{
+                        ...exportChipStyle,
+                        ...exportChipActiveStyle,
+                        ...(exportDisabled ? exportChipDisabledStyle : null),
+                      }}
+                    >
+                      {exporting ? t('safemode.busy') : t('ganttExport.confirm')}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
           {/* 画布表面：wheel 原生监听 + 空白拖拽平移的宿主；relative 承载编辑 overlay 的绝对定位。 */}
           <div
@@ -836,6 +1050,44 @@ const chipStyle: CSSProperties = {
   borderRadius: 'var(--oe-radius-control)',
   cursor: 'pointer',
   fontFamily: 'inherit',
+}
+
+/** 导出入口的图标钮（GanttView 同款尺寸，两套工具栏节奏对齐）。 */
+const iconButtonStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 26,
+  height: 24,
+  padding: 0,
+  fontSize: 12,
+  color: TEXT,
+  background: 'transparent',
+  border: 'none',
+  borderRadius: 'var(--oe-radius-control)',
+  cursor: 'pointer',
+}
+
+// T48 导出弹层的选项 chip（格式 / 范围 / 取消 / 导出共用一套，甘特同款）
+const exportChipStyle: CSSProperties = {
+  padding: '2px 8px',
+  fontSize: 12,
+  lineHeight: '18px',
+  color: TEXT,
+  background: 'var(--oe-fill)',
+  border: 'none',
+  borderRadius: 'var(--oe-radius-control)',
+  cursor: 'pointer',
+}
+
+const exportChipActiveStyle: CSSProperties = {
+  color: 'var(--oe-on-accent)',
+  background: INDIGO,
+}
+
+const exportChipDisabledStyle: CSSProperties = {
+  opacity: 0.5,
+  cursor: 'not-allowed',
 }
 
 export default MindMapView

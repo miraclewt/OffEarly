@@ -55,7 +55,7 @@
 | 界面 chrome 色 | 20 个不同值 | 全部收敛为上表 token |
 | 语义色（仅三处） | 逾期红 / 阻塞橙 / 完成绿 | ✅ 红仅用于逾期与错误态；橙仅用于阻塞与安全模式；**没有第四种语义色**（T38 换档为 Apple 系统色，档位与数量不变） |
 | 话题分类色 `TOPIC_PALETTE` | 12 色 | **保持字面量**：写进 `vault.json` 的用户数据，且被测试断言长度与成员 |
-| SVG 呈现属性锁定的字面量 | 9 处 → **11 处**（T39 新增任务名标签两档） | **必须保持字面量**（见 §4） |
+| SVG 呈现属性锁定的字面量 | 9 处 → **11 处**（T39 新增任务名标签两档）→ **T48 另增一组导图导出常量**（`MINDMAP_EXPORT_*`，见下表） | **必须保持字面量**（见 §4） |
 
 ### 为什么有一批色值不能 token 化
 
@@ -72,6 +72,7 @@ SVG 的**呈现属性**（`fill=` / `stroke=` 这类 XML attribute，区别于�
 | `DEFAULT_TOPIC_COLOR` | `#5E5CE6` | 话题数据兜底色（与 `--oe-accent` 同值，但必须是字面量） |
 | 里程碑菱形 `stroke="#FFFFFF"` | `#FFFFFF` | SVG 呈现属性 |
 | `GANTT_LABEL_FILL` / `GANTT_LABEL_ON_PROGRESS_FILL`（T39 任务名标签） | `#1D1D1F` / `#FFFFFF` | SVG `fill`；浅底用近黑、深色进度盖过半时用白字，两档都是 `GanttCanvas` 与 `GanttExporter` 共用的常量（导出 markup 不得出现 `var(`，由测试钉住） |
+| `MINDMAP_EXPORT_*`（T48 导图导出） | `#5E5CE6` / `#1D1D1F`（复用 `GANTT_LABEL_FILL`）/ `#FFFFFF`（复用 `GANTT_LABEL_ON_PROGRESS_FILL`）/ `#6E6E73` / `#000000`+0.12 / `#787880`+0.1 | SVG 呈现属性；与 `MindMapCanvas` 用的 CSS 变量一一同档（theme.css 改动需两处同步）。rgba 令牌（`--oe-border` / `--oe-fill`）拆成 hex + `*-opacity`；标签与强调底上白字两档复用甘特同一常量，两套视图不分叉 |
 | `mixColor(..., target='#000000')` | `#000000` | 颜色计算基色，非样式 |
 
 已在 `GanttCanvas.tsx` 顶部写明这段约束，避免后来者「顺手改成变量」而让甘特图变黑。
