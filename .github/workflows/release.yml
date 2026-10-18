@@ -1,0 +1,48 @@
+name: 发布版本
+
+# dist/ 在 .gitignore 里，Actions 上没有现成产物，所以发版时由工作流自己构建。
+# 只在推 v* tag 时跑一次，不是每次 push 都跑的测试门禁。
+on:
+  push:
+    tags:
+      - 'v*'
+
+# gh release create 需要写权限；用自带的 GITHUB_TOKEN，不配 PAT、不配 secret。
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # vite 8 要求 Node >=22.12（或 ^20.19），runner 预装的版本不保证够
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # 顺带把关：build 里含 tsc --noEmit 和 verify-bundle（单文件/离线/体积九条断言）
+      - run: npm run build
+
+      - name: 发布 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          # 发版说明取自 tag 正文；轻量 tag 会退回最后一次提交的信息
+          NOTES="$(git tag --format='%(contents)' -l "$TAG")"
+          ARGS=(--title "OffEarly $VERSION")
+          if [ -n "$NOTES" ]; then
+            ARGS+=(--notes "$NOTES")
+          else
+            ARGS+=(--generate-notes)
+          fi
+          gh release create "$TAG" "${ARGS[@]}" dist/OffEarly.html
+          echo "下载链接：https://github.com/$REPO/releases/download/$TAG/OffEarly.html"

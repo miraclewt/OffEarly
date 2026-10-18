@@ -23,7 +23,7 @@ OffEarly 是一个**单文件、离线、数据自持**的个人任务管理工�
 
 ## 快速上手
 
-1. 双击 `dist/OffEarly.html`（或先 `npm run build` 生成）
+1. 下载 [`OffEarly.html`](https://github.com/miraclewt/OffEarly/releases/latest/download/OffEarly.html) 双击打开；源码用户改成先 `npm run build`，再双击 `dist/OffEarly.html`
 2. 首次打开点「选择文件夹」，选一个空目录（会询问是否在此创建新库），或直接用仓库自带的 `example.vault/` 试玩——里面有 5 个话题、15 个任务、3 个里程碑、7 条依赖和 1 张配图笔记，覆盖全部状态与逾期 / 被阻塞 / 未排期场景
 3. 之后每次打开自动记住并连接该文件夹（重开只需点一次「授权并继续」）
 
@@ -56,6 +56,24 @@ npm run preview      # 预览构建产物
 
 `npm run capture` 依赖已存在的 `dist/OffEarly.html`，所以先 `npm run build` 再跑它。
 
+## 发版
+
+推一个 `v*` tag 就行，Actions 会自己构建并发布成 GitHub Release：
+
+```bash
+git tag -a v0.1.0 -m "第一个正式版" -m "这里写的会变成 Release 说明"
+git push origin v0.1.0
+```
+
+`.github/workflows/release.yml` 跑 `npm ci && npm run build`（含 `tsc --noEmit` 和十项产物校验），把 `dist/OffEarly.html` 作为唯一附件传上去，之后下载链永久有效：
+
+```
+https://github.com/miraclewt/OffEarly/releases/latest/download/OffEarly.html
+```
+
+只在推 tag 时触发，普通 push 不跑；不需要 PAT 也不需要配 secret，用工作流自带的 `GITHUB_TOKEN`。
+`npm version 0.1.0` 也能一次改版本号加打 tag，但它要求工作区干净，多人共用 worktree 时容易失败，手打 tag 更稳。
+
 ## 项目结构
 
 ```
@@ -74,7 +92,7 @@ tests/                        单元测试（按 domain / controllers / persiste
 e2e/                          Playwright 用例（01 启动 → 09 思维导图）
 capture/                      落地页素材抓取（独立 Playwright 配置，不混进回归套件）
 site/                         落地页：单文件 index.html + 截图 + 随站产物，Pages 发布这个目录
-.github/workflows/            Pages 部署工作流
+.github/workflows/            Pages 部署 + Release 发布工作流
 scripts/                      构建校验、禁 emoji 检查、冲突处理脚本
 docs/                         交付说明、用户手册、视觉审计、设计稿
 brand/                        图标与 Logo
