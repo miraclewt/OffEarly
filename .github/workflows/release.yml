@@ -25,7 +25,7 @@ jobs:
 
       - run: npm ci
 
-      # 顺带把关：build 里含 tsc --noEmit 和 verify-bundle（单文件/离线/体积九条断言）
+      # 顺带把关：build 里含 tsc --noEmit 和 verify-bundle（单文件/离线/体积十项断言）
       - run: npm run build
 
       - name: 发布 Release
@@ -36,8 +36,14 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${TAG#v}"
-          # 发版说明取自 tag 正文；轻量 tag 会退回最后一次提交的信息
-          NOTES="$(git tag --format='%(contents)' -l "$TAG")"
+          # Actions 的浅克隆会把 annotated tag 剥成它指的提交，git tag 只能读到提交信息，
+          # 所以说明文字走 API 取 tag 对象本体；轻量 tag 没有正文就退回 GitHub 自动生成。
+          # 只用 gh api --jq，不依赖 runner 上的 jq。
+          NOTES=""
+          if [ "$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq .object.type || true)" = tag ]; then
+            SHA="$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq .object.sha)"
+            NOTES="$(gh api "repos/$REPO/git/tags/$SHA" --jq .message)"
+          fi
           ARGS=(--title "OffEarly $VERSION")
           if [ -n "$NOTES" ]; then
             ARGS+=(--notes "$NOTES")
