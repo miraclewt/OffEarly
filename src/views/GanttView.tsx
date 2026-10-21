@@ -172,7 +172,21 @@ export function GanttView(props: GanttViewProps) {
         range: props.range,
         uiScale: uiScale,
       }),
-    [vault, filter, state.scale, props.today, props.range, uiScale],
+    // 依赖只取 buildGanttModel 真正读到的切片（话题 / 任务 / 依赖 / 里程碑 / 工作日历）。
+    // 用整个 vault 做依赖的话，autosave 写盘成功后回写 revision/updatedAt（换了对象、内容没变）
+    // 也会把列、行、箭头整套重算一遍——每存一次盘就抖一下。
+    [
+      vault.topics,
+      vault.tasks,
+      vault.links,
+      vault.milestones,
+      vault.settings.calendar,
+      filter,
+      state.scale,
+      props.today,
+      props.range,
+      uiScale,
+    ],
   )
 
   const { lane, body } = useMemo(() => splitMilestoneLane(model.rows), [model])

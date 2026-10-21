@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { applyBoardDrop, isAboveCenter, planBoardDrop, sortByOrder } from '../../src/controllers/boardDnd'
 import type { BoardDrop } from '../../src/controllers/boardDnd'
+import { applyCreateTask } from '../../src/controllers/taskCreate'
 import { createCommandBus } from '../../src/domain/commandBus'
 import { createEmptyFilter, createQueryEngine } from '../../src/domain/queryEngine'
 import { createVaultStore } from '../../src/domain/store'
@@ -488,6 +489,35 @@ describe('列内新建任务入口', () => {
     expect(input.value).toBe('')
     // 仍是展开态（输入框还在）
     expect(view.getByTestId('board-new-task-input-todo')).toBeDefined()
+  })
+
+  it('新建成功后把列体滚到底：新卡片不会落在焦点所在的输入框之外', () => {
+    // 真接线里 onCreateTask 会落一条命令；这里用同一个控制器驱动，让 tasks.length 真的变长
+    const { view, store, bus } = setup(createEmptyFilter(), {
+      onCreateTask: (status, title) => {
+        applyCreateTask(bus, store.getVault(), { title, status })
+      },
+    })
+
+    const zone = view.getByTestId('board-dropzone-doing')
+    let scrollTop = 0
+    // jsdom 没有布局：scrollTop/scrollHeight 都是 0，这里给出可观察的替身
+    Object.defineProperty(zone, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value
+      },
+    })
+    Object.defineProperty(zone, 'scrollHeight', { configurable: true, get: () => 1600 })
+
+    fireEvent.click(view.getByTestId('board-add-task-doing'))
+    const input = view.getByTestId('board-new-task-input-doing')
+    fireEvent.change(input, { target: { value: '滚动后可见的任务' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(store.getVault().tasks.some((task) => task.title === '滚动后可见的任务')).toBe(true)
+    expect(scrollTop).toBe(1600)
   })
 
   it('空白标题不提交；Esc 收起输入框', () => {

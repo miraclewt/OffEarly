@@ -17,7 +17,7 @@
 // 不 import 任何尚未实现的面板（FilterBar / TaskDrawer / BackupPanel）。
 // 视觉：颜色一律取 --oe-* token，圆角两档、无渐变、无 emoji（spec 第 7 节）。
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { useStore } from 'zustand'
 import { nanoid } from 'nanoid'
@@ -218,6 +218,19 @@ export function MilestonePanel(props: MilestonePanelProps) {
   const [draft, setDraft] = useState<MilestoneDraft | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [dateError, setDateError] = useState(false)
+  /**
+   * 刚建好的里程碑：列表按日期排序，新条可能落在滚动区之外——不把它带进视野，
+   * 用户点完「保存」看到的是编辑器关闭、列表纹丝不动（线上反馈的「创建后不显示」）。
+   */
+  const [revealId, setRevealId] = useState<string | null>(null)
+  const listRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (revealId === null) return
+    const row = listRef.current?.querySelector(`[data-testid="milestone-row-${revealId}"]`)
+    row?.scrollIntoView?.({ block: 'nearest' })
+    setRevealId(null)
+  }, [revealId, vault.milestones])
 
   const open = props.open ?? selfOpen
   const newId = props.newId ?? (() => nanoid())
@@ -309,16 +322,16 @@ export function MilestonePanel(props: MilestonePanelProps) {
     const done = draft.done
     const date = draft.date
     const id = draft.id
+    // 新建时的实体先算好（recipe 保持纯函数：不在 store.update 里塞副作用）
+    const created: Milestone | null = id === null ? { id: newId(), topicId, title, date, done, color } : null
     store.update((current) => {
-      if (id === null) {
-        const created: Milestone = { id: newId(), topicId, title, date, done, color }
-        return upsertMilestone(current, created)
-      }
+      if (created !== null) return upsertMilestone(current, created)
       const existing = current.milestones.find((candidate) => candidate.id === id)
       // 面板打开期间该条被外部删掉的罕见情况：不新建、不报错，静默跳过
       if (existing === undefined) return current
       return upsertMilestone(current, { ...existing, topicId, title, date, done, color })
     })
+    setRevealId(created?.id ?? null)
     setDraft(null)
     setConfirmingDelete(false)
     setDateError(false)
@@ -534,6 +547,7 @@ export function MilestonePanel(props: MilestonePanelProps) {
         data-selected={selected ? 'true' : 'false'}
         data-done={milestone.done ? 'true' : 'false'}
         data-cross-topic={cross ? 'true' : 'false'}
+        className="oe-row"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -738,7 +752,7 @@ export function MilestonePanel(props: MilestonePanelProps) {
 
       {renderEditor()}
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', borderTop: `1px solid ${BORDER}` }}>
+      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', borderTop: `1px solid ${BORDER}` }}>
         {empty ? (
           <div
             data-testid="milestone-empty"

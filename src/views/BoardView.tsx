@@ -17,7 +17,7 @@
 // 列内新建（T34）同样只外送 (status, title)——命令由接线方（App 的 Workspace）用实时库构造，
 // 本组件不读 store、也不需要知道 taskCreate 的存在。
 
-import { useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import type { CSSProperties } from 'react'
 import { DndContext, PointerSensor, closestCorners, useSensor, useSensors } from '@dnd-kit/core'
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core'
@@ -121,10 +121,14 @@ export function BoardView(props: BoardViewProps) {
     suppressClickRef.current = true
   }
 
-  function handleOpenTask(taskId: string): void {
-    if (suppressClickRef.current) return
-    props.onOpenTask?.(taskId)
-  }
+  // TaskCard 是 memo 的：这个回调若每次渲染都换引用，memo 就白做了
+  const openTask = useCallback(
+    (taskId: string) => {
+      if (suppressClickRef.current) return
+      props.onOpenTask?.(taskId)
+    },
+    [props.onOpenTask],
+  )
 
   function handleDragEnd(event: DragEndEvent): void {
     const { active, over } = event
@@ -198,7 +202,7 @@ export function BoardView(props: BoardViewProps) {
             dependencyCountById={dependencyCountById}
             today={today}
             t={t}
-            onOpenTask={handleOpenTask}
+            onOpenTask={openTask}
             // 列底新建：把 status 绑进回调，列组件只管「回车提交了标题」
             onCreateTask={
               props.onCreateTask === undefined

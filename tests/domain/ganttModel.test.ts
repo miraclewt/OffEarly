@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import dayjs from 'dayjs'
 
-import { buildGanttModel, GANTT_ROW_HEIGHT } from '../../src/domain/ganttModel'
+import { GANTT_MIN_SPAN_DAYS, buildGanttModel, GANTT_ROW_HEIGHT } from '../../src/domain/ganttModel'
 import { createEmptyFilter } from '../../src/domain/queryEngine'
 import type { Dependency, Milestone, Task, Topic, Vault, WorkCalendar } from '../../src/domain/types'
 
@@ -145,10 +146,76 @@ describe('T19 · 刻度与列几何（验收 2）', () => {
     ])
   })
 
-  it('缺省 viewport.range 时按已排期数据派生并两侧留 3 天', () => {
+  it('缺省 viewport.range 时按已排期数据派生，并拉够最小跨度、起点对齐周一', () => {
+    // 数据 10-05..10-22（两侧各留 3 天 = 10-02..10-25，仅 24 格）→
+    // 补到 42 天：未来 12 天、过去 6 天 → 09-26..11-06；起点再对齐到 ISO 周一 = 09-21
     const model = buildGanttModel(vault, filter, 'day', { today: '2026-10-15' })
-    expect(model.range).toEqual({ start: '2026-10-02', end: '2026-10-25' })
-    expect(model.columns).toHaveLength(24)
+    expect(model.range).toEqual({ start: '2026-09-21', end: '2026-11-06' })
+    expect(model.columns).toHaveLength(47)
+  })
+})
+
+describe('T19 · 自动范围（时间线不能只剩几格）', () => {
+  const oneDay = () =>
+    makeVault({
+      tasks: [makeTask('solo', { topicId: 'a', start: '2026-10-15', due: '2026-10-15' })],
+      milestones: [],
+      links: [],
+    })
+
+  it('单个一天任务也铺满最小跨度，而不是 7 格', () => {
+    const model = buildGanttModel(oneDay(), filter, 'day', { today: '2026-10-15' })
+    expect(model.columns.length).toBeGreaterThanOrEqual(GANTT_MIN_SPAN_DAYS)
+    expect(model.columns.some((column) => column.isToday)).toBe(true)
+    // 唯一的条仍然完整可见
+    expect(model.rows.find((row) => row.id === 'solo')?.bar).not.toBeNull()
+  })
+
+  it('窗口总是包含今天：数据在过去但离今天不远时向未来补齐', () => {
+    const past = makeVault({
+      tasks: [makeTask('old', { topicId: 'a', start: '2026-09-01', due: '2026-09-05' })],
+      milestones: [],
+      links: [],
+    })
+    const model = buildGanttModel(past, filter, 'day', { today: '2026-10-15' })
+    expect(model.range.end >= '2026-10-15').toBe(true)
+    expect(model.columns.some((column) => column.isToday)).toBe(true)
+  })
+
+  it('数据离今天很远时不强行把今天塞进窗口（否则会撑成几乎全空白的长卷）', () => {
+    const archive = makeVault({
+      tasks: [makeTask('ancient', { topicId: 'a', start: '2024-01-02', due: '2024-01-06' })],
+      milestones: [],
+      links: [],
+    })
+    const model = buildGanttModel(archive, filter, 'day', { today: '2026-10-15' })
+    expect(model.columns.some((column) => column.isToday)).toBe(false)
+    expect(model.columns.length).toBeLessThanOrEqual(GANTT_MIN_SPAN_DAYS + 6)
+    expect(model.rows.find((row) => row.id === 'ancient')?.bar).not.toBeNull()
+  })
+
+  it('起点对齐 ISO 周一，week 刻度次行表头从第一格就有文案', () => {
+    const model = buildGanttModel(vault, filter, 'week', { today: '2026-10-15' })
+    expect(dayjs(model.range.start).day()).toBe(1)
+    expect(model.headerRows[1]?.[0]?.x).toBe(0)
+    // 表头覆盖整段跨度：最后一格的右端 = 画布总宽
+    const last = model.headerRows[1]![model.headerRows[1]!.length - 1]!
+    expect(last.x + last.width).toBe(model.width)
+  })
+
+  it('显式 range 不被拉伸：导出与调用方的范围可预期', () => {
+    const model = buildGanttModel(oneDay(), filter, 'day', { today: '2026-10-15', range: OCTOBER })
+    expect(model.range).toEqual(OCTOBER)
+    expect(model.columns).toHaveLength(31)
+  })
+
+  it('单侧显式时不改那一侧，只把另一侧补到最小跨度', () => {
+    const model = buildGanttModel(oneDay(), filter, 'day', {
+      today: '2026-10-15',
+      range: { start: '2026-10-10' },
+    })
+    expect(model.range.start).toBe('2026-10-10')
+    expect(model.columns.length).toBeGreaterThanOrEqual(GANTT_MIN_SPAN_DAYS)
   })
 })
 
@@ -263,11 +330,13 @@ describe('T19 · 筛选联动（验收 1）', () => {
     expect([...onlyB.criticalIds].sort()).toEqual(['t1', 't2', 't3'])
   })
 
-  it('不含任何排期任务时退化为单列（今天）', () => {
+  it('不含任何排期任务时仍给足最小跨度（以今天为锚，今天落在窗口内）', () => {
     const empty = makeVault({ tasks: [makeTask('x', { topicId: 'a' })], milestones: [], links: [] })
     const model = buildGanttModel(empty, filter, 'day', { today: '2026-10-15' })
-    expect(model.range).toEqual({ start: '2026-10-15', end: '2026-10-15' })
-    expect(model.columns).toHaveLength(1)
+    // 今天两侧各留 3 天 = 7 格 → 补到 42 天（未来 24 / 过去 11）→ 起点对齐周一
+    expect(model.range).toEqual({ start: '2026-09-28', end: '2026-11-11' })
+    expect(model.columns.length).toBeGreaterThanOrEqual(42)
+    expect(model.columns.some((column) => column.isToday)).toBe(true)
     expect(model.rows).toEqual([])
     expect(model.unscheduled.map((t) => t.id)).toEqual(['x'])
   })

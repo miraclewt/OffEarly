@@ -9,7 +9,7 @@
 // 列内卡片由 SortableContext 管理同列换序。归档任务不渲染、筛选结果驱动列内容
 // 都由 BoardView 在上游保证（QueryEngine 默认排除归档）。
 
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -169,6 +169,39 @@ export function BoardColumn(props: BoardColumnProps) {
     data: { type: 'column', status },
   })
 
+  /**
+   * 列体既是 droppable 又是滚动容器：新建的卡片插在「（已聚焦的）新建输入框」上方，
+   * 列体滚到底时这一插会把输入框顶出可视区，新卡片正好落在视野之外——
+   * 用户按完回车看起来「什么都没发生」（线上反馈的现象）。
+   * 所以提交时打个标记，卡片数量真的变多后把列体滚到底，新卡片与输入框一起露出。
+   */
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const revealOnAddRef = useRef(false)
+  const prevCountRef = useRef(tasks.length)
+  const attachScroller = useCallback(
+    (node: HTMLDivElement | null) => {
+      scrollerRef.current = node
+      setNodeRef(node)
+    },
+    [setNodeRef],
+  )
+  useEffect(() => {
+    const grew = tasks.length > prevCountRef.current
+    prevCountRef.current = tasks.length
+    if (!revealOnAddRef.current) return
+    revealOnAddRef.current = false
+    const scroller = scrollerRef.current
+    if (!grew || scroller === null) return
+    scroller.scrollTop = scroller.scrollHeight
+  }, [tasks.length])
+  const handleCreate = useCallback(
+    (taskTitle: string) => {
+      revealOnAddRef.current = true
+      props.onCreateTask?.(taskTitle)
+    },
+    [props.onCreateTask],
+  )
+
   const ratio = columnProgressRatio(tasks)
   const ratioText = ratio === null ? '—' : `${ratio}%`
 
@@ -217,7 +250,7 @@ export function BoardColumn(props: BoardColumnProps) {
       </header>
 
       <div
-        ref={setNodeRef}
+        ref={attachScroller}
         data-testid={`board-dropzone-${status}`}
         data-dragover={isOver ? 'true' : 'false'}
         style={{
@@ -260,7 +293,7 @@ export function BoardColumn(props: BoardColumnProps) {
         <AddTaskRow
           status={status}
           t={t}
-          onCreateTask={props.onCreateTask}
+          onCreateTask={props.onCreateTask === undefined ? undefined : handleCreate}
           createHint={props.createHint}
         />
       </div>

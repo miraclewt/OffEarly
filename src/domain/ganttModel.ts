@@ -19,13 +19,30 @@ export type GanttScale = 'day' | 'week'
 /** 行高固定 32px（spec 5.4）；刻度只改列宽，不改行高。 */
 export const GANTT_ROW_HEIGHT = 32
 
+/**
+ * 自动范围的最小跨度（天，约 6 周）。
+ *
+ * 曾经的口径是「数据范围 + 两侧各留 3 天」——库里只有几个任务时，时间线只有十来格，
+ * 右侧一大片空白、也看不出任务处在什么时间背景下（用户报的现象）。
+ * 现在派生范围一律拉够这个跨度；显式传 `range` 的调用方（导出、单测）不受影响。
+ */
+export const GANTT_MIN_SPAN_DAYS = 42
+
+/** 最小跨度里分给「未来」的比例；剩下的给过去。往前看比往回翻更常用。 */
+const FUTURE_SHARE = 2 / 3
+
 export interface GanttViewport {
   /** 视口锚定的「今天」（YYYY-MM-DD）；默认取本地当天，注入以便测试确定化。 */
   today?: string
-  /** 显式指定时间范围；缺省或单侧缺省时按已排期数据自动求值，不做 padding。 */
+  /**
+   * 显式指定时间范围；缺省或单侧缺省时按已排期数据自动求值（见 resolveAutoRange）。
+   * 显式给出的一侧原样使用，不做 padding / 最小跨度拉伸。
+   */
   range?: { start?: string; end?: string }
   /** 数据派生范围两端各留几天（默认 3）；只在未显式给出 range 的一侧生效。 */
   paddingDays?: number
+  /** 自动范围的最小跨度（天）；默认 GANTT_MIN_SPAN_DAYS。显式 range 的一侧不参与拉伸。 */
+  minSpanDays?: number
   /**
    * 界面尺度（T40）。几何一律按它放大：行高、列宽、条高、里程碑边长。
    *
@@ -165,6 +182,68 @@ function inScope(scope: Set<string> | null, topicId: string | null): boolean {
   return scope === null || scope.has(topicId)
 }
 
+const DATE_FORMAT = 'YYYY-MM-DD'
+
+/**
+ * 自动范围（= 未显式给出的一侧）的求值口径，三条规则依次生效：
+ *
+ * ① **包含今天**：数据整体在窗口一侧、且离今天不超过一个最小跨度时，把那一侧扩到今天。
+ *    隔了半年的旧项目不在此列——为迁就「今天」把时间线撑成一条几乎全是空白的长卷没有意义。
+ * ② **拉够最小跨度**：数据只覆盖几天时，缺口按 2/3 给未来、1/3 给过去补足
+ *    （时间线太短是用户报的原始问题）。
+ * ③ **起点对齐 ISO 周一**：week 刻度的次行表头按周一起格，从周中开始会在最左侧
+ *    留一段没有表头文案的空白；对齐后顺带把首月表头也撑得像样些。
+ *
+ * 显式给出的一侧全程不参与拉伸——导出（range='full'）与单测都靠这个保证范围可预期。
+ */
+export function resolveAutoRange(input: {
+  derived: { start: string; end: string } | null
+  today: string
+  paddingDays: number
+  minSpanDays: number
+  explicit?: { start?: string; end?: string }
+}): { start: string; end: string } {
+  const { derived, today, explicit } = input
+  const padding = input.paddingDays
+  const minSpan = Math.max(1, Math.floor(input.minSpanDays))
+  const autoStart = explicit?.start === undefined
+  const autoEnd = explicit?.end === undefined
+
+  const anchorStart = derived?.start ?? today
+  const anchorEnd = derived?.end ?? today
+  let start = dayjs(explicit?.start ?? anchorStart)
+  let end = dayjs(explicit?.end ?? anchorEnd)
+  if (autoStart) start = start.subtract(padding, 'day')
+  if (autoEnd) end = end.add(padding, 'day')
+
+  const todayDate = dayjs(today)
+  if (autoStart && start.isAfter(todayDate, 'day') && start.diff(todayDate, 'day') <= minSpan) {
+    start = todayDate.subtract(padding, 'day')
+  }
+  if (autoEnd && end.isBefore(todayDate, 'day') && todayDate.diff(end, 'day') <= minSpan) {
+    end = todayDate.add(padding, 'day')
+  }
+
+  const span = end.diff(start, 'day') + 1
+  if (span < minSpan) {
+    let missing = minSpan - span
+    if (autoStart && autoEnd) {
+      const future = Math.ceil(missing * FUTURE_SHARE)
+      end = end.add(future, 'day')
+      missing -= future
+      start = start.subtract(missing, 'day')
+    } else if (autoEnd) {
+      end = end.add(missing, 'day')
+    } else if (autoStart) {
+      start = start.subtract(missing, 'day')
+    }
+  }
+
+  if (autoStart) start = dayjs(isoWeekStartOf(start.format(DATE_FORMAT)))
+
+  return { start: start.format(DATE_FORMAT), end: end.format(DATE_FORMAT) }
+}
+
 function clampBar(
   start: string,
   end: string,
@@ -227,11 +306,13 @@ export function buildGanttModel(
     .sort((a, b) => (a.date !== b.date ? (a.date < b.date ? -1 : 1) : a.id < b.id ? -1 : 1))
 
   const derived = deriveRange(scheduled, visibleMilestones)
-  const padding = viewport.paddingDays ?? 3
-  const rangeStart =
-    viewport.range?.start ?? (derived ? dayjs(derived.start).subtract(padding, 'day').format('YYYY-MM-DD') : today)
-  const rangeEnd =
-    viewport.range?.end ?? (derived ? dayjs(derived.end).add(padding, 'day').format('YYYY-MM-DD') : today)
+  const { start: rangeStart, end: rangeEnd } = resolveAutoRange({
+    derived,
+    today,
+    paddingDays: viewport.paddingDays ?? 3,
+    minSpanDays: viewport.minSpanDays ?? GANTT_MIN_SPAN_DAYS,
+    explicit: viewport.range,
+  })
 
   const cellWidth = cellWidthOf(scale) * s
   const columnDates: string[] = []

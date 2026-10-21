@@ -239,3 +239,44 @@ input[type='checkbox'] {
 .oe-card:hover {
   box-shadow: var(--oe-shadow-hover);
 }
+
+/* ── 入场：新建的任务卡 / 里程碑行淡入（里程碑行再多抬 3px） ──
+   只在挂载时跑一次，用来「确认新建生效」——此前创建成功与没创建长得一模一样。
+   卡片的 transform 归 dnd-kit 所有（拖拽位移写在内联样式上），**动画里绝不碰 transform**：
+   CSS 动画的优先级高于内联样式，一旦在关键帧里写 transform，拖拽会整段失灵。
+   也不加 fill-mode —— 动画结束后不能留下任何覆盖内联样式的声明。
+   尊重系统的「减弱动态效果」。 */
+@keyframes oe-enter-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes oe-enter-lift {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.oe-card {
+  animation: oe-enter-fade 140ms ease-out;
+}
+
+.oe-row {
+  animation: oe-enter-lift 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oe-card,
+  .oe-row {
+    animation: none;
+  }
+}

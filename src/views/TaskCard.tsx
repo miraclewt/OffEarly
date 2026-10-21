@@ -14,6 +14,7 @@
 // P0=逾期红 / P1=阻塞琥珀边 / P2=完成绿 / P3=弱化灰——效果图 01 的
 // 「高→红橙、中→琥珀、低→绿」梯度即此映射（P3 无效果图样例，取最弱一档）。
 
+import { memo } from 'react'
 import type { CSSProperties } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 
@@ -70,7 +71,13 @@ function toTransform(transform: { x: number; y: number } | null): string | undef
   return `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
 }
 
-export function TaskCard(props: TaskCardProps) {
+/**
+ * 卡片是 memo 的：看板一次变更要把整列重渲染，而绝大多数卡片的入参没变
+ * （task 对象来自不可变更新，未改动的任务引用不变）。不 memo 时新建一张卡
+ * 会连带重渲染全部卡片 + 全部 useSortable 订阅者，库稍大就是几十毫秒的掉帧。
+ * 调用方必须保证 `t` / `onOpenTask` 引用稳定，否则 memo 白做。
+ */
+export const TaskCard = memo(function TaskCard(props: TaskCardProps) {
   const { task, topic, dependencyCount, blocked, today, t } = props
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
@@ -264,6 +271,6 @@ export function TaskCard(props: TaskCardProps) {
       </div>
     </div>
   )
-}
+})
 
 export default TaskCard
