@@ -155,7 +155,16 @@ function resolve(path, { addBraceAfterHead = false, write = false } = {}) {
   return { blocks: blocks.length, leftover }
 }
 
-const { files, braceFiles, write } = parseArgs(process.argv.slice(2))
-for (const file of files) {
-  resolve(file, { addBraceAfterHead: braceFiles.includes(file), write })
+const USAGE =
+  '用法：node scripts/resolve-conflict.mjs <文件…> [--brace-after-head <文件…>] [--write]'
+
+try {
+  const { files, braceFiles, write } = parseArgs(process.argv.slice(2))
+  for (const file of files) {
+    resolve(file, { addBraceAfterHead: braceFiles.includes(file), write })
+  }
+} catch (error) {
+  // CLI 工具不该把 stack 甩给使用者：只报「哪里不对」和用法
+  console.error(`${error instanceof Error ? error.message : String(error)}\n\n${USAGE}`)
+  process.exit(1)
 }
