@@ -11,6 +11,7 @@ import { useState } from 'react'
 import type { CSSProperties } from 'react'
 
 import type { ConflictReport } from '../persistence/vaultRepository'
+import { fs, sp, px } from '../styles/scale'
 
 const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
@@ -59,8 +60,8 @@ function errorText(e: unknown): string {
 }
 
 const PANEL: CSSProperties = {
-  width: 420,
-  padding: '20px 24px',
+  width: sp(420),
+  padding: px('20px 24px'),
   background: 'var(--oe-surface)',
   border: '1px solid var(--oe-separator)',
   borderRadius: 'var(--oe-radius-overlay)',
@@ -68,8 +69,8 @@ const PANEL: CSSProperties = {
 }
 
 const BUTTON: CSSProperties = {
-  padding: '6px 14px',
-  fontSize: 13,
+  padding: px('6px 14px'),
+  fontSize: fs(13),
   background: 'var(--oe-surface)',
   border: `1px solid ${BORDER}`,
   borderRadius: 'var(--oe-radius-control)',
@@ -130,18 +131,18 @@ export function ConflictDialog(props: ConflictDialogProps) {
       }}
     >
       <div style={PANEL}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: TEXT }}>{text.title}</div>
-        <div style={{ fontSize: 12, color: MUTED, marginTop: 8, lineHeight: 1.7 }}>
+        <div style={{ fontSize: fs(15), fontWeight: 600, color: TEXT }}>{text.title}</div>
+        <div style={{ fontSize: fs(12), color: MUTED, marginTop: sp(8), lineHeight: 1.7 }}>
           {text.hint}
         </div>
         <div
           data-testid="conflict-drop-warning"
-          style={{ fontSize: 12, color: AMBER, marginTop: 8, lineHeight: 1.7 }}
+          style={{ fontSize: fs(12), color: AMBER, marginTop: sp(8), lineHeight: 1.7 }}
         >
           {fill(text.droppedWarning, report.droppedTaskCount)}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: sp(8), marginTop: sp(16) }}>
           <Choice
             testId="conflict-keep-mine"
             label={text.keepMine}
@@ -172,17 +173,17 @@ export function ConflictDialog(props: ConflictDialogProps) {
         </div>
 
         {pending === null ? null : (
-          <div data-testid="conflict-status" style={{ fontSize: 12, color: MUTED, marginTop: 12 }}>
+          <div data-testid="conflict-status" style={{ fontSize: fs(12), color: MUTED, marginTop: sp(12) }}>
             {text.busy}
           </div>
         )}
         {done && pending === null && error === null ? (
-          <div data-testid="conflict-status" style={{ fontSize: 12, color: MUTED, marginTop: 12 }}>
+          <div data-testid="conflict-status" style={{ fontSize: fs(12), color: MUTED, marginTop: sp(12) }}>
             {text.resolved}
           </div>
         ) : null}
         {error === null ? null : (
-          <div data-testid="conflict-error" style={{ fontSize: 12, color: 'var(--oe-overdue)', marginTop: 12 }}>
+          <div data-testid="conflict-error" style={{ fontSize: fs(12), color: 'var(--oe-overdue)', marginTop: sp(12) }}>
             {text.failed}：{errorText(error)}
           </div>
         )}
@@ -214,7 +215,7 @@ function Choice(props: {
       >
         {props.label}
       </button>
-      <div style={{ fontSize: 11, color: MUTED, marginTop: 4 }}>{props.hint}</div>
+      <div style={{ fontSize: fs(11), color: MUTED, marginTop: sp(4) }}>{props.hint}</div>
     </div>
   )
 }

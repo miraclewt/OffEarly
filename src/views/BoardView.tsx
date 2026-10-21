@@ -25,6 +25,7 @@ import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core'
 import { applyBoardDrop, isAboveCenter, sortByOrder } from '../controllers/boardDnd'
 import type { BoardDrop } from '../controllers/boardDnd'
 import { BoardColumn } from './BoardColumn'
+import { sp } from '../styles/scale'
 import { createDependencyGraph } from '../domain/dependencyGraph'
 import { createEmptyFilter, createQueryEngine, localDateKey } from '../domain/queryEngine'
 import type { CommandBus } from '../domain/commandBus'
@@ -177,8 +178,10 @@ export function BoardView(props: BoardViewProps) {
         data-testid="board"
         style={{
           display: 'flex',
-          gap: 12,
-          padding: 16,
+          // T40：看板留白与列间距同样跟随界面尺度 —— 只放大字号而间距不动，
+          // 大屏上会变成"字很大、卡片挤在一起"，反而比原来更难看。
+          gap: sp(12),
+          padding: sp(16),
           height: '100%',
           boxSizing: 'border-box',
           ...props.style,

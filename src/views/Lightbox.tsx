@@ -13,6 +13,7 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as 
 import { createI18n } from '../locales/i18n'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
+import { fs, sp, px } from '../styles/scale'
 
 const SURFACE = 'var(--oe-surface)'
 const BORDER = 'var(--oe-border)'
@@ -192,7 +193,7 @@ const BACKDROP: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  padding: 24,
+  padding: sp(24),
   background: 'var(--oe-scrim)',
   backdropFilter: 'blur(8px) saturate(140%)',
   WebkitBackdropFilter: 'blur(8px) saturate(140%)',
@@ -203,8 +204,8 @@ const PANEL: CSSProperties = {
   flexDirection: 'column',
   width: '100%',
   height: '100%',
-  maxWidth: 960,
-  maxHeight: 720,
+  maxWidth: sp(960),
+  maxHeight: sp(720),
   overflow: 'hidden',
   background: SURFACE,
   border: '1px solid var(--oe-separator)',
@@ -215,30 +216,30 @@ const PANEL: CSSProperties = {
 const HEADER: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
-  padding: '6px 8px',
+  gap: sp(8),
+  padding: px('6px 8px'),
   borderBottom: `1px solid ${BORDER}`,
-  fontSize: 12,
+  fontSize: fs(12),
   color: TEXT,
 }
 
 const FILENAME: CSSProperties = {
-  maxWidth: 320,
+  maxWidth: sp(320),
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
 }
 
 const SCALE_TEXT: CSSProperties = {
-  minWidth: 44,
-  fontSize: 11,
+  minWidth: sp(44),
+  fontSize: fs(11),
   color: MUTED,
 }
 
 const ACTIONS: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 2,
+  gap: sp(2),
   marginLeft: 'auto',
 }
 
@@ -246,9 +247,9 @@ const ICON_BUTTON: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  minWidth: 24,
-  height: 24,
-  padding: '0 4px',
+  minWidth: sp(24),
+  height: sp(24),
+  padding: px('0 4px'),
   color: MUTED,
   background: 'transparent',
   border: '1px solid transparent',
@@ -257,7 +258,7 @@ const ICON_BUTTON: CSSProperties = {
 }
 
 const RESET_TEXT: CSSProperties = {
-  fontSize: 11,
+  fontSize: fs(11),
 }
 
 const STAGE: CSSProperties = {
@@ -266,7 +267,7 @@ const STAGE: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   overflow: 'auto',
-  padding: 12,
+  padding: sp(12),
   background: 'var(--oe-fill)',
 }
 

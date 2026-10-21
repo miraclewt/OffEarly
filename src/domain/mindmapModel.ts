@@ -76,6 +76,8 @@ export interface MindMapLayoutOptions {
    * 需另加 opts 维度，不要改这里的行为（模型测试已锁定）。
    */
   foldAll?: boolean
+  /** 界面尺度（T40）：行高 / 间距 / 节点宽上下限 / 字号一起放大，默认 1。 */
+  uiScale?: number
 }
 
 /** 布局中间态：一个节点及其可见子节点，带最终矩形。 */
@@ -86,6 +88,11 @@ interface PlacedNode {
 
 export function buildMindMapModel(map: MindMap, opts?: MindMapLayoutOptions): MindMapModel {
   const foldAll = opts?.foldAll === true
+  // T40：布局常量全部乘这一个系数，视图只读模型，不会出现「字大了框没大」
+  const s = opts?.uiScale && opts.uiScale > 0 ? opts.uiScale : 1
+  const rowHeight = MINDMAP_NODE_HEIGHT * s
+  const vGap = MINDMAP_V_GAP * s
+  const hGap = MINDMAP_H_GAP * s
   const nodes: MindMapNodeView[] = []
   const edges: MindMapEdge[] = []
 
@@ -101,10 +108,10 @@ export function buildMindMapModel(map: MindMap, opts?: MindMapLayoutOptions): Mi
   /** 趟 1：子树像素高。折叠/叶子 = 行高；展开父 = max(行高, Σ子树高 + 间距)。 */
   function measure(node: MindNode): number {
     const children = visibleChildren(node)
-    if (children.length === 0) return MINDMAP_NODE_HEIGHT
-    let height = MINDMAP_V_GAP * (children.length - 1)
+    if (children.length === 0) return rowHeight
+    let height = vGap * (children.length - 1)
     for (const child of children) height += measure(child)
-    return Math.max(MINDMAP_NODE_HEIGHT, height)
+    return Math.max(rowHeight, height)
   }
 
   /** 趟 2：深度优先落子。先按 left 起排可见子列，再让自身在子列的垂直中心上居中。 */
@@ -115,8 +122,8 @@ export function buildMindMapModel(map: MindMap, opts?: MindMapLayoutOptions): Mi
     depth: number,
     parentId: string | null,
   ): PlacedNode {
-    const width = nodeWidth(node.text)
-    const childLeft = left + width + MINDMAP_H_GAP
+    const width = nodeWidth(node.text, s)
+    const childLeft = left + width + hGap
     const children: PlacedNode[] = []
     let cursorTop = top
     for (const child of visibleChildren(node)) {
@@ -124,24 +131,24 @@ export function buildMindMapModel(map: MindMap, opts?: MindMapLayoutOptions): Mi
       // 这里会重走一遍子树（O(n·depth)）：导图规模下够用，且不加可变缓存以保持纯函数可复算。
       const childHeight = measure(child)
       children.push(place(child, childLeft, cursorTop, depth + 1, node.id))
-      cursorTop += childHeight + MINDMAP_V_GAP
+      cursorTop += childHeight + vGap
     }
     const folded = isFoldedForLayout(node)
     // 折叠与叶子一样只占一行（落在 top 上）；展开父取子列中心
     const occupiedHeight =
-      children.length === 0 ? MINDMAP_NODE_HEIGHT : cursorTop - top - MINDMAP_V_GAP
-    const y = top + (occupiedHeight - MINDMAP_NODE_HEIGHT) / 2
+      children.length === 0 ? rowHeight : cursorTop - top - vGap
+    const y = top + (occupiedHeight - rowHeight) / 2
 
     return {
       view: {
         id: node.id,
-        text: truncatedText(node.text),
+        text: truncatedText(node.text, s),
         depth,
         parentId,
         x: left,
         y,
         width,
-        height: MINDMAP_NODE_HEIGHT,
+        height: rowHeight,
         folded,
         hiddenCount: folded ? hiddenUnder(node) : 0,
         hasChildren: node.children.length > 0,
@@ -191,18 +198,18 @@ function hiddenUnder(node: MindNode): number {
 }
 
 /** 标签截断 + 节点宽：clamp(估算(截断文本) + 内边距, 下限, 封顶)。text 即模型里渲染的那份。 */
-function truncatedText(text: string): string {
+function truncatedText(text: string, s = 1): string {
   return truncateGanttLabel(
     text,
-    MINDMAP_MAX_TEXT_WIDTH - MINDMAP_NODE_PADDING,
-    MINDMAP_FONT_SIZE,
+    (MINDMAP_MAX_TEXT_WIDTH - MINDMAP_NODE_PADDING) * s,
+    MINDMAP_FONT_SIZE * s,
   )
 }
 
-function nodeWidth(text: string): number {
+function nodeWidth(text: string, s = 1): number {
   const estimate =
-    estimateGanttLabelWidth(truncatedText(text), MINDMAP_FONT_SIZE) + MINDMAP_NODE_PADDING
-  return Math.min(MINDMAP_MAX_TEXT_WIDTH, Math.max(MINDMAP_MIN_NODE_WIDTH, estimate))
+    estimateGanttLabelWidth(truncatedText(text, s), MINDMAP_FONT_SIZE * s) + MINDMAP_NODE_PADDING * s
+  return Math.min(MINDMAP_MAX_TEXT_WIDTH * s, Math.max(MINDMAP_MIN_NODE_WIDTH * s, estimate))
 }
 
 /** 父右缘中点 → 子左缘中点，控制点取两端 x 中线的水平方向（xmind 曲线手感）。 */

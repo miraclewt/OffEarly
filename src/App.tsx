@@ -60,6 +60,7 @@ import { SaveIndicator } from './views/SaveIndicator'
 import { TopicSidebar } from './views/TopicSidebar'
 import { BackupPanel } from './views/BackupPanel'
 import { SettingsPanel } from './views/SettingsPanel'
+import { fs, px, sp } from './styles/scale'
 
 const INDIGO = 'var(--oe-accent)'
 const TEXT = 'var(--oe-text)'
@@ -293,9 +294,9 @@ function useI18n(source: LocaleSource): I18n {
 }
 
 const CARD: CSSProperties = {
-  maxWidth: 420,
+  maxWidth: sp(420),
   margin: '0 auto',
-  padding: '28px 32px',
+  padding: px('28px 32px'),
   background: 'var(--oe-surface)',
   border: `1px solid var(--oe-separator)`,
   borderRadius: 'var(--oe-radius-overlay)',
@@ -315,18 +316,18 @@ function StartupScreen(props: {
     <div style={{ display: 'grid', placeItems: 'center', height: '100%' }}>
       <div style={CARD}>
         <Icon name={props.icon} size={28} label="" />
-        <div style={{ fontSize: 15, fontWeight: 600, color: TEXT, marginTop: 12 }}>{props.title}</div>
-        <div style={{ fontSize: 12, color: MUTED, marginTop: 8, lineHeight: 1.7 }}>{props.hint}</div>
+        <div style={{ fontSize: fs(15), fontWeight: 600, color: TEXT, marginTop: sp(12) }}>{props.title}</div>
+        <div style={{ fontSize: fs(12), color: MUTED, marginTop: sp(8), lineHeight: 1.7 }}>{props.hint}</div>
         {props.reason === undefined ? null : (
-          <div style={{ fontSize: 12, color: 'var(--oe-blocked)', marginTop: 8 }}>{props.reason}</div>
+          <div style={{ fontSize: fs(12), color: 'var(--oe-blocked)', marginTop: sp(8) }}>{props.reason}</div>
         )}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 16 }}>
+        <div style={{ display: 'flex', gap: sp(8), justifyContent: 'center', marginTop: sp(16) }}>
           <button
             type="button"
             onClick={props.primary.onClick}
             style={{
-              padding: '6px 16px',
-              fontSize: 13,
+              padding: px('6px 16px'),
+              fontSize: fs(13),
               color: 'var(--oe-on-accent)',
               background: INDIGO,
               border: 'none',
@@ -341,8 +342,8 @@ function StartupScreen(props: {
               type="button"
               onClick={props.secondary.onClick}
               style={{
-                padding: '6px 16px',
-                fontSize: 13,
+                padding: px('6px 16px'),
+                fontSize: fs(13),
                 color: 'var(--oe-text-secondary)',
                 background: 'var(--oe-fill)',
                 border: 'none',
@@ -713,7 +714,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
     case 'booting':
     case 'busy':
       main = (
-        <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: MUTED, fontSize: 13 }}>
+        <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: MUTED, fontSize: fs(13) }}>
           {t('startup.busy')}
         </div>
       )
@@ -882,7 +883,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
         background: 'var(--oe-bg)',
         color: TEXT,
         fontFamily: 'var(--oe-font)',
-        fontSize: 14,
+        fontSize: fs(14),
       }}
     >
       <IconSprite />
@@ -890,8 +891,10 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <aside
           style={{
-            width: 220,
-            flex: '0 0 220px',
+            // T40：侧栏宽度与顶栏高度跟随界面尺度——大屏上若只放大字号不加宽，
+            // 话题名会被更早截断，反而比小屏更难读。
+            width: sp(220),
+            flex: `0 0 ${sp(220)}`,
             background: 'var(--oe-material-sidebar)',
             backdropFilter: 'blur(20px) saturate(180%)',
             WebkitBackdropFilter: 'blur(20px) saturate(180%)',
@@ -901,11 +904,11 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
             minHeight: 0,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: sp(8), padding: sp(16) }}>
             <LogoMark />
             <div>
-              <div style={{ fontSize: 15, fontWeight: 650, letterSpacing: '-0.01em' }}>OffEarly</div>
-              <div style={{ fontSize: 11, color: MUTED }}>早下班</div>
+              <div style={{ fontSize: fs(15), fontWeight: 650, letterSpacing: '-0.01em' }}>OffEarly</div>
+              <div style={{ fontSize: fs(11), color: MUTED }}>早下班</div>
             </div>
           </div>
           {session === null ? null : (
@@ -933,10 +936,10 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'flex-end',
-              gap: 12,
-              height: 44,
-              flex: '0 0 44px',
-              padding: '0 16px',
+              gap: sp(12),
+              height: sp(44),
+              flex: `0 0 ${sp(44)}`,
+              padding: `0 ${sp(16)}`,
               background: 'var(--oe-material-bar)',
               backdropFilter: 'blur(20px) saturate(180%)',
               WebkitBackdropFilter: 'blur(20px) saturate(180%)',
@@ -962,7 +965,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
               </div>
             )}
             {notice === null ? null : (
-              <span data-testid="shell-notice" style={{ fontSize: 12, color: 'var(--oe-blocked)' }}>
+              <span data-testid="shell-notice" style={{ fontSize: fs(12), color: 'var(--oe-blocked)' }}>
                 {'text' in notice ? notice.text : t(notice.key, notice.params)}
               </span>
             )}

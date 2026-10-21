@@ -24,6 +24,7 @@ import type { Topic } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
 import type { IconName } from './IconSprite'
+import { fs, px, sp } from '../styles/scale'
 
 const TEXT = 'var(--oe-text)'
 const MUTED = 'var(--oe-text-muted)'
@@ -147,15 +148,15 @@ export function TopicSidebar(props: TopicSidebarProps) {
           setEditing(null)
         }}
         style={{
-          margin: '4px 0 4px 20px',
-          padding: '3px 6px',
-          fontSize: 12,
+          margin: px('4px 0 4px 20px'),
+          padding: px('3px 6px'),
+          fontSize: fs(12),
           color: TEXT,
           background: 'var(--oe-surface)',
           border: `1px solid ${INDIGO}`,
           borderRadius: 'var(--oe-radius-control)',
           outline: 'none',
-          width: 'calc(100% - 24px)',
+          width: px('calc(100% - 24px)'),
           boxSizing: 'border-box',
         }}
       />
@@ -172,8 +173,8 @@ export function TopicSidebar(props: TopicSidebarProps) {
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(6, 1fr)',
-          gap: 4,
-          padding: '6px 0 6px 20px',
+          gap: sp(4),
+          padding: px('6px 0 6px 20px'),
         }}
       >
         {TOPIC_PALETTE.map((color) => (
@@ -189,8 +190,8 @@ export function TopicSidebar(props: TopicSidebarProps) {
               setPaletteFor(null)
             }}
             style={{
-              width: 16,
-              height: 16,
+              width: sp(16),
+              height: sp(16),
               padding: 0,
               background: color,
               border: color === topic.color ? `1px solid ${TEXT}` : '1px solid transparent',
@@ -239,10 +240,10 @@ export function TopicSidebar(props: TopicSidebarProps) {
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 6,
-            height: 26,
-            paddingLeft: 4 + depth * INDENT,
-            paddingRight: 4,
+            gap: sp(6),
+            height: sp(26),
+            paddingLeft: sp(4) + depth * INDENT,
+            paddingRight: sp(4),
             // 左色条 / 整行底色都在禁用之列（spec 9.3 C 方案），选中态只用圆角浅底行 + 文字色
             background: selected ? ROW_HOVER : hovered ? 'var(--oe-row-hover)' : 'transparent',
             borderRadius: 'var(--oe-radius-control)',
@@ -252,7 +253,7 @@ export function TopicSidebar(props: TopicSidebarProps) {
               : selected
                 ? 'var(--oe-accent-deep)'
                 : 'var(--oe-text-secondary)',
-            fontSize: 13,
+            fontSize: fs(13),
             fontWeight: selected ? 600 : 400,
           }}
         >
@@ -267,8 +268,8 @@ export function TopicSidebar(props: TopicSidebarProps) {
               }}
               style={{
                 display: 'flex',
-                width: 16,
-                height: 16,
+                width: sp(16),
+                height: sp(16),
                 padding: 0,
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -281,7 +282,7 @@ export function TopicSidebar(props: TopicSidebarProps) {
               <Icon name={expanded ? 'chevron' : 'chevron-right'} size={14} />
             </button>
           ) : (
-            <span style={{ width: 16, flex: '0 0 16px' }} />
+            <span style={{ width: sp(16), flex: px('0 0 16px') }} />
           )}
 
           {/* 色块 swatch：与 T15 卡片色点同一套颜色（都读 topic.color） */}
@@ -289,9 +290,9 @@ export function TopicSidebar(props: TopicSidebarProps) {
             data-testid={`topic-swatch-${topic.id}`}
             data-color={topic.color}
             style={{
-              width: 10,
-              height: 10,
-              flex: '0 0 10px',
+              width: sp(10),
+              height: sp(10),
+              flex: px('0 0 10px'),
               borderRadius: '50%',
               background: topic.color,
               opacity: topic.archived ? 0.4 : 1,
@@ -310,7 +311,7 @@ export function TopicSidebar(props: TopicSidebarProps) {
             {topic.name}
           </span>
 
-          <span data-testid={`topic-count-${topic.id}`} style={{ fontSize: 11, color: MUTED }}>
+          <span data-testid={`topic-count-${topic.id}`} style={{ fontSize: fs(11), color: MUTED }}>
             {countOf(topic.id)}
           </span>
 
@@ -328,8 +329,8 @@ export function TopicSidebar(props: TopicSidebarProps) {
               }}
               style={{
                 display: 'flex',
-                width: 16,
-                height: 16,
+                width: sp(16),
+                height: sp(16),
                 padding: 0,
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -360,9 +361,9 @@ export function TopicSidebar(props: TopicSidebarProps) {
     const itemStyle: CSSProperties = {
       display: 'block',
       width: '100%',
-      padding: '6px 10px',
+      padding: px('6px 10px'),
       textAlign: 'left',
-      fontSize: 12,
+      fontSize: fs(12),
       color: TEXT,
       background: 'transparent',
       border: 'none',
@@ -383,8 +384,8 @@ export function TopicSidebar(props: TopicSidebarProps) {
             position: 'fixed',
             left: menuFor.x === 0 ? 16 : menuFor.x,
             top: menuFor.y === 0 ? 16 : menuFor.y,
-            minWidth: 132,
-            padding: 4,
+            minWidth: sp(132),
+            padding: sp(4),
             background: 'var(--oe-surface)',
             border: '1px solid var(--oe-separator)',
             borderRadius: 'var(--oe-radius-card)',
@@ -462,8 +463,8 @@ export function TopicSidebar(props: TopicSidebarProps) {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        width: 220,
-        flex: '0 0 220px',
+        width: sp(220),
+        flex: px('0 0 220px'),
         height: '100%',
         minHeight: 0,
         // 材质由 App 外壳的振镜侧栏提供，这里保持透明，避免双层底色
@@ -477,9 +478,9 @@ export function TopicSidebar(props: TopicSidebarProps) {
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
-          padding: '10px 8px 6px 12px',
-          fontSize: 11,
+          gap: sp(6),
+          padding: px('10px 8px 6px 12px'),
+          fontSize: fs(11),
           fontWeight: 650,
           letterSpacing: '0.02em',
           color: 'var(--oe-text-faint)',
@@ -493,8 +494,8 @@ export function TopicSidebar(props: TopicSidebarProps) {
             setShowArchived((prev) => !prev)
           }}
           style={{
-            padding: '1px 6px',
-            fontSize: 11,
+            padding: px('1px 6px'),
+            fontSize: fs(11),
             fontWeight: 400,
             color: MUTED,
             background: 'transparent',
@@ -515,8 +516,8 @@ export function TopicSidebar(props: TopicSidebarProps) {
           }}
           style={{
             display: 'flex',
-            width: 18,
-            height: 18,
+            width: sp(18),
+            height: sp(18),
             padding: 0,
             alignItems: 'center',
             justifyContent: 'center',
@@ -533,7 +534,7 @@ export function TopicSidebar(props: TopicSidebarProps) {
       <div
         role="tree"
         data-testid="topic-tree"
-        style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 8px 8px' }}
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: px('0 8px 8px') }}
       >
         {roots.map((topic) => renderRow(topic, 0))}
         {renderEditor({ mode: 'create', parentId: null })}
@@ -543,10 +544,10 @@ export function TopicSidebar(props: TopicSidebarProps) {
         data-testid="topic-sidebar-footer"
         style={{
           borderTop: '1px solid var(--oe-separator)',
-          padding: 6,
+          padding: sp(6),
           display: 'flex',
           flexDirection: 'column',
-          gap: 2,
+          gap: sp(2),
         }}
       >
         {bottom.map((entry) => (
@@ -560,9 +561,9 @@ export function TopicSidebar(props: TopicSidebarProps) {
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 8,
-              padding: '6px 8px',
-              fontSize: 12,
+              gap: sp(8),
+              padding: px('6px 8px'),
+              fontSize: fs(12),
               color: 'var(--oe-text-secondary)',
               background: 'transparent',
               border: 'none',

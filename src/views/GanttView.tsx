@@ -36,6 +36,8 @@ import type { GanttExportFormat, GanttExportRange } from './GanttExporter'
 import { GanttCanvas } from './GanttCanvas'
 import { GanttTable } from './GanttTable'
 import { Icon } from './IconSprite'
+import { fs, px, sp } from '../styles/scale'
+import { useUiScale } from '../styles/useUiScale'
 
 const TEXT = 'var(--oe-text)'
 const TEXT_MUTED = 'var(--oe-text-muted)'
@@ -98,6 +100,8 @@ export function GanttView(props: GanttViewProps) {
   const [ownViewport] = useState(() => createGanttViewport({ scale: props.scale }))
   const viewport = props.viewport ?? ownViewport
   const state = useSyncExternalStore(viewport.subscribe, viewport.getState)
+  // T40：甘特的几何全在 JS 里算（行高、列宽、虚拟化窗口、箭头），必须订阅数值档位
+  const uiScale = useUiScale()
 
   const rootRef = useRef<HTMLDivElement | null>(null)
 
@@ -162,8 +166,13 @@ export function GanttView(props: GanttViewProps) {
   }, [])
 
   const model = useMemo(
-    () => buildGanttModel(vault, filter, state.scale, { today: props.today, range: props.range }),
-    [vault, filter, state.scale, props.today, props.range],
+    () =>
+      buildGanttModel(vault, filter, state.scale, {
+        today: props.today,
+        range: props.range,
+        uiScale: uiScale,
+      }),
+    [vault, filter, state.scale, props.today, props.range, uiScale],
   )
 
   const { lane, body } = useMemo(() => splitMilestoneLane(model.rows), [model])
@@ -175,8 +184,8 @@ export function GanttView(props: GanttViewProps) {
   // 两侧面板实际占位宽度：收起后各让出一条竖轨，中间画布拿回的全部空间都要如实还给视口，
   // 否则列窗口会按「表还在」的旧宽度算，画布右侧凭空少几列。
   const unscheduledOpen = unscheduledOverride ?? model.unscheduled.length > 0
-  const unscheduledPanelWidth = unscheduledOpen ? UNSCHEDULED_PANEL_WIDTH : UNSCHEDULED_PANEL_COLLAPSED_WIDTH
-  const tablePanelWidth = tableOpen ? GANTT_TABLE_WIDTH : GANTT_TABLE_RAIL_WIDTH
+  const unscheduledPanelWidth = (unscheduledOpen ? UNSCHEDULED_PANEL_WIDTH : UNSCHEDULED_PANEL_COLLAPSED_WIDTH) * uiScale
+  const tablePanelWidth = (tableOpen ? GANTT_TABLE_WIDTH : GANTT_TABLE_RAIL_WIDTH) * uiScale
 
   // 能测到真实容器尺寸就跟它走（file:// 单文件运行时）；测不到（jsdom）沿用注入值
   useEffect(() => {
@@ -187,7 +196,7 @@ export function GanttView(props: GanttViewProps) {
       if (box === undefined || box.width <= 0) return
       viewport.setViewportSize({
         width: Math.max(0, box.width - tablePanelWidth - unscheduledPanelWidth),
-        height: Math.max(0, box.height - TOOLBAR_HEIGHT),
+        height: Math.max(0, box.height - TOOLBAR_HEIGHT * uiScale),
       })
     })
     observer.observe(element)
@@ -337,7 +346,8 @@ export function GanttView(props: GanttViewProps) {
         display: 'flex',
         flexDirection: 'column',
         minWidth: 0,
-        height: canvasHeight + TOOLBAR_HEIGHT,
+        height: '100%',
+        minHeight: 0,
         background: 'var(--oe-surface)',
         color: TEXT,
         fontFamily: BODY_FONT,
@@ -348,12 +358,12 @@ export function GanttView(props: GanttViewProps) {
       <div
         data-testid="gantt-toolbar"
         style={{
-          height: TOOLBAR_HEIGHT,
-          flex: `0 0 ${TOOLBAR_HEIGHT}px`,
+          height: TOOLBAR_HEIGHT * uiScale,
+          flex: `0 0 ${TOOLBAR_HEIGHT * uiScale}px`,
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
-          padding: '0 12px',
+          gap: sp(8),
+          padding: px('0 12px'),
           borderBottom: '1px solid var(--oe-separator)',
           boxSizing: 'border-box',
         }}
@@ -385,7 +395,7 @@ export function GanttView(props: GanttViewProps) {
           {scaleButton('week', t('gantt.scale.week'))}
         </div>
 
-        <span style={{ width: 8 }} />
+        <span style={{ width: sp(8) }} />
 
         <button
           type="button"
@@ -401,7 +411,7 @@ export function GanttView(props: GanttViewProps) {
           data-testid="gantt-zoom-label"
           aria-label={t('gantt.resetZoom')}
           onClick={() => viewport.resetZoom()}
-          style={{ ...iconButtonStyle, width: 46, color: TEXT_MUTED }}
+          style={{ ...iconButtonStyle, width: sp(46), color: TEXT_MUTED }}
         >
           {`${Math.round(zoom * 100)}%`}
         </button>
@@ -415,11 +425,11 @@ export function GanttView(props: GanttViewProps) {
           <Icon name="zoom-in" />
         </button>
 
-        <span style={{ flex: 1, minWidth: 8 }} />
+        <span style={{ flex: 1, minWidth: sp(8) }} />
 
         <label
           data-testid="gantt-baseline-label"
-          style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TEXT_MUTED, cursor: 'pointer' }}
+          style={{ display: 'flex', alignItems: 'center', gap: sp(6), fontSize: fs(12), color: TEXT_MUTED, cursor: 'pointer' }}
         >
           <input
             type="checkbox"
@@ -433,7 +443,7 @@ export function GanttView(props: GanttViewProps) {
         {/* T21：关键路径高亮开关（默认开） */}
         <label
           data-testid="gantt-critical-label"
-          style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: TEXT_MUTED, cursor: 'pointer' }}
+          style={{ display: 'flex', alignItems: 'center', gap: sp(6), fontSize: fs(12), color: TEXT_MUTED, cursor: 'pointer' }}
         >
           <input
             type="checkbox"
@@ -446,7 +456,7 @@ export function GanttView(props: GanttViewProps) {
 
         {/* T23：导出反馈（成功/失败）；PNG 不可用的说明放在弹层内靠近该格式处 */}
         {exportHint === null ? null : (
-          <span data-testid="gantt-export-hint" style={{ fontSize: 12, color: TEXT_MUTED, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span data-testid="gantt-export-hint" style={{ fontSize: fs(12), color: TEXT_MUTED, maxWidth: sp(220), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {exportHint}
           </span>
         )}
@@ -472,14 +482,14 @@ export function GanttView(props: GanttViewProps) {
               aria-label={t('ganttExport.button')}
               style={{
                 position: 'absolute',
-                top: 26,
+                top: sp(26),
                 right: 0,
                 zIndex: 5,
-                width: 198,
+                width: sp(198),
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 8,
-                padding: 10,
+                gap: sp(8),
+                padding: sp(10),
                 boxSizing: 'border-box',
                 background: 'var(--oe-surface)',
                 border: '1px solid var(--oe-separator)',
@@ -488,8 +498,8 @@ export function GanttView(props: GanttViewProps) {
                 color: TEXT,
               }}
             >
-              <div style={{ fontSize: 12, color: TEXT_MUTED }}>{t('ganttExport.format')}</div>
-              <div role="radiogroup" aria-label={t('ganttExport.format')} style={{ display: 'flex', gap: 6 }}>
+              <div style={{ fontSize: fs(12), color: TEXT_MUTED }}>{t('ganttExport.format')}</div>
+              <div role="radiogroup" aria-label={t('ganttExport.format')} style={{ display: 'flex', gap: sp(6) }}>
                 {EXPORT_FORMAT_ORDER.map((format) => {
                   const disabled = format === 'png' && pngSupported === false
                   return (
@@ -513,8 +523,8 @@ export function GanttView(props: GanttViewProps) {
                 })}
               </div>
 
-              <div style={{ fontSize: 12, color: TEXT_MUTED }}>{t('ganttExport.range')}</div>
-              <div role="radiogroup" aria-label={t('ganttExport.range')} style={{ display: 'flex', gap: 6 }}>
+              <div style={{ fontSize: fs(12), color: TEXT_MUTED }}>{t('ganttExport.range')}</div>
+              <div role="radiogroup" aria-label={t('ganttExport.range')} style={{ display: 'flex', gap: sp(6) }}>
                 {EXPORT_RANGE_ORDER.map((range) => (
                   <button
                     key={range}
@@ -531,12 +541,12 @@ export function GanttView(props: GanttViewProps) {
               </div>
 
               {pngSupported === false ? (
-                <div data-testid="gantt-export-png-hint" style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--oe-blocked)' }}>
+                <div data-testid="gantt-export-png-hint" style={{ fontSize: fs(11), lineHeight: 1.45, color: 'var(--oe-blocked)' }}>
                   {t('ganttExport.pngUnsupported')}
                 </div>
               ) : null}
 
-              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: sp(6), justifyContent: 'flex-end' }}>
                 <button
                   type="button"
                   data-testid="gantt-export-cancel"
@@ -574,7 +584,7 @@ export function GanttView(props: GanttViewProps) {
             laneHeight={laneHeight}
             bodyRowCount={body.length}
             scrollTop={state.scrollTop}
-            width={GANTT_TABLE_WIDTH}
+            width={GANTT_TABLE_WIDTH * uiScale}
             height={canvasHeight}
             t={t}
           />
@@ -616,12 +626,13 @@ export function GanttView(props: GanttViewProps) {
  * 这样收起 / 展开来回切时画布的横向起点不会跳。展开入口在工具栏，这里不放第二个开关。
  */
 function GanttTableRail(props: { label: string; height: number }): ReactElement {
+  const s = useUiScale()
   return (
     <div
       data-testid="gantt-table-rail"
       style={{
-        flex: `0 0 ${GANTT_TABLE_RAIL_WIDTH}px`,
-        width: GANTT_TABLE_RAIL_WIDTH,
+        flex: `0 0 ${GANTT_TABLE_RAIL_WIDTH * s}px`,
+        width: GANTT_TABLE_RAIL_WIDTH * s,
         height: props.height,
         display: 'flex',
         flexDirection: 'column',
@@ -632,8 +643,8 @@ function GanttTableRail(props: { label: string; height: number }): ReactElement 
     >
       <div
         style={{
-          height: GANTT_HEADER_HEIGHT,
-          flex: `0 0 ${GANTT_HEADER_HEIGHT}px`,
+          height: GANTT_HEADER_HEIGHT * s,
+          flex: `0 0 ${GANTT_HEADER_HEIGHT * s}px`,
           borderBottom: '1px solid var(--oe-separator)',
           boxSizing: 'border-box',
         }}
@@ -641,7 +652,7 @@ function GanttTableRail(props: { label: string; height: number }): ReactElement 
       <div style={{ flex: 1, minHeight: 0, display: 'grid', placeItems: 'center' }}>
         <span
           aria-hidden="true"
-          style={{ writingMode: 'vertical-rl', fontSize: 11, letterSpacing: 2, color: TEXT_MUTED }}
+          style={{ writingMode: 'vertical-rl', fontSize: fs(11), letterSpacing: sp(2), color: TEXT_MUTED }}
         >
           {props.label}
         </span>
@@ -668,13 +679,14 @@ interface GanttUnscheduledPanelProps {
  */
 function GanttUnscheduledPanel(props: GanttUnscheduledPanelProps): ReactElement {
   const { tasks, topics, open, rowHeight, onToggle, onSelect, t } = props
+  const s = useUiScale()
   return (
     <div
       data-testid="gantt-unscheduled-panel"
       data-open={open ? 'true' : 'false'}
       style={{
-        flex: `0 0 ${open ? UNSCHEDULED_PANEL_WIDTH : UNSCHEDULED_PANEL_COLLAPSED_WIDTH}px`,
-        width: open ? UNSCHEDULED_PANEL_WIDTH : UNSCHEDULED_PANEL_COLLAPSED_WIDTH,
+        flex: `0 0 ${(open ? UNSCHEDULED_PANEL_WIDTH : UNSCHEDULED_PANEL_COLLAPSED_WIDTH) * s}px`,
+        width: (open ? UNSCHEDULED_PANEL_WIDTH : UNSCHEDULED_PANEL_COLLAPSED_WIDTH) * s,
         display: 'flex',
         flexDirection: 'column',
         minHeight: 0,
@@ -692,16 +704,16 @@ function GanttUnscheduledPanel(props: GanttUnscheduledPanelProps): ReactElement 
         aria-label={open ? t('ganttUnscheduled.collapse') : t('ganttUnscheduled.expand')}
         onClick={onToggle}
         style={{
-          flex: `0 0 ${TOOLBAR_HEIGHT}px`,
+          flex: `0 0 ${TOOLBAR_HEIGHT * s}px`,
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
+          gap: sp(6),
           width: '100%',
-          height: TOOLBAR_HEIGHT,
-          padding: open ? '0 10px' : 0,
+          height: TOOLBAR_HEIGHT * s,
+          padding: open ? px('0 10px') : 0,
           justifyContent: open ? 'flex-start' : 'center',
           boxSizing: 'border-box',
-          fontSize: 12,
+          fontSize: fs(12),
           color: TEXT,
           background: 'transparent',
           border: 'none',
@@ -723,7 +735,7 @@ function GanttUnscheduledPanel(props: GanttUnscheduledPanelProps): ReactElement 
         {open ? (
           <span
             data-testid="gantt-unscheduled-count"
-            style={{ marginLeft: 'auto', color: TEXT_MUTED, fontSize: 11 }}
+            style={{ marginLeft: 'auto', color: TEXT_MUTED, fontSize: fs(11) }}
           >
             {t('ganttUnscheduled.count', { n: tasks.length })}
           </span>
@@ -734,7 +746,7 @@ function GanttUnscheduledPanel(props: GanttUnscheduledPanelProps): ReactElement 
         tasks.length === 0 ? (
           <div
             data-testid="gantt-unscheduled-empty"
-            style={{ padding: '12px 10px', fontSize: 11, lineHeight: 1.5, color: TEXT_MUTED }}
+            style={{ padding: px('12px 10px'), fontSize: fs(11), lineHeight: 1.5, color: TEXT_MUTED }}
           >
             {t('ganttUnscheduled.empty')}
           </div>
@@ -760,10 +772,10 @@ function GanttUnscheduledPanel(props: GanttUnscheduledPanelProps): ReactElement 
                     height: rowHeight,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 8,
-                    padding: '0 10px',
+                    gap: sp(8),
+                    padding: px('0 10px'),
                     boxSizing: 'border-box',
-                    fontSize: 12,
+                    fontSize: fs(12),
                     color: TEXT,
                     borderBottom: '1px solid var(--oe-separator)',
                     cursor: 'pointer',
@@ -773,7 +785,7 @@ function GanttUnscheduledPanel(props: GanttUnscheduledPanelProps): ReactElement 
                     data-testid={`gantt-unscheduled-dot-${task.id}`}
                     data-color={color}
                     aria-hidden="true"
-                    style={{ flex: '0 0 8px', width: 8, height: 8, borderRadius: '50%', background: color }}
+                    style={{ flex: px('0 0 8px'), width: sp(8), height: sp(8), borderRadius: '50%', background: color }}
                   />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {task.title}
@@ -792,10 +804,10 @@ const iconButtonStyle: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 26,
-  height: 24,
+  width: sp(26),
+  height: sp(24),
   padding: 0,
-  fontSize: 12,
+  fontSize: fs(12),
   color: TEXT,
   background: 'transparent',
   border: 'none',
@@ -805,9 +817,9 @@ const iconButtonStyle: CSSProperties = {
 
 // T23 导出弹层的选项 chip（格式 / 范围 / 取消 / 导出共用一套）
 const exportChipStyle: CSSProperties = {
-  padding: '2px 8px',
-  fontSize: 12,
-  lineHeight: '18px',
+  padding: px('2px 8px'),
+  fontSize: fs(12),
+  lineHeight: px('18px'),
   color: TEXT,
   background: 'var(--oe-fill)',
   border: 'none',

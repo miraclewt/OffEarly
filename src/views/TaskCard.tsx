@@ -20,6 +20,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import type { Priority, Task, Topic } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
+import { fs, px, sp } from '../styles/scale'
 
 const TEXT = 'var(--oe-text)'
 const MUTED = 'var(--oe-text-muted)'
@@ -85,7 +86,7 @@ export function TaskCard(props: TaskCardProps) {
     border: '0.5px solid var(--oe-card-border)',
     borderRadius: 'var(--oe-radius-card)',
     boxShadow: 'var(--oe-shadow-card)',
-    padding: '10px 12px',
+    padding: `${sp(10)} ${sp(12)}`,
     cursor: 'grab',
     transform: toTransform(transform),
     transition,
@@ -123,13 +124,13 @@ export function TaskCard(props: TaskCardProps) {
       }}
     >
       {/* 第一行：标题 + 右上角标（琥珀阻塞标记 / 依赖角标） */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: sp(6) }}>
         <span
           title={task.title}
           style={{
             flex: 1,
             minWidth: 0,
-            fontSize: 13,
+            fontSize: fs(13),
             fontWeight: 600,
             lineHeight: 1.4,
             color: TEXT,
@@ -149,12 +150,12 @@ export function TaskCard(props: TaskCardProps) {
               display: 'inline-flex',
               alignItems: 'center',
               flex: '0 0 auto',
-              padding: '0 6px',
-              fontSize: 11,
-              lineHeight: '16px',
+              padding: `0 ${sp(6)}`,
+              fontSize: fs(11),
+              lineHeight: sp(16),
               color: BLOCKED_COLOR,
               background: BLOCKED_BG,
-              borderRadius: 6,
+              borderRadius: sp(6),
             }}
           >
             {t('card.blocked')}
@@ -167,10 +168,10 @@ export function TaskCard(props: TaskCardProps) {
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: 3,
+            gap: sp(3),
             flex: '0 0 auto',
             color: MUTED,
-            fontSize: 11,
+            fontSize: fs(11),
           }}
         >
           <Icon name="dependency" size={14} />
@@ -179,24 +180,24 @@ export function TaskCard(props: TaskCardProps) {
       </div>
 
       {/* 第二行 meta：话题色点+话题名 / 类别 chip / 优先级点 / 到期日 / 笔记图标 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: sp(6), marginTop: sp(6) }}>
         <span
           data-testid={`task-topic-dot-${task.id}`}
           data-color={topicColor}
           title={topic?.name}
           style={{
-            width: 8,
-            height: 8,
-            flex: '0 0 8px',
+            width: sp(8),
+            height: sp(8),
+            flex: px('0 0 8px'),
             borderRadius: '50%',
             background: topicColor,
           }}
         />
         <span
           style={{
-            fontSize: 11,
+            fontSize: fs(11),
             color: MUTED,
-            maxWidth: 96,
+            maxWidth: sp(96),
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -208,12 +209,12 @@ export function TaskCard(props: TaskCardProps) {
         <span
           data-testid={`task-kind-${task.id}`}
           style={{
-            padding: '0 6px',
-            fontSize: 11,
-            lineHeight: '16px',
+            padding: `0 ${sp(6)}`,
+            fontSize: fs(11),
+            lineHeight: sp(16),
             color: 'var(--oe-text-secondary)',
             background: 'var(--oe-fill)',
-            borderRadius: 6,
+            borderRadius: sp(6),
           }}
         >
           {t(`card.kind.${task.kind}` as MsgKey)}
@@ -226,9 +227,9 @@ export function TaskCard(props: TaskCardProps) {
           data-priority={task.priority}
           title={task.priority}
           style={{
-            width: 8,
-            height: 8,
-            flex: '0 0 8px',
+            width: sp(8),
+            height: sp(8),
+            flex: px('0 0 8px'),
             borderRadius: '50%',
             background: PRIORITY_DOT[task.priority],
           }}
@@ -240,7 +241,7 @@ export function TaskCard(props: TaskCardProps) {
             data-overdue={overdue ? 'true' : 'false'}
             title={task.due}
             style={{
-              fontSize: 11,
+              fontSize: fs(11),
               color: overdue ? OVERDUE : MUTED,
               fontWeight: overdue ? 600 : 400,
               whiteSpace: 'nowrap',

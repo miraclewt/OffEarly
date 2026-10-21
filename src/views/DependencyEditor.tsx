@@ -24,6 +24,7 @@ import type { VaultStore } from '../domain/store'
 import type { Dependency, DependencyType, Task } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
+import { fs, sp, px } from '../styles/scale'
 
 const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
@@ -165,8 +166,8 @@ export interface DependencyEditorProps {
 }
 
 const INPUT: CSSProperties = {
-  padding: '3px 6px',
-  fontSize: 12,
+  padding: px('3px 6px'),
+  fontSize: fs(12),
   color: TEXT,
   background: SURFACE,
   border: `1px solid ${BORDER}`,
@@ -178,9 +179,9 @@ const INPUT: CSSProperties = {
 const SMALL_GHOST: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 3,
-  padding: '2px 6px',
-  fontSize: 11,
+  gap: sp(3),
+  padding: px('2px 6px'),
+  fontSize: fs(11),
   color: SECONDARY,
   background: 'transparent',
   border: `1px solid ${BORDER}`,
@@ -216,7 +217,7 @@ function LagInput(props: { link: Dependency; commit: (lagDays: number) => void; 
       step={1}
       aria-label={t('drawer.depLag')}
       value={editing ? draft : String(link.lagDays)}
-      style={{ ...INPUT, width: 52 }}
+      style={{ ...INPUT, width: sp(52) }}
       onFocus={() => setEditing(true)}
       onChange={(event) => {
         setEditing(true)
@@ -301,20 +302,20 @@ export function DependencyEditor(props: DependencyEditorProps) {
         style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: 4,
-          padding: '6px 8px',
+          gap: sp(4),
+          padding: px('6px 8px'),
           border: `1px solid ${cyclic ? DANGER : BORDER}`,
           borderRadius: 'var(--oe-radius-card)',
           background: SURFACE,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: sp(6) }}>
           <span
             style={{
               flex: '0 0 auto',
-              padding: '0 5px',
-              fontSize: 10,
-              lineHeight: '15px',
+              padding: px('0 5px'),
+              fontSize: fs(10),
+              lineHeight: px('15px'),
               color: SECONDARY,
               background: FILL,
               borderRadius: 'var(--oe-radius-control)',
@@ -325,14 +326,14 @@ export function DependencyEditor(props: DependencyEditorProps) {
 
           <span
             data-testid={`dep-row-${link.id}-other`}
-            style={{ display: 'flex', minWidth: 0, alignItems: 'center', gap: 5, flex: 1 }}
+            style={{ display: 'flex', minWidth: 0, alignItems: 'center', gap: sp(5), flex: 1 }}
           >
             <span
               aria-hidden="true"
               style={{
-                width: 7,
-                height: 7,
-                flex: '0 0 7px',
+                width: sp(7),
+                height: sp(7),
+                flex: px('0 0 7px'),
                 borderRadius: '50%',
                 background: topic?.color ?? FAINT,
               }}
@@ -343,7 +344,7 @@ export function DependencyEditor(props: DependencyEditorProps) {
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
-                fontSize: 12,
+                fontSize: fs(12),
                 color: other === undefined ? MUTED : TEXT,
               }}
               title={other?.title}
@@ -357,9 +358,9 @@ export function DependencyEditor(props: DependencyEditorProps) {
               data-testid={`dep-row-${link.id}-cycle`}
               style={{
                 flex: '0 0 auto',
-                padding: '0 5px',
-                fontSize: 10,
-                lineHeight: '15px',
+                padding: px('0 5px'),
+                fontSize: fs(10),
+                lineHeight: px('15px'),
                 color: DANGER,
                 border: `1px solid ${DANGER}`,
                 borderRadius: 'var(--oe-radius-control)',
@@ -377,13 +378,13 @@ export function DependencyEditor(props: DependencyEditorProps) {
             onClick={() => {
               deleteDependency(link.id)
             }}
-            style={{ ...SMALL_GHOST, flex: '0 0 auto', padding: '0 4px', color: MUTED }}
+            style={{ ...SMALL_GHOST, flex: '0 0 auto', padding: px('0 4px'), color: MUTED }}
           >
             <Icon name="close" size={12} />
           </button>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: MUTED }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: sp(6), fontSize: fs(11), color: MUTED }}>
           <span>{t('drawer.depType')}</span>
           <select
             data-testid={`dep-row-${link.id}-type`}
@@ -393,7 +394,7 @@ export function DependencyEditor(props: DependencyEditorProps) {
             onChange={(event) => {
               patchDependency(link.id, { type: event.target.value as DependencyType })
             }}
-            style={{ ...INPUT, width: 62 }}
+            style={{ ...INPUT, width: sp(62) }}
           >
             {DEPENDENCY_TYPES.map((type) => (
               <option key={type} value={type}>
@@ -412,12 +413,12 @@ export function DependencyEditor(props: DependencyEditorProps) {
   return (
     <section
       data-testid="drawer-dependencies"
-      style={{ display: 'flex', flexDirection: 'column', gap: 8, ...props.style }}
+      style={{ display: 'flex', flexDirection: 'column', gap: sp(8), ...props.style }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: sp(6) }}>
         <Icon name="dependency" size={14} />
-        <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: TEXT }}>{t('drawer.sectionDeps')}</span>
-        <span data-testid="dep-count" style={{ fontSize: 11, color: MUTED }}>
+        <span style={{ flex: 1, fontSize: fs(12), fontWeight: 600, color: TEXT }}>{t('drawer.sectionDeps')}</span>
+        <span data-testid="dep-count" style={{ fontSize: fs(11), color: MUTED }}>
           {t('drawer.depCount', { n: total })}
         </span>
       </div>
@@ -426,8 +427,8 @@ export function DependencyEditor(props: DependencyEditorProps) {
         <div
           data-testid="dep-cycle-hint"
           style={{
-            padding: '5px 8px',
-            fontSize: 11,
+            padding: px('5px 8px'),
+            fontSize: fs(11),
             lineHeight: 1.6,
             color: DANGER,
             border: `1px solid ${DANGER}`,
@@ -439,7 +440,7 @@ export function DependencyEditor(props: DependencyEditorProps) {
       ) : null}
 
       <div style={{ position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: sp(6) }}>
           <span style={{ display: 'flex', flex: '0 0 auto', color: FAINT }}>
             <Icon name="search" size={14} />
           </span>
@@ -496,8 +497,8 @@ export function DependencyEditor(props: DependencyEditorProps) {
               left: 0,
               right: 0,
               zIndex: 30,
-              marginTop: 2,
-              maxHeight: 180,
+              marginTop: sp(2),
+              maxHeight: sp(180),
               overflowY: 'auto',
               background: SURFACE,
               border: `1px solid ${BORDER}`,
@@ -506,7 +507,7 @@ export function DependencyEditor(props: DependencyEditorProps) {
             }}
           >
             {candidates.length === 0 ? (
-              <div data-testid="dep-search-empty" style={{ padding: '6px 8px', fontSize: 11, color: MUTED }}>
+              <div data-testid="dep-search-empty" style={{ padding: px('6px 8px'), fontSize: fs(11), color: MUTED }}>
                 {t('drawer.depSearchEmpty')}
               </div>
             ) : (
@@ -530,9 +531,9 @@ export function DependencyEditor(props: DependencyEditorProps) {
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 6,
+                      gap: sp(6),
                       width: '100%',
-                      padding: '5px 8px',
+                      padding: px('5px 8px'),
                       background: index === highlight ? FILL : 'transparent',
                       border: 'none',
                       cursor: 'pointer',
@@ -542,9 +543,9 @@ export function DependencyEditor(props: DependencyEditorProps) {
                     <span
                       aria-hidden="true"
                       style={{
-                        width: 7,
-                        height: 7,
-                        flex: '0 0 7px',
+                        width: sp(7),
+                        height: sp(7),
+                        flex: px('0 0 7px'),
                         borderRadius: '50%',
                         background: topic?.color ?? FAINT,
                       }}
@@ -556,13 +557,13 @@ export function DependencyEditor(props: DependencyEditorProps) {
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
-                        fontSize: 12,
+                        fontSize: fs(12),
                         color: TEXT,
                       }}
                     >
                       {task.title}
                     </span>
-                    <span style={{ flex: '0 0 auto', fontSize: 11, color: MUTED }}>{topic?.name ?? ''}</span>
+                    <span style={{ flex: '0 0 auto', fontSize: fs(11), color: MUTED }}>{topic?.name ?? ''}</span>
                   </button>
                 )
               })
@@ -572,11 +573,11 @@ export function DependencyEditor(props: DependencyEditorProps) {
       </div>
 
       {total === 0 ? (
-        <div data-testid="dep-empty" style={{ fontSize: 11, color: MUTED, lineHeight: 1.7 }}>
+        <div data-testid="dep-empty" style={{ fontSize: fs(11), color: MUTED, lineHeight: 1.7 }}>
           {t('drawer.depEmpty')}
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: sp(6) }}>
           {sortByOtherTitle(groups.predecessors, (link) => link.from).map((link) =>
             renderRow(link, 'predecessor'),
           )}

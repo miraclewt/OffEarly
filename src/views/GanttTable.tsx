@@ -7,6 +7,7 @@ import { GANTT_HEADER_HEIGHT } from '../controllers/ganttViewport'
 import type { GanttRowWindow } from '../controllers/ganttViewport'
 import type { GanttRow } from '../domain/ganttModel'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
+import { fs, sp, px } from '../styles/scale'
 
 const TEXT = 'var(--oe-text)'
 const TEXT_MUTED = 'var(--oe-text-muted)'
@@ -39,9 +40,9 @@ function Swatch(props: { color: string | null }) {
     <span
       data-gantt-swatch="true"
       style={{
-        width: 8,
-        height: 8,
-        flex: '0 0 8px',
+        width: sp(8),
+        height: sp(8),
+        flex: px('0 0 8px'),
         borderRadius: '50%',
         background: props.color ?? DEFAULT_TOPIC_COLOR,
       }}
@@ -70,7 +71,7 @@ function Row(props: { row: GanttRow; top: number; height: number; t: GanttTableP
         alignItems: 'center',
         boxSizing: 'border-box',
         borderBottom: '1px solid var(--oe-separator)',
-        fontSize: 12,
+        fontSize: fs(12),
         color: TEXT,
       }}
     >
@@ -80,18 +81,18 @@ function Row(props: { row: GanttRow; top: number; height: number; t: GanttTableP
           minWidth: 0,
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
+          gap: sp(6),
           paddingLeft: indent,
-          paddingRight: 6,
+          paddingRight: sp(6),
         }}
       >
         {row.kind === 'milestone' ? (
           <span
             data-gantt-table-diamond="true"
             style={{
-              width: 8,
-              height: 8,
-              flex: '0 0 8px',
+              width: sp(8),
+              height: sp(8),
+              flex: px('0 0 8px'),
               background: row.color ?? DEFAULT_TOPIC_COLOR,
               transform: 'rotate(45deg)',
             }}
@@ -112,13 +113,13 @@ function Row(props: { row: GanttRow; top: number; height: number; t: GanttTableP
       </div>
       <div
         style={{
-          width: DATE_WIDTH,
+          width: sp(DATE_WIDTH),
           color: TEXT_MUTED,
-          flex: `0 0 ${DATE_WIDTH}px`,
-          paddingRight: DATE_GUTTER,
+          flex: `0 0 ${sp(DATE_WIDTH)}`,
+          paddingRight: sp(DATE_GUTTER),
           boxSizing: 'border-box',
           whiteSpace: 'nowrap',
-          fontSize: 11,
+          fontSize: fs(11),
           fontVariantNumeric: 'tabular-nums',
         }}
       >
@@ -126,13 +127,13 @@ function Row(props: { row: GanttRow; top: number; height: number; t: GanttTableP
       </div>
       <div
         style={{
-          width: DATE_WIDTH,
+          width: sp(DATE_WIDTH),
           color: TEXT_MUTED,
-          flex: `0 0 ${DATE_WIDTH}px`,
-          paddingRight: DATE_GUTTER,
+          flex: `0 0 ${sp(DATE_WIDTH)}`,
+          paddingRight: sp(DATE_GUTTER),
           boxSizing: 'border-box',
           whiteSpace: 'nowrap',
-          fontSize: 11,
+          fontSize: fs(11),
           fontVariantNumeric: 'tabular-nums',
         }}
       >
@@ -140,10 +141,10 @@ function Row(props: { row: GanttRow; top: number; height: number; t: GanttTableP
       </div>
       <div
         style={{
-          width: PROGRESS_WIDTH,
-          flex: `0 0 ${PROGRESS_WIDTH}px`,
+          width: sp(PROGRESS_WIDTH),
+          flex: `0 0 ${sp(PROGRESS_WIDTH)}`,
           textAlign: 'right',
-          paddingRight: 8,
+          paddingRight: sp(8),
           color: TEXT_MUTED,
         }}
       >
@@ -174,34 +175,34 @@ export function GanttTable(props: GanttTableProps) {
       <div
         data-testid="gantt-table-header"
         style={{
-          height: GANTT_HEADER_HEIGHT,
-          flex: `0 0 ${GANTT_HEADER_HEIGHT}px`,
+          height: sp(GANTT_HEADER_HEIGHT),
+          flex: `0 0 ${sp(GANTT_HEADER_HEIGHT)}`,
           display: 'flex',
           alignItems: 'center',
           borderBottom: '1px solid var(--oe-separator)',
-          fontSize: 11,
+          fontSize: fs(11),
           color: TEXT_MUTED,
           boxSizing: 'border-box',
         }}
       >
-        <div data-gantt-table-col="task" style={{ flex: 1, minWidth: 0, paddingLeft: 8 }}>
+        <div data-gantt-table-col="task" style={{ flex: 1, minWidth: 0, paddingLeft: sp(8) }}>
           {t('gantt.task')}
         </div>
         <div
           data-gantt-table-col="start"
-          style={{ width: DATE_WIDTH, flex: `0 0 ${DATE_WIDTH}px`, paddingRight: DATE_GUTTER, boxSizing: 'border-box' }}
+          style={{ width: sp(DATE_WIDTH), flex: `0 0 ${sp(DATE_WIDTH)}`, paddingRight: sp(DATE_GUTTER), boxSizing: 'border-box' }}
         >
           {t('gantt.start')}
         </div>
         <div
           data-gantt-table-col="end"
-          style={{ width: DATE_WIDTH, flex: `0 0 ${DATE_WIDTH}px`, paddingRight: DATE_GUTTER, boxSizing: 'border-box' }}
+          style={{ width: sp(DATE_WIDTH), flex: `0 0 ${sp(DATE_WIDTH)}`, paddingRight: sp(DATE_GUTTER), boxSizing: 'border-box' }}
         >
           {t('gantt.end')}
         </div>
         <div
           data-gantt-table-col="progress"
-          style={{ width: PROGRESS_WIDTH, flex: `0 0 ${PROGRESS_WIDTH}px`, textAlign: 'right', paddingRight: 8 }}
+          style={{ width: sp(PROGRESS_WIDTH), flex: `0 0 ${sp(PROGRESS_WIDTH)}`, textAlign: 'right', paddingRight: sp(8) }}
         >
           {t('gantt.progress')}
         </div>
@@ -230,19 +231,19 @@ export function GanttTable(props: GanttTableProps) {
                 height: laneHeight,
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
-                paddingLeft: 8,
+                gap: sp(6),
+                paddingLeft: sp(8),
                 boxSizing: 'border-box',
                 background: LANE_FILL,
                 borderBottom: '1px solid var(--oe-separator)',
-                fontSize: 12,
+                fontSize: fs(12),
                 fontWeight: 600,
                 color: TEXT,
               }}
             >
               <span
                 data-gantt-table-diamond="true"
-                style={{ width: 8, height: 8, flex: '0 0 8px', background: DEFAULT_TOPIC_COLOR, transform: 'rotate(45deg)' }}
+                style={{ width: sp(8), height: sp(8), flex: px('0 0 8px'), background: DEFAULT_TOPIC_COLOR, transform: 'rotate(45deg)' }}
               />
               <span style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
                 {t('gantt.crossTopicMilestone')}

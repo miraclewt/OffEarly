@@ -20,6 +20,7 @@ import {
   patchTaskCommand,
 } from '../../src/domain/commandBus'
 import { createVaultStore } from '../../src/domain/store'
+import { sp } from '../../src/styles/scale'
 import type { Dependency, Task, Topic, Vault } from '../../src/domain/types'
 import { createI18n } from '../../src/locales/i18n'
 import {
@@ -750,7 +751,8 @@ describe('T36 · 居中弹窗呈现', () => {
   it('样式可被外部覆写（面板宽度与遮罩内边距）', () => {
     const { view } = setup({ style: { maxWidth: 560 } })
     expect(view.getByTestId('task-drawer').style.maxWidth).toBe('560px')
-    expect(view.getByTestId('task-modal').style.padding).toBe('24px')
+    // T40 起内边距走尺度旋钮：单测里没有 installUiScale，默认档为 1，实际渲染仍是 24px
+    expect(view.getByTestId('task-modal').style.padding).toBe(sp(24))
   })
 
   it('点遮罩空白处关闭：onOpenChange(false) + onSelect(null)', () => {

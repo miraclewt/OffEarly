@@ -3,6 +3,8 @@
  * 描边语言集中在 symbol 上：1.5px、round cap/join、fill none；颜色走 currentColor，由使用处的文字色决定。
  */
 
+import { currentUiScale } from '../styles/scale'
+
 const ICON_GEOMETRY = {
   chevron: ['M6 9.5 L12 15.5 L18 9.5'],
   'chevron-right': ['M9.5 6 L15.5 12 L9.5 18'],
@@ -192,11 +194,14 @@ export interface IconProps {
 }
 
 export function Icon({ name, size = 16, label, className }: IconProps) {
+  // T40：图标尺寸与字号同源放大。调用点一律写"设计稿尺寸"，缩放收在这一处，
+  // 否则 4K 上会出现"字大了、图标还是 15px"的割裂（图标是定宽定高的 svg，不吃 inherit）。
+  const scaled = size * currentUiScale()
   return (
     <svg
       className={className}
-      width={size}
-      height={size}
+      width={scaled}
+      height={scaled}
       role={label === undefined ? undefined : 'img'}
       aria-label={label}
       aria-hidden={label === undefined ? 'true' : undefined}

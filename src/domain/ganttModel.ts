@@ -26,6 +26,13 @@ export interface GanttViewport {
   range?: { start?: string; end?: string }
   /** 数据派生范围两端各留几天（默认 3）；只在未显式给出 range 的一侧生效。 */
   paddingDays?: number
+  /**
+   * 界面尺度（T40）。几何一律按它放大：行高、列宽、条高、里程碑边长。
+   *
+   * 不缩放就会出现"字放大了、行没放开"的裁切——甘特的文字、条形、行高、
+   * 虚拟化窗口必须来自**同一个**数字。默认 1（单测与导出基线都按设计稿跑）。
+   */
+  uiScale?: number
 }
 
 export interface GanttColumn {
@@ -187,6 +194,13 @@ export function buildGanttModel(
   const today = viewport.today ?? toDateKey(new Date())
   const calendar = vault.settings.calendar
   const engine = createScheduleEngine(calendar)
+  // T40：所有几何都从这一个系数派生，避免"有的放大了有的没放"。
+  const s = viewport.uiScale && viewport.uiScale > 0 ? viewport.uiScale : 1
+  const rowHeight = GANTT_ROW_HEIGHT * s
+  const taskBarHeight = TASK_BAR_HEIGHT * s
+  const baselineBarHeight = BASELINE_BAR_HEIGHT * s
+  const milestoneSize = MILESTONE_SIZE * s
+  const arrowGap = ARROW_GAP * s
 
   const query = createQueryEngine(vault.topics, vault.tasks, vault.links, {
     today,
@@ -219,7 +233,7 @@ export function buildGanttModel(
   const rangeEnd =
     viewport.range?.end ?? (derived ? dayjs(derived.end).add(padding, 'day').format('YYYY-MM-DD') : today)
 
-  const cellWidth = cellWidthOf(scale)
+  const cellWidth = cellWidthOf(scale) * s
   const columnDates: string[] = []
   for (let cursor = dayjs(rangeStart); !cursor.isAfter(dayjs(rangeEnd), 'day'); cursor = cursor.add(1, 'day')) {
     columnDates.push(cursor.format('YYYY-MM-DD'))
@@ -301,11 +315,11 @@ export function buildGanttModel(
     orderedTopics.push(...rest)
   }
 
-  const barY = (rowIndex: number): number => rowIndex * GANTT_ROW_HEIGHT + (GANTT_ROW_HEIGHT - TASK_BAR_HEIGHT) / 2
+  const barY = (rowIndex: number): number => rowIndex * rowHeight + (rowHeight - taskBarHeight) / 2
 
   const pushRow = (row: Omit<GanttRow, 'rowIndex' | 'y' | 'height'>): number => {
     const rowIndex = rows.length
-    rows.push({ ...row, rowIndex, y: rowIndex * GANTT_ROW_HEIGHT, height: GANTT_ROW_HEIGHT })
+    rows.push({ ...row, rowIndex, y: rowIndex * rowHeight, height: rowHeight })
     return rowIndex
   }
 
@@ -348,7 +362,7 @@ export function buildGanttModel(
       })
       const y = barY(rowIndex)
       const row = rows[rowIndex]!
-      row.bar = clampBar(task.start!, task.due!, index, cellWidth, columns.length, y, TASK_BAR_HEIGHT, (width) =>
+      row.bar = clampBar(task.start!, task.due!, index, cellWidth, columns.length, y, taskBarHeight, (width) =>
         Math.round((width * task.progress) / 100),
       )
       if (task.baseline?.start && task.baseline.due) {
@@ -358,8 +372,8 @@ export function buildGanttModel(
           index,
           cellWidth,
           columns.length,
-          y + TASK_BAR_HEIGHT + 2,
-          BASELINE_BAR_HEIGHT,
+          y + taskBarHeight + 2 * s,
+          baselineBarHeight,
           () => 0,
         )
       }
@@ -385,10 +399,10 @@ export function buildGanttModel(
     if (columnIndex === undefined) continue
     const centerX = columnIndex * cellWidth + cellWidth / 2
     rows[rowIndex]!.bar = {
-      x: centerX - MILESTONE_SIZE / 2,
-      y: rowIndex * GANTT_ROW_HEIGHT + (GANTT_ROW_HEIGHT - MILESTONE_SIZE) / 2,
-      width: MILESTONE_SIZE,
-      height: MILESTONE_SIZE,
+      x: centerX - milestoneSize / 2,
+      y: rowIndex * rowHeight + (rowHeight - milestoneSize) / 2,
+      width: milestoneSize,
+      height: milestoneSize,
       progressWidth: 0,
     }
   }
@@ -408,8 +422,8 @@ export function buildGanttModel(
     const ty = to.bar.y + to.bar.height / 2
 
     let points: Array<{ x: number; y: number }>
-    if (tx >= sx + ARROW_GAP * 2) {
-      const midX = sx + ARROW_GAP
+    if (tx >= sx + arrowGap * 2) {
+      const midX = sx + arrowGap
       points = [
         { x: sx, y: sy },
         { x: midX, y: sy },
@@ -418,9 +432,9 @@ export function buildGanttModel(
       ]
     } else {
       // 空间不足时绕行：先向右出、再走贴近目标行的横沟、最后从左侧切入
-      const outX = sx + ARROW_GAP
-      const backX = tx - ARROW_GAP
-      const channelY = ty >= sy ? ty - ARROW_GAP : ty + ARROW_GAP
+      const outX = sx + arrowGap
+      const backX = tx - arrowGap
+      const channelY = ty >= sy ? ty - arrowGap : ty + arrowGap
       points = [
         { x: sx, y: sy },
         { x: outX, y: sy },
@@ -454,7 +468,7 @@ export function buildGanttModel(
     cycles,
     unscheduled,
     width: columns.length * cellWidth,
-    rowHeight: GANTT_ROW_HEIGHT,
+    rowHeight,
   }
 }
 

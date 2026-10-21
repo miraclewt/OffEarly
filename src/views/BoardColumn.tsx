@@ -18,6 +18,7 @@ import type { Status, Task, Topic } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
 import { TaskCard } from './TaskCard'
+import { fs, px, sp } from '../styles/scale'
 
 const TEXT = 'var(--oe-text)'
 const MUTED = 'var(--oe-text-muted)'
@@ -69,7 +70,7 @@ function AddTaskRow(props: {
       <div
         data-testid={`board-add-task-blocked-${status}`}
         title={createHint}
-        style={{ padding: '6px 4px', fontSize: 11, color: MUTED, textAlign: 'center' }}
+        style={{ padding: `${sp(6)} ${sp(4)}`, fontSize: fs(11), color: MUTED, textAlign: 'center' }}
       >
         {createHint}
       </div>
@@ -89,9 +90,9 @@ function AddTaskRow(props: {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 4,
-          padding: '6px 4px',
-          fontSize: 12,
+          gap: sp(4),
+          padding: `${sp(6)} ${sp(4)}`,
+          fontSize: fs(12),
           color: MUTED,
           background: 'transparent',
           border: 'none',
@@ -134,8 +135,8 @@ function AddTaskRow(props: {
         }}
         style={{
           width: '100%',
-          padding: '5px 7px',
-          fontSize: 12,
+          padding: `${sp(5)} ${sp(7)}`,
+          fontSize: fs(12),
           color: TEXT,
           background: 'var(--oe-surface)',
           border: `1px solid ${INDIGO}`,
@@ -144,7 +145,7 @@ function AddTaskRow(props: {
           boxSizing: 'border-box',
         }}
       />
-      <div style={{ padding: '3px 2px 0', fontSize: 11, color: MUTED }}>{t('newTask.hint')}</div>
+      <div style={{ padding: px('3px 2px 0'), fontSize: fs(11), color: MUTED }}>{t('newTask.hint')}</div>
     </div>
   )
 }
@@ -172,12 +173,12 @@ export function BoardColumn(props: BoardColumnProps) {
   const ratioText = ratio === null ? '—' : `${ratio}%`
 
   const headerCountStyle: CSSProperties = {
-    padding: '0 7px',
-    fontSize: 11,
-    lineHeight: '18px',
+    padding: `0 ${sp(7)}`,
+    fontSize: fs(11),
+    lineHeight: sp(18),
     color: 'var(--oe-text-muted)',
     background: 'var(--oe-fill)',
-    borderRadius: 999,
+    borderRadius: sp(999),
   }
 
   return (
@@ -197,11 +198,11 @@ export function BoardColumn(props: BoardColumnProps) {
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
-          padding: '10px 12px 6px',
+          gap: sp(8),
+          padding: `${sp(10)} ${sp(12)} ${sp(6)}`,
         }}
       >
-        <span style={{ fontSize: 13, fontWeight: 650, color: TEXT }}>{title}</span>
+        <span style={{ fontSize: fs(13), fontWeight: 650, color: TEXT }}>{title}</span>
         <span data-testid={`board-column-count-${status}`} style={headerCountStyle}>
           {tasks.length}
         </span>
@@ -209,7 +210,7 @@ export function BoardColumn(props: BoardColumnProps) {
         <span
           data-testid={`board-column-ratio-${status}`}
           title={t('card.progressRatio')}
-          style={{ fontSize: 11, color: 'var(--oe-text-faint)' }}
+          style={{ fontSize: fs(11), color: 'var(--oe-text-faint)' }}
         >
           {ratioText}
         </span>
@@ -223,10 +224,10 @@ export function BoardColumn(props: BoardColumnProps) {
           flex: 1,
           minHeight: 0,
           overflowY: 'auto',
-          padding: 8,
+          padding: sp(8),
           display: 'flex',
           flexDirection: 'column',
-          gap: 8,
+          gap: sp(8),
           background: isOver ? 'var(--oe-fill)' : 'transparent',
           borderRadius: 'var(--oe-radius-card)',
         }}
@@ -249,7 +250,7 @@ export function BoardColumn(props: BoardColumnProps) {
         {tasks.length === 0 ? (
           <div
             data-testid={`board-column-empty-${status}`}
-            style={{ padding: '24px 0', textAlign: 'center', fontSize: 12, color: MUTED }}
+            style={{ padding: `${sp(24)} 0`, textAlign: 'center', fontSize: fs(12), color: MUTED }}
           >
             {t('board.emptyColumn')}
           </div>

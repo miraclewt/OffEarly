@@ -21,6 +21,7 @@
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
 
 import { MINDMAP_FONT_SIZE } from '../domain/mindmapModel'
+import { currentUiScale } from '../styles/scale'
 import type { MindMapModel, MindMapNodeView } from '../domain/mindmapModel'
 
 /** 节点 pointerdown 的指针落点（屏幕坐标 + 指针 id + 按键）：视图层拖拽阈值的输入。 */
@@ -164,7 +165,7 @@ export function MindMapCanvas(props: MindMapCanvasProps) {
                 y={node.y}
                 width={node.width}
                 height={node.height}
-                rx={NODE_RADIUS}
+                rx={NODE_RADIUS * currentUiScale()}
                 strokeWidth={selected || dropping ? 2 : 1}
                 style={{
                   fill: paint.fill,
@@ -180,7 +181,7 @@ export function MindMapCanvas(props: MindMapCanvasProps) {
                   data-mindmap-label={node.id}
                   x={node.x + node.width / 2}
                   y={centerY(node)}
-                  fontSize={MINDMAP_FONT_SIZE}
+                  fontSize={MINDMAP_FONT_SIZE * currentUiScale()}
                   textAnchor="middle"
                   dominantBaseline="central"
                   pointerEvents="none"
@@ -199,14 +200,14 @@ export function MindMapCanvas(props: MindMapCanvasProps) {
                   <circle
                     cx={node.x + node.width}
                     cy={centerY(node)}
-                    r={BADGE_RADIUS}
+                    r={BADGE_RADIUS * currentUiScale()}
                     strokeWidth={1}
                     style={{ fill: 'var(--oe-fill)', stroke: 'var(--oe-border)' }}
                   />
                   <text
                     x={node.x + node.width}
                     y={centerY(node)}
-                    fontSize={BADGE_FONT_SIZE}
+                    fontSize={BADGE_FONT_SIZE * currentUiScale()}
                     textAnchor="middle"
                     dominantBaseline="central"
                     pointerEvents="none"

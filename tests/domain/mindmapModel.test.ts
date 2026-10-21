@@ -127,3 +127,22 @@ describe('buildMindMapModel：xmind 逻辑图·向右布局（纯函数）', () 
     expect(buildMindMapModel(structure)).toEqual(m)
   })
 })
+
+describe('T40 · 界面尺度：布局等比放大', () => {
+  it('行高 / 节点宽 / 父子间距与兄弟间距一起放大', () => {
+    const m = map(node('r', '根', [node('c1', '子一'), node('c2', '子二')]))
+    const base = buildMindMapModel(m)
+    const big = buildMindMapModel(m, { uiScale: 2 })
+
+    expect(pick(big, 'r').height).toBe(pick(base, 'r').height * 2)
+    expect(pick(big, 'r').width).toBe(pick(base, 'r').width * 2)
+    // 子节点 x = 父宽 + H_GAP，y 由行高与 V_GAP 递推 —— 两者都该翻倍
+    expect(pick(big, 'c1').x).toBe(pick(base, 'c1').x * 2)
+    expect(pick(big, 'c2').y).toBe(pick(base, 'c2').y * 2)
+  })
+
+  it('非法尺度回落到 1（视图/导出在不调 installUiScale 时保持设计稿）', () => {
+    const m = map(node('r', '根'))
+    expect(buildMindMapModel(m, { uiScale: 0 }).nodes[0]!.height).toBe(MINDMAP_NODE_HEIGHT)
+  })
+})

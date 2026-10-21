@@ -272,3 +272,38 @@ describe('T19 · 筛选联动（验收 1）', () => {
     expect(model.unscheduled.map((t) => t.id)).toEqual(['x'])
   })
 })
+
+describe('T40 · 界面尺度：几何等比放大', () => {
+  it('行高 / 列宽 / 条高一起放大，箭头端点跟着走', () => {
+    const base = buildGanttModel(vault, filter, 'day', { today: '2026-10-15' })
+    const big = buildGanttModel(vault, filter, 'day', { today: '2026-10-15', uiScale: 2 })
+
+    expect(big.rowHeight).toBe(base.rowHeight * 2)
+    expect(big.columns[0]!.width).toBe(base.columns[0]!.width * 2)
+
+    const baseTask = base.rows.find((row) => row.kind === 'task')!
+    const bigTask = big.rows.find((row) => row.id === baseTask.id)!
+    expect(bigTask.y).toBe(baseTask.y * 2)
+    expect(bigTask.bar!.x).toBe(baseTask.bar!.x * 2)
+    expect(bigTask.bar!.width).toBe(baseTask.bar!.width * 2)
+    expect(bigTask.bar!.height).toBe(baseTask.bar!.height * 2)
+
+    // 里程碑菱形与依赖箭头同样只由 rowHeight / cellWidth 派生
+    const baseMs = base.rows.find((row) => row.kind === 'milestone')!
+    const bigMs = big.rows.find((row) => row.id === baseMs.id)!
+    expect(bigMs.bar!.x).toBe(baseMs.bar!.x * 2)
+    expect(bigMs.bar!.width).toBe(baseMs.bar!.width * 2)
+    const points = (path: string): number[] => path.split(/[ ]/).filter((t) => t !== 'M' && t !== 'L').map(Number)
+    expect(points(big.arrows[0]!.path)).toEqual(points(base.arrows[0]!.path).map((n) => n * 2))
+  })
+
+  it('缺省与非法尺度都回落到 1（导出口径不受影响）', () => {
+    expect(buildGanttModel(vault, filter, 'day', { today: '2026-10-15' }).rowHeight).toBe(GANTT_ROW_HEIGHT)
+    expect(
+      buildGanttModel(vault, filter, 'day', { today: '2026-10-15', uiScale: 0 }).rowHeight,
+    ).toBe(GANTT_ROW_HEIGHT)
+    expect(
+      buildGanttModel(vault, filter, 'day', { today: '2026-10-15', uiScale: -3 }).rowHeight,
+    ).toBe(GANTT_ROW_HEIGHT)
+  })
+})

@@ -47,6 +47,7 @@ import {
   topicBarFill,
   topicProgressFill,
 } from './GanttCanvas'
+import { currentUiScale } from '../styles/scale'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const XML_PROLOG = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
@@ -64,6 +65,8 @@ export const GANTT_EXPORT_FONT_STACK =
  * 呈现属性（`fill=` / `stroke=`），呈现属性不解析 `var()`，写变量会渲染成黑色。
  * 已在 GanttCanvas 导出、且被渲染层与测试共同断言的色值直接复用，避免两套视觉语言漂移。
  */
+const sc = (value: number): number => value * currentUiScale()
+
 const EXPORT_SURFACE = '#FFFFFF' // --oe-surface
 const EXPORT_TEXT = '#111827' // --oe-text
 const EXPORT_TEXT_SECONDARY = '#374151' // --oe-text-secondary
@@ -211,7 +214,7 @@ export function resolveGanttScope(model: GanttModel, input: GanttExportScopeInpu
     rowCount: body.length,
     scrollTop: viewport.scrollTop,
     offsetY: laneHeight,
-    height: Math.max(0, viewport.height - GANTT_HEADER_HEIGHT),
+    height: Math.max(0, viewport.height - sc(GANTT_HEADER_HEIGHT)),
     rowHeight: model.rowHeight,
   })
   const columnWindow = computeColumnWindow({
@@ -272,7 +275,7 @@ function svgText(
     x,
     y,
     'font-family': GANTT_EXPORT_FONT_STACK,
-    'font-size': EXPORT_FONT_SIZE,
+    'font-size': sc(EXPORT_FONT_SIZE),
     fill: EXPORT_TEXT,
     ...attrs,
   })
@@ -306,7 +309,7 @@ function appendRowSwatch(group: SVGElement, row: GanttRow, centreY: number): voi
 
 function appendRowLabel(group: SVGElement, row: GanttRow, centreY: number): void {
   appendRowSwatch(group, row, centreY)
-  const label = truncateGanttLabel(row.label, EXPORT_GUTTER_WIDTH - 30, EXPORT_FONT_SIZE)
+  const label = truncateGanttLabel(row.label, sc(EXPORT_GUTTER_WIDTH) - 30, sc(EXPORT_FONT_SIZE))
   group.appendChild(
     svgText(24, centreY + 4, label, {
       fill: row.kind === 'topic' ? EXPORT_TEXT_SECONDARY : EXPORT_TEXT,
@@ -317,13 +320,13 @@ function appendRowLabel(group: SVGElement, row: GanttRow, centreY: number): void
 
 function appendMilestoneDiamond(group: SVGElement, id: string, cx: number, cy: number, fill: string, title: string): void {
   const diamond = svgEl('g', { 'data-gantt-milestone': id, transform: `translate(${cx} ${cy}) rotate(45)` })
-  const half = GANTT_MILESTONE_SIZE / 2
+  const half = sc(GANTT_MILESTONE_SIZE) / 2
   diamond.appendChild(
     svgEl('rect', {
       x: -half,
       y: -half,
-      width: GANTT_MILESTONE_SIZE,
-      height: GANTT_MILESTONE_SIZE,
+      width: sc(GANTT_MILESTONE_SIZE),
+      height: sc(GANTT_MILESTONE_SIZE),
       rx: 1,
       fill,
       stroke: EXPORT_SURFACE,
@@ -348,7 +351,7 @@ function appendBarLabel(group: SVGElement, row: GanttRow): void {
     svgText(label.x, row.bar.y + row.bar.height / 2 + 4, label.text, {
       'data-gantt-label': row.id,
       'data-placement': label.placement,
-      'font-size': GANTT_LABEL_FONT_SIZE,
+      'font-size': sc(GANTT_LABEL_FONT_SIZE),
       fill: label.fill,
     }),
   )
@@ -359,7 +362,7 @@ function appendMilestoneLabel(group: SVGElement, row: GanttRow, cx: number, cy: 
     svgText(milestoneLabelX(cx), cy + 4, row.label, {
       'data-gantt-label': row.id,
       'data-placement': 'outside',
-      'font-size': GANTT_LABEL_FONT_SIZE,
+      'font-size': sc(GANTT_LABEL_FONT_SIZE),
       fill: GANTT_LABEL_FILL,
     }),
   )
@@ -376,13 +379,13 @@ export function buildGanttSvgMarkup(model: GanttModel, options: GanttSvgOptions)
   const scope = resolveGanttScope(model, options)
 
   const rowHeight = model.rowHeight
-  const width = EXPORT_GUTTER_WIDTH + scope.contentWidth
-  const bodyTop = GANTT_HEADER_HEIGHT + scope.laneHeight
+  const width = sc(EXPORT_GUTTER_WIDTH) + scope.contentWidth
+  const bodyTop = sc(GANTT_HEADER_HEIGHT) + scope.laneHeight
   const height = bodyTop + scope.bodyHeight
   /** 模型 x → 导出图 x */
-  const toX = (modelX: number): number => EXPORT_GUTTER_WIDTH + modelX - scope.originX
+  const toX = (modelX: number): number => sc(EXPORT_GUTTER_WIDTH) + modelX - scope.originX
   /** body 内容整体平移量：列/条/箭头/今日线都按模型坐标画在这个 group 里 */
-  const bodyShiftX = EXPORT_GUTTER_WIDTH - scope.originX
+  const bodyShiftX = sc(EXPORT_GUTTER_WIDTH) - scope.originX
   const bodyShiftY = bodyTop - scope.originY
 
   // 注意：**不手动 setAttribute('xmlns', …)**。根元素由 createElementNS 建在 SVG 命名空间里，
@@ -392,7 +395,7 @@ export function buildGanttSvgMarkup(model: GanttModel, options: GanttSvgOptions)
     height,
     viewBox: `0 0 ${width} ${height}`,
     'font-family': GANTT_EXPORT_FONT_STACK,
-    'font-size': EXPORT_FONT_SIZE,
+    'font-size': sc(EXPORT_FONT_SIZE),
     fill: EXPORT_TEXT,
   }) as SVGSVGElement
 
@@ -415,21 +418,21 @@ export function buildGanttSvgMarkup(model: GanttModel, options: GanttSvgOptions)
   // ── 表头（月 / 日或周）+ 今日标签 ─────────────────────────────────────────
   const header = svgEl('g', { 'data-gantt-layer': 'header' })
   const headerBounds = { left: scope.originX, right: scope.originX + scope.contentWidth }
-  const monthRow = GANTT_HEADER_HEIGHT / 2
+  const monthRow = sc(GANTT_HEADER_HEIGHT) / 2
   const topCells = clipHeaderCells(model.headerRows[0] ?? [], headerBounds, 1)
   for (const cell of topCells) {
     header.appendChild(
-      svgEl('line', { x1: toX(cell.x), y1: 0, x2: toX(cell.x), y2: GANTT_HEADER_HEIGHT, stroke: EXPORT_BORDER, 'stroke-width': 1 }),
+      svgEl('line', { x1: toX(cell.x), y1: 0, x2: toX(cell.x), y2: sc(GANTT_HEADER_HEIGHT), stroke: EXPORT_BORDER, 'stroke-width': 1 }),
     )
-    header.appendChild(svgText(toX(cell.x) + 4, monthRow - 6, cell.label, { 'font-size': EXPORT_HEADER_FONT_SIZE, fill: EXPORT_TEXT_MUTED }))
+    header.appendChild(svgText(toX(cell.x) + 4, monthRow - 6, cell.label, { 'font-size': sc(EXPORT_HEADER_FONT_SIZE), fill: EXPORT_TEXT_MUTED }))
   }
   const bottomCells = clipHeaderCells(model.headerRows[1] ?? [], headerBounds, 1)
   for (const cell of bottomCells) {
     header.appendChild(
-      svgEl('line', { x1: toX(cell.x), y1: monthRow, x2: toX(cell.x), y2: GANTT_HEADER_HEIGHT, stroke: EXPORT_BORDER, 'stroke-width': 1 }),
+      svgEl('line', { x1: toX(cell.x), y1: monthRow, x2: toX(cell.x), y2: sc(GANTT_HEADER_HEIGHT), stroke: EXPORT_BORDER, 'stroke-width': 1 }),
     )
     header.appendChild(
-      svgText(toX(cell.x) + 4, GANTT_HEADER_HEIGHT - 6, cell.label, { 'font-size': EXPORT_HEADER_FONT_SIZE, fill: EXPORT_TEXT_SECONDARY }),
+      svgText(toX(cell.x) + 4, sc(GANTT_HEADER_HEIGHT) - 6, cell.label, { 'font-size': sc(EXPORT_HEADER_FONT_SIZE), fill: EXPORT_TEXT_SECONDARY }),
     )
   }
   root.appendChild(header)
@@ -439,13 +442,13 @@ export function buildGanttSvgMarkup(model: GanttModel, options: GanttSvgOptions)
   const todayCentre = todayColumn === undefined ? null : todayColumn.x + todayColumn.width / 2
   const todayInScope = todayCentre !== null && todayCentre >= scope.originX && todayCentre <= scope.originX + scope.contentWidth
   if (todayCentre !== null && todayInScope) {
-    const labelWidth = estimateGanttLabelWidth(todayLabel, EXPORT_HEADER_FONT_SIZE) + 10
+    const labelWidth = estimateGanttLabelWidth(todayLabel, sc(EXPORT_HEADER_FONT_SIZE)) + 10
     header.appendChild(
       svgEl('rect', { 'data-gantt-today-label': 'true', x: toX(todayCentre) - labelWidth / 2, y: 2, width: labelWidth, height: 16, rx: 6, fill: GANTT_TODAY_COLOR }),
     )
     header.appendChild(
       svgText(toX(todayCentre), 13, todayLabel, {
-        'font-size': EXPORT_HEADER_FONT_SIZE,
+        'font-size': sc(EXPORT_HEADER_FONT_SIZE),
         fill: EXPORT_ON_TODAY,
         'text-anchor': 'middle',
       }),
@@ -455,11 +458,11 @@ export function buildGanttSvgMarkup(model: GanttModel, options: GanttSvgOptions)
   // ── 跨话题里程碑轨道（始终整条保留，与画布一致） ──────────────────────────
   if (scope.laneHeight > 0) {
     const lane = svgEl('g', { 'data-gantt-layer': 'lane' })
-    lane.appendChild(svgEl('rect', { 'data-gantt-lane': 'true', x: 0, y: GANTT_HEADER_HEIGHT, width, height: scope.laneHeight, fill: EXPORT_LANE_FILL }))
+    lane.appendChild(svgEl('rect', { 'data-gantt-lane': 'true', x: 0, y: sc(GANTT_HEADER_HEIGHT), width, height: scope.laneHeight, fill: EXPORT_LANE_FILL }))
     for (const row of scope.lane) {
       if (row.bar === null) continue
       const cx = toX(row.bar.x + row.bar.width / 2)
-      const cy = GANTT_HEADER_HEIGHT + scope.laneHeight / 2
+      const cy = sc(GANTT_HEADER_HEIGHT) + scope.laneHeight / 2
       appendMilestoneDiamond(lane, row.id, cx, cy, topicBarFill(row.color), row.label)
       appendMilestoneLabel(lane, row, cx, cy)
     }
@@ -612,13 +615,13 @@ export function buildGanttSvgMarkup(model: GanttModel, options: GanttSvgOptions)
   // ── gutter：任务名 + 行分隔线（导出图没有 HTML 表格兜底，这里自己画） ──────
   const gutter = svgEl('g', { 'data-gantt-layer': 'gutter' })
   for (const row of scope.lane) {
-    appendRowLabel(gutter, row, GANTT_HEADER_HEIGHT + scope.laneHeight / 2)
+    appendRowLabel(gutter, row, sc(GANTT_HEADER_HEIGHT) + scope.laneHeight / 2)
   }
   scope.body.forEach((row, index) => {
     appendRowLabel(gutter, row, bodyTop + index * rowHeight + rowHeight / 2)
   })
   gutter.appendChild(
-    svgEl('line', { x1: 0, y1: GANTT_HEADER_HEIGHT, x2: width, y2: GANTT_HEADER_HEIGHT, stroke: EXPORT_BORDER, 'stroke-width': 1 }),
+    svgEl('line', { x1: 0, y1: sc(GANTT_HEADER_HEIGHT), x2: width, y2: sc(GANTT_HEADER_HEIGHT), stroke: EXPORT_BORDER, 'stroke-width': 1 }),
   )
   if (scope.laneHeight > 0) {
     gutter.appendChild(svgEl('line', { x1: 0, y1: bodyTop, x2: width, y2: bodyTop, stroke: EXPORT_BORDER, 'stroke-width': 1 }))
@@ -628,7 +631,7 @@ export function buildGanttSvgMarkup(model: GanttModel, options: GanttSvgOptions)
     gutter.appendChild(svgEl('line', { x1: 0, y1: y, x2: width, y2: y, stroke: EXPORT_BORDER, 'stroke-width': 1 }))
   })
   gutter.appendChild(
-    svgEl('line', { x1: EXPORT_GUTTER_WIDTH, y1: GANTT_HEADER_HEIGHT, x2: EXPORT_GUTTER_WIDTH, y2: height, stroke: EXPORT_BORDER, 'stroke-width': 1 }),
+    svgEl('line', { x1: sc(EXPORT_GUTTER_WIDTH), y1: sc(GANTT_HEADER_HEIGHT), x2: sc(EXPORT_GUTTER_WIDTH), y2: height, stroke: EXPORT_BORDER, 'stroke-width': 1 }),
   )
   root.appendChild(gutter)
 

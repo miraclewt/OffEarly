@@ -87,6 +87,10 @@
   --oe-scrim: rgba(20, 20, 28, 0.34);
 
   /* ── 排版 ───────────────────────────────────────────── */
+  /* 界面尺度：字号 / 间距 / 关键尺寸都乘这个旋钮（T40）。
+     默认 1 表示"设计稿原尺寸"；实际值由 styles/scale.ts 的 installUiScale()
+     按视口宽度判定后写到 <html> 的行内样式上，这里的 1 只是兜底。 */
+  --oe-ui-scale: 1;
   --oe-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
 }
@@ -102,7 +106,8 @@ body {
   background: var(--oe-bg);
   color: var(--oe-text);
   font-family: var(--oe-font);
-  font-size: 13px;
+  /* 基准字号也走尺度：按钮/输入框/下拉都是 font-size: inherit，吃这一处即可 */
+  font-size: calc(13px * var(--oe-ui-scale, 1));
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
@@ -137,15 +142,15 @@ select {
   -webkit-appearance: none;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%2386868b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat;
-  background-position: right 8px center;
-  padding-right: 26px !important;
+  background-position: right calc(8px * var(--oe-ui-scale, 1)) center;
+  padding-right: calc(26px * var(--oe-ui-scale, 1)) !important;
 }
 
 /* 滑杆：4px 圆槽 + 白圆钮柔影 */
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
-  height: 4px;
+  height: calc(4px * var(--oe-ui-scale, 1));
   border-radius: 999px;
   background: rgba(120, 120, 128, 0.22);
   border: none !important;
@@ -154,8 +159,8 @@ input[type='range'] {
 
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 15px;
-  height: 15px;
+  width: calc(15px * var(--oe-ui-scale, 1));
+  height: calc(15px * var(--oe-ui-scale, 1));
   border-radius: 50%;
   background: #ffffff;
   box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 2px 5px rgba(0, 0, 0, 0.2);
@@ -213,9 +218,9 @@ input[type='checkbox'] {
   background: transparent;
   color: var(--oe-text-secondary);
   border-radius: 6px;
-  padding: 3px 14px;
-  font-size: 12px;
-  line-height: 18px;
+  padding: calc(3px * var(--oe-ui-scale, 1)) calc(14px * var(--oe-ui-scale, 1));
+  font-size: calc(12px * var(--oe-ui-scale, 1));
+  line-height: calc(18px * var(--oe-ui-scale, 1));
   cursor: pointer;
 }
 

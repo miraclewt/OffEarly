@@ -51,6 +51,7 @@ import { NoteEditor } from './NoteEditor'
 import type { NoteAssetsPort, NoteLinkTarget } from './NoteEditor'
 import { SaveIndicator } from './SaveIndicator'
 import type { SaveIndicatorSource } from './SaveIndicator'
+import { fs, sp, px } from '../styles/scale'
 
 const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
@@ -61,7 +62,7 @@ const SURFACE = 'var(--oe-surface)'
 const INDIGO = 'var(--oe-accent)'
 const DANGER = 'var(--oe-overdue)'
 
-/** 弹窗面板的最大宽度；高度用 `maxHeight: 100%` 顶住视口（遮罩留 24px 内边距）。 */
+/** 弹窗面板的最大宽度；高度用 `maxHeight: sp(100)%` 顶住视口（遮罩留 24px 内边距）。 */
 const MODAL_MAX_WIDTH = 760
 
 const STATUSES: readonly Status[] = ['todo', 'doing', 'review', 'done']
@@ -145,8 +146,8 @@ export interface TaskDrawerProps {
 }
 
 const INPUT: CSSProperties = {
-  padding: '6px 10px',
-  fontSize: 12,
+  padding: px('6px 10px'),
+  fontSize: fs(12),
   color: TEXT,
   background: SURFACE,
   border: `1px solid ${BORDER}`,
@@ -159,8 +160,8 @@ const INPUT: CSSProperties = {
 const FIELD_LABEL: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 4,
-  fontSize: 11,
+  gap: sp(4),
+  fontSize: fs(11),
   fontWeight: 550,
   color: MUTED,
   minWidth: 0,
@@ -169,13 +170,13 @@ const FIELD_LABEL: CSSProperties = {
 const SECTION: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 8,
-  padding: '12px 0',
+  gap: sp(8),
+  padding: px('12px 0'),
   borderTop: '1px solid var(--oe-separator)',
 }
 
 const SECTION_TITLE: CSSProperties = {
-  fontSize: 12,
+  fontSize: fs(12),
   fontWeight: 650,
   color: TEXT,
 }
@@ -188,7 +189,7 @@ const BACKDROP: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  padding: 24,
+  padding: sp(24),
   background: 'var(--oe-scrim)',
   backdropFilter: 'blur(8px) saturate(140%)',
   WebkitBackdropFilter: 'blur(8px) saturate(140%)',
@@ -215,7 +216,7 @@ const PANEL: CSSProperties = {
 
 function SectionHeader(props: { icon: ReactNode; title: string; trailing?: ReactNode }): ReactNode {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: sp(6) }}>
       <span style={{ display: 'flex', flex: '0 0 auto', color: MUTED }}>{props.icon}</span>
       <span style={{ flex: 1, ...SECTION_TITLE }}>{props.title}</span>
       {props.trailing}
@@ -454,9 +455,9 @@ export function TaskDrawer(props: TaskDrawerProps) {
     const progress = done ? 100 : task.progress
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', padding: '0 18px 20px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', padding: px('0 18px 20px') }}>
         {/* ① 标题（inline 编辑） */}
-        <section data-testid="drawer-title-section" style={{ ...SECTION, borderTop: 'none', paddingTop: 4 }}>
+        <section data-testid="drawer-title-section" style={{ ...SECTION, borderTop: 'none', paddingTop: sp(4) }}>
           {titleDraft === null ? (
             <button
               type="button"
@@ -468,8 +469,8 @@ export function TaskDrawer(props: TaskDrawerProps) {
               style={{
                 display: 'block',
                 width: '100%',
-                padding: '2px 0',
-                fontSize: 15,
+                padding: px('2px 0'),
+                fontSize: fs(15),
                 fontWeight: 600,
                 lineHeight: 1.4,
                 color: TEXT,
@@ -489,7 +490,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
               value={titleDraft}
               autoFocus
               placeholder={t('drawer.untitled')}
-              style={{ ...INPUT, fontSize: 15, fontWeight: 600 }}
+              style={{ ...INPUT, fontSize: fs(15), fontWeight: 600 }}
               onChange={(event) => {
                 setTitleDraft(event.target.value)
               }}
@@ -512,7 +513,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
         {/* ② 属性行：状态 / 类别 / 优先级 / 话题 / 负责人 / 标签 */}
         <section data-testid="drawer-props-section" style={SECTION}>
           <div style={SECTION_TITLE}>{t('drawer.sectionProps')}</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: sp(8) }}>
             <label style={FIELD_LABEL}>
               {t('drawer.fieldStatus')}
               <select
@@ -609,7 +610,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
         {/* ③ 日期与进度：起止可填、工期只读、进度滑块（done 强压 100） */}
         <section data-testid="drawer-dates-section" style={SECTION}>
           <div style={SECTION_TITLE}>{t('drawer.sectionDates')}</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: sp(8) }}>
             <label style={FIELD_LABEL}>
               {t('drawer.fieldStart')}
               <input
@@ -639,25 +640,25 @@ export function TaskDrawer(props: TaskDrawerProps) {
           </div>
 
           {dateError === null ? null : (
-            <div data-testid="drawer-date-error" style={{ fontSize: 11, color: DANGER }}>
+            <div data-testid="drawer-date-error" style={{ fontSize: fs(11), color: DANGER }}>
               {t(dateError)}
             </div>
           )}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: sp(6) }}>
             <span style={{ display: 'flex', color: FAINT }}>
               <Icon name="clock" size={13} />
             </span>
-            <span style={{ fontSize: 11, color: MUTED }}>{t('drawer.fieldDuration')}</span>
-            <span data-testid="drawer-duration" style={{ fontSize: 12, color: SECONDARY }}>
+            <span style={{ fontSize: fs(11), color: MUTED }}>{t('drawer.fieldDuration')}</span>
+            <span data-testid="drawer-duration" style={{ fontSize: fs(12), color: SECONDARY }}>
               {durationLabel(task, calendar, t)}
             </span>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 11, color: MUTED }}>{t('drawer.fieldProgress')}</span>
-              <span data-testid="drawer-progress-value" style={{ fontSize: 12, color: SECONDARY }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: sp(4) }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: sp(6) }}>
+              <span style={{ fontSize: fs(11), color: MUTED }}>{t('drawer.fieldProgress')}</span>
+              <span data-testid="drawer-progress-value" style={{ fontSize: fs(12), color: SECONDARY }}>
                 {progress}%
               </span>
             </div>
@@ -676,7 +677,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
               }}
             />
             {done ? (
-              <div data-testid="drawer-progress-locked" style={{ fontSize: 11, color: MUTED }}>
+              <div data-testid="drawer-progress-locked" style={{ fontSize: fs(11), color: MUTED }}>
                 {t('drawer.doneProgressLocked')}
               </div>
             ) : null}
@@ -732,19 +733,19 @@ export function TaskDrawer(props: TaskDrawerProps) {
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 8,
+            gap: sp(8),
             flex: '0 0 auto',
-            padding: '10px 14px',
+            padding: px('10px 14px'),
             background: 'var(--oe-material-overlay)',
             backdropFilter: 'blur(16px) saturate(180%)',
             WebkitBackdropFilter: 'blur(16px) saturate(180%)',
             borderBottom: '1px solid var(--oe-separator)',
           }}
         >
-          <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: sp(8) }}>
             {props.autosave === undefined ? null : <SaveIndicator autosave={props.autosave} t={t} />}
           </span>
-          <span style={{ fontSize: 13, fontWeight: 650, color: TEXT }}>{t('drawer.title')}</span>
+          <span style={{ fontSize: fs(13), fontWeight: 650, color: TEXT }}>{t('drawer.title')}</span>
           <span style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
             <button
               type="button"
@@ -756,8 +757,8 @@ export function TaskDrawer(props: TaskDrawerProps) {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: 22,
-                height: 22,
+                width: sp(22),
+                height: sp(22),
                 padding: 0,
                 color: MUTED,
                 background: 'var(--oe-fill)',
@@ -774,7 +775,7 @@ export function TaskDrawer(props: TaskDrawerProps) {
         {task === undefined ? (
           <div
             data-testid="drawer-missing-task"
-            style={{ padding: '24px 16px', fontSize: 12, color: MUTED, textAlign: 'center', lineHeight: 1.7 }}
+            style={{ padding: px('24px 16px'), fontSize: fs(12), color: MUTED, textAlign: 'center', lineHeight: 1.7 }}
           >
             {t('drawer.missingTask')}
           </div>

@@ -8,6 +8,7 @@ import type { CSSProperties } from 'react'
 
 import type { SaveState } from '../persistence/autosave'
 import type { MsgKey } from '../locales/i18n'
+import { fs, sp, px } from '../styles/scale'
 
 export interface SaveIndicatorSource {
   subscribe(listener: () => void): () => void
@@ -42,9 +43,9 @@ export function SaveIndicator(props: {
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
-        fontSize: 12,
-        lineHeight: '20px',
+        gap: sp(6),
+        fontSize: fs(12),
+        lineHeight: px('20px'),
         color: COLOR[state],
         ...props.style,
       }}
@@ -57,9 +58,9 @@ export function SaveIndicator(props: {
             void autosave.retry()
           }}
           style={{
-            padding: '0 8px',
-            fontSize: 12,
-            lineHeight: '18px',
+            padding: px('0 8px'),
+            fontSize: fs(12),
+            lineHeight: px('18px'),
             color: DANGER,
             background: 'var(--oe-surface)',
             border: `1px solid ${DANGER}`,

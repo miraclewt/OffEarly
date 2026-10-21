@@ -29,6 +29,7 @@ import { createTopicTree } from '../domain/topicTree'
 import type { Milestone, Topic, Vault } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
+import { fs, sp, px } from '../styles/scale'
 
 const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
@@ -163,8 +164,8 @@ export interface MilestonePanelProps {
 }
 
 const INPUT: CSSProperties = {
-  padding: '4px 6px',
-  fontSize: 12,
+  padding: px('4px 6px'),
+  fontSize: fs(12),
   color: TEXT,
   background: SURFACE,
   border: `1px solid ${BORDER}`,
@@ -177,14 +178,14 @@ const INPUT: CSSProperties = {
 const FIELD_LABEL: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 3,
-  fontSize: 11,
+  gap: sp(3),
+  fontSize: fs(11),
   color: MUTED,
 }
 
 const PRIMARY_BUTTON: CSSProperties = {
-  padding: '5px 12px',
-  fontSize: 12,
+  padding: px('5px 12px'),
+  fontSize: fs(12),
   fontWeight: 600,
   color: 'var(--oe-on-accent)',
   background: INDIGO,
@@ -194,8 +195,8 @@ const PRIMARY_BUTTON: CSSProperties = {
 }
 
 const GHOST_BUTTON: CSSProperties = {
-  padding: '5px 10px',
-  fontSize: 12,
+  padding: px('5px 10px'),
+  fontSize: fs(12),
   color: SECONDARY,
   background: 'transparent',
   border: `1px solid ${BORDER}`,
@@ -351,12 +352,12 @@ export function MilestonePanel(props: MilestonePanelProps) {
         style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: 8,
-          padding: '10px 10px 12px',
+          gap: sp(8),
+          padding: px('10px 10px 12px'),
           borderBottom: `1px solid ${BORDER}`,
         }}
       >
-        <div style={{ fontSize: 12, fontWeight: 600, color: TEXT }}>
+        <div style={{ fontSize: fs(12), fontWeight: 600, color: TEXT }}>
           {editing ? t('milestonePanel.edit') : t('milestonePanel.new')}
         </div>
 
@@ -388,7 +389,7 @@ export function MilestonePanel(props: MilestonePanelProps) {
           />
         </label>
         {dateError ? (
-          <div data-testid="milestone-error" style={{ fontSize: 11, color: OVERDUE_RED }}>
+          <div data-testid="milestone-error" style={{ fontSize: fs(11), color: OVERDUE_RED }}>
             {t('milestonePanel.invalidDate')}
           </div>
         ) : null}
@@ -414,12 +415,12 @@ export function MilestonePanel(props: MilestonePanelProps) {
           </select>
         </label>
         {draft.topicId === null ? (
-          <div data-testid="milestone-cross-hint" style={{ fontSize: 11, color: MUTED, lineHeight: 1.6 }}>
+          <div data-testid="milestone-cross-hint" style={{ fontSize: fs(11), color: MUTED, lineHeight: 1.6 }}>
             {t('milestonePanel.crossTopicHint')}
           </div>
         ) : null}
 
-        <label style={{ ...FIELD_LABEL, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <label style={{ ...FIELD_LABEL, flexDirection: 'row', alignItems: 'center', gap: sp(6) }}>
           <input
             data-testid="milestone-done-toggle"
             type="checkbox"
@@ -428,16 +429,16 @@ export function MilestonePanel(props: MilestonePanelProps) {
               setDraft({ ...draft, done: event.target.checked })
             }}
           />
-          <span style={{ fontSize: 12, color: SECONDARY }}>{t('milestonePanel.fieldDone')}</span>
+          <span style={{ fontSize: fs(12), color: SECONDARY }}>{t('milestonePanel.fieldDone')}</span>
         </label>
 
         <div>
-          <div style={{ fontSize: 11, color: MUTED, marginBottom: 4 }}>{t('milestonePanel.fieldColor')}</div>
+          <div style={{ fontSize: fs(11), color: MUTED, marginBottom: sp(4) }}>{t('milestonePanel.fieldColor')}</div>
           <div
             data-testid="milestone-color-palette"
             role="group"
             aria-label={t('milestonePanel.fieldColor')}
-            style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 4 }}
+            style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: sp(4) }}
           >
             {TOPIC_PALETTE.map((color) => (
               <button
@@ -450,8 +451,8 @@ export function MilestonePanel(props: MilestonePanelProps) {
                   setDraft({ ...draft, color })
                 }}
                 style={{
-                  width: 16,
-                  height: 16,
+                  width: sp(16),
+                  height: sp(16),
                   padding: 0,
                   background: color,
                   border: color === draft.color ? `1px solid ${TEXT}` : '1px solid transparent',
@@ -463,7 +464,7 @@ export function MilestonePanel(props: MilestonePanelProps) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+        <div style={{ display: 'flex', gap: sp(6), marginTop: sp(2) }}>
           <button type="button" data-testid="milestone-save" onClick={saveDraft} style={PRIMARY_BUTTON}>
             {t('milestonePanel.save')}
           </button>
@@ -485,9 +486,9 @@ export function MilestonePanel(props: MilestonePanelProps) {
           confirmingDelete ? (
             <div
               data-testid="milestone-delete-confirm-bar"
-              style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}
+              style={{ display: 'flex', alignItems: 'center', gap: sp(6), marginTop: sp(2) }}
             >
-              <span style={{ flex: 1, fontSize: 11, color: MUTED, lineHeight: 1.5 }}>
+              <span style={{ flex: 1, fontSize: fs(11), color: MUTED, lineHeight: 1.5 }}>
                 {t('milestonePanel.deleteHint')}
               </span>
               <button type="button" data-testid="milestone-delete-confirm" onClick={deleteDraft} style={DANGER_BUTTON}>
@@ -511,7 +512,7 @@ export function MilestonePanel(props: MilestonePanelProps) {
               onClick={() => {
                 setConfirmingDelete(true)
               }}
-              style={{ ...GHOST_BUTTON, marginTop: 2, alignSelf: 'flex-start' }}
+              style={{ ...GHOST_BUTTON, marginTop: sp(2), alignSelf: 'flex-start' }}
             >
               {t('milestonePanel.delete')}
             </button>
@@ -536,8 +537,8 @@ export function MilestonePanel(props: MilestonePanelProps) {
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
-          padding: '0 10px',
+          gap: sp(6),
+          padding: px('0 10px'),
           background: selected ? ROW_SELECTED : 'transparent',
         }}
       >
@@ -552,8 +553,8 @@ export function MilestonePanel(props: MilestonePanelProps) {
             flex: 1,
             minWidth: 0,
             alignItems: 'center',
-            gap: 8,
-            padding: '5px 0',
+            gap: sp(8),
+            padding: px('5px 0'),
             background: 'transparent',
             border: 'none',
             cursor: 'pointer',
@@ -564,13 +565,13 @@ export function MilestonePanel(props: MilestonePanelProps) {
           <span
             aria-hidden="true"
             style={{
-              width: 9,
-              height: 9,
-              flex: '0 0 9px',
+              width: sp(9),
+              height: sp(9),
+              flex: px('0 0 9px'),
               transform: 'rotate(45deg)',
               background: milestone.done ? color : 'transparent',
               border: `1px solid ${color}`,
-              borderRadius: 1,
+              borderRadius: sp(1),
             }}
           />
           <span
@@ -580,21 +581,21 @@ export function MilestonePanel(props: MilestonePanelProps) {
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              fontSize: 12,
+              fontSize: fs(12),
               color: milestone.done ? MUTED : TEXT,
               textDecoration: milestone.done ? 'line-through' : 'none',
             }}
           >
             {milestone.title}
           </span>
-          <span style={{ fontSize: 11, color: MUTED, flex: '0 0 auto' }}>{milestone.date}</span>
+          <span style={{ fontSize: fs(11), color: MUTED, flex: '0 0 auto' }}>{milestone.date}</span>
           {cross ? (
             <span
               data-testid={`milestone-badge-${milestone.id}`}
               style={{
                 flex: '0 0 auto',
-                padding: '0 5px',
-                fontSize: 10,
+                padding: px('0 5px'),
+                fontSize: fs(10),
                 color: SECONDARY,
                 background: 'var(--oe-fill)',
                 borderRadius: 'var(--oe-radius-control)',
@@ -607,18 +608,18 @@ export function MilestonePanel(props: MilestonePanelProps) {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 4,
+                gap: sp(4),
                 flex: '0 0 auto',
-                maxWidth: 84,
-                fontSize: 11,
+                maxWidth: sp(84),
+                fontSize: fs(11),
                 color: SECONDARY,
               }}
             >
               <span
                 style={{
-                  width: 8,
-                  height: 8,
-                  flex: '0 0 8px',
+                  width: sp(8),
+                  height: sp(8),
+                  flex: px('0 0 8px'),
                   borderRadius: 'var(--oe-radius-control)',
                   background: topic?.color ?? color,
                 }}
@@ -638,8 +639,8 @@ export function MilestonePanel(props: MilestonePanelProps) {
           }}
           style={{
             flex: '0 0 auto',
-            padding: '1px 6px',
-            fontSize: 11,
+            padding: px('1px 6px'),
+            fontSize: fs(11),
             color: milestone.done ? DONE_GREEN : MUTED,
             background: 'transparent',
             border: `1px solid ${milestone.done ? DONE_GREEN : BORDER}`,
@@ -657,7 +658,7 @@ export function MilestonePanel(props: MilestonePanelProps) {
     if (items.length === 0) return null
     return (
       <div key={key} data-testid={`milestone-group-${key}`}>
-        <div style={{ padding: '6px 10px 2px', fontSize: 11, fontWeight: 600, color: MUTED }}>{title}</div>
+        <div style={{ padding: px('6px 10px 2px'), fontSize: fs(11), fontWeight: 600, color: MUTED }}>{title}</div>
         {items.map((milestone) => renderRow(milestone))}
       </div>
     )
@@ -689,10 +690,10 @@ export function MilestonePanel(props: MilestonePanelProps) {
         ...props.style,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 10px 8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: sp(6), padding: px('10px 10px 8px') }}>
         <Icon name="milestone" size={15} />
-        <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: TEXT }}>{t('milestonePanel.title')}</span>
-        <span data-testid="milestone-count" style={{ fontSize: 11, color: MUTED }}>
+        <span style={{ flex: 1, fontSize: fs(13), fontWeight: 600, color: TEXT }}>{t('milestonePanel.title')}</span>
+        <span data-testid="milestone-count" style={{ fontSize: fs(11), color: MUTED }}>
           {t('milestonePanel.count', { n: vault.milestones.length })}
         </span>
         <button
@@ -703,7 +704,7 @@ export function MilestonePanel(props: MilestonePanelProps) {
           onClick={requestClose}
           style={{
             display: 'flex',
-            padding: 2,
+            padding: sp(2),
             color: MUTED,
             background: 'transparent',
             border: 'none',
@@ -714,7 +715,7 @@ export function MilestonePanel(props: MilestonePanelProps) {
         </button>
       </div>
 
-      <div style={{ padding: '0 10px 8px' }}>
+      <div style={{ padding: px('0 10px 8px') }}>
         <button
           type="button"
           data-testid="milestone-new"
@@ -724,7 +725,7 @@ export function MilestonePanel(props: MilestonePanelProps) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 5,
+            gap: sp(5),
             width: '100%',
             color: INDIGO,
             borderColor: INDIGO,
@@ -741,7 +742,7 @@ export function MilestonePanel(props: MilestonePanelProps) {
         {empty ? (
           <div
             data-testid="milestone-empty"
-            style={{ padding: '24px 16px', fontSize: 12, color: MUTED, textAlign: 'center', lineHeight: 1.7 }}
+            style={{ padding: px('24px 16px'), fontSize: fs(12), color: MUTED, textAlign: 'center', lineHeight: 1.7 }}
           >
             {t('milestonePanel.empty')}
           </div>

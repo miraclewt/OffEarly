@@ -34,6 +34,7 @@ import type { VaultStore } from '../domain/store'
 import type { GanttScale, LocaleSetting, WorkCalendar } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
+import { fs, sp, px } from '../styles/scale'
 
 const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
@@ -68,21 +69,21 @@ const WEEKDAY_KEYS: Record<number, MsgKey> = {
 }
 
 const SECTION_TITLE: CSSProperties = {
-  marginTop: 14,
-  marginBottom: 6,
-  fontSize: 11,
+  marginTop: sp(14),
+  marginBottom: sp(6),
+  fontSize: fs(11),
   fontWeight: 600,
   color: MUTED,
-  letterSpacing: 0.2,
+  letterSpacing: sp(0.2),
 }
 
-const HINT: CSSProperties = { fontSize: 11, color: MUTED, marginTop: 6, lineHeight: 1.6 }
+const HINT: CSSProperties = { fontSize: fs(11), color: MUTED, marginTop: sp(6), lineHeight: 1.6 }
 
 const INPUT: CSSProperties = {
   flex: 1,
   minWidth: 0,
-  padding: '4px 6px',
-  fontSize: 12,
+  padding: px('4px 6px'),
+  fontSize: fs(12),
   color: TEXT,
   background: SURFACE,
   border: `1px solid ${BORDER}`,
@@ -92,8 +93,8 @@ const INPUT: CSSProperties = {
 }
 
 const GHOST_BUTTON: CSSProperties = {
-  padding: '4px 10px',
-  fontSize: 12,
+  padding: px('4px 10px'),
+  fontSize: fs(12),
   color: SECONDARY,
   background: 'transparent',
   border: `1px solid ${BORDER}`,
@@ -109,7 +110,7 @@ function Segmented<T extends string>(props: {
   onPick: (value: T) => void
 }) {
   return (
-    <div role="group" data-testid={props.testid} style={{ display: 'flex', gap: 6 }}>
+    <div role="group" data-testid={props.testid} style={{ display: 'flex', gap: sp(6) }}>
       {props.options.map((option) => {
         const active = option.value === props.value
         return (
@@ -122,8 +123,8 @@ function Segmented<T extends string>(props: {
               props.onPick(option.value)
             }}
             style={{
-              padding: '4px 10px',
-              fontSize: 12,
+              padding: px('4px 10px'),
+              fontSize: fs(12),
               fontWeight: active ? 600 : 400,
               color: active ? 'var(--oe-on-accent)' : SECONDARY,
               background: active ? INDIGO : 'transparent',
@@ -155,14 +156,14 @@ function DateList(props: {
   onRemove: (date: string) => void
 }) {
   return (
-    <div data-testid={props.testid} style={{ marginTop: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-        <span style={{ fontSize: 12, color: TEXT }}>{props.title}</span>
-        <span data-testid={`${props.testid}-count`} style={{ fontSize: 11, color: MUTED }}>
+    <div data-testid={props.testid} style={{ marginTop: sp(8) }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: sp(6), marginBottom: sp(6) }}>
+        <span style={{ fontSize: fs(12), color: TEXT }}>{props.title}</span>
+        <span data-testid={`${props.testid}-count`} style={{ fontSize: fs(11), color: MUTED }}>
           {props.dates.length}
         </span>
       </div>
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div style={{ display: 'flex', gap: sp(6) }}>
         <input
           data-testid={`${props.testid}-input`}
           aria-label={props.title}
@@ -181,9 +182,9 @@ function DateList(props: {
         </button>
       </div>
       {props.dates.length === 0 ? (
-        <div style={{ fontSize: 11, color: MUTED, marginTop: 6 }}>{props.emptyLabel}</div>
+        <div style={{ fontSize: fs(11), color: MUTED, marginTop: sp(6) }}>{props.emptyLabel}</div>
       ) : (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: sp(6), marginTop: sp(6) }}>
           {props.dates.map((date) => (
             <span
               key={date}
@@ -191,9 +192,9 @@ function DateList(props: {
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 6,
-                padding: '2px 6px',
-                fontSize: 11,
+                gap: sp(6),
+                padding: px('2px 6px'),
+                fontSize: fs(11),
                 color: TEXT,
                 background: 'var(--oe-fill-subtle)',
                 border: `1px solid ${BORDER}`,
@@ -210,8 +211,8 @@ function DateList(props: {
                 }}
                 style={{
                   display: 'flex',
-                  width: 12,
-                  height: 12,
+                  width: sp(12),
+                  height: sp(12),
                   padding: 0,
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -305,14 +306,14 @@ export function SettingsPanel(props: SettingsPanelProps) {
         aria-label={t('settingsPanel.title')}
         style={{
           position: 'fixed',
-          left: 8,
-          bottom: 52,
+          left: sp(8),
+          bottom: sp(52),
           width: PANEL_WIDTH,
-          maxHeight: 'min(640px, 78vh)',
+          maxHeight: px('min(640px, 78vh)'),
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
-          padding: '9px 12px 14px',
+          padding: px('9px 12px 14px'),
           background: 'var(--oe-material-overlay)',
           backdropFilter: 'blur(20px) saturate(180%)',
           WebkitBackdropFilter: 'blur(20px) saturate(180%)',
@@ -325,9 +326,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
           ...props.style,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: sp(6) }}>
           <Icon name="settings" size={15} />
-          <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: TEXT }}>
+          <span style={{ flex: 1, fontSize: fs(13), fontWeight: 600, color: TEXT }}>
             {t('settingsPanel.title')}
           </span>
           <button
@@ -336,7 +337,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
             aria-label={t('settingsPanel.close')}
             title={t('settingsPanel.close')}
             onClick={requestClose}
-            style={{ ...GHOST_BUTTON, padding: '2px 7px' }}
+            style={{ ...GHOST_BUTTON, padding: px('2px 7px') }}
           >
             <Icon name="close" size={13} />
           </button>
@@ -355,13 +356,13 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
         {/* ── 主题（本版只有浅色，只读展示） ── */}
         <div style={SECTION_TITLE}>{t('settingsPanel.theme')}</div>
-        <div data-testid="settings-theme" style={{ display: 'flex', gap: 6 }}>
+        <div data-testid="settings-theme" style={{ display: 'flex', gap: sp(6) }}>
           <span
             data-testid="settings-theme-light"
             aria-pressed="true"
             style={{
-              padding: '4px 10px',
-              fontSize: 12,
+              padding: px('4px 10px'),
+              fontSize: fs(12),
               fontWeight: 600,
               color: 'var(--oe-on-accent)',
               background: INDIGO,
@@ -387,10 +388,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
         {/* ── 工作日历 ── */}
         <div style={SECTION_TITLE}>{t('settingsPanel.calendar')}</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 12, color: TEXT }}>{t('settingsPanel.workdays')}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: sp(6) }}>
+          <span style={{ fontSize: fs(12), color: TEXT }}>{t('settingsPanel.workdays')}</span>
         </div>
-        <div data-testid="settings-workdays" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+        <div data-testid="settings-workdays" style={{ display: 'flex', flexWrap: 'wrap', gap: sp(6), marginTop: sp(6) }}>
           {WEEK_ORDER.map((day) => {
             const on = isWorkdaySet(calendar, day)
             const enabled = canToggleWorkday(calendar, day)
@@ -408,9 +409,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 4,
-                  padding: '3px 8px',
-                  fontSize: 12,
+                  gap: sp(4),
+                  padding: px('3px 8px'),
+                  fontSize: fs(12),
                   color: on ? TEXT : MUTED,
                   background: on ? 'var(--oe-fill-subtle)' : 'transparent',
                   border: `1px solid ${on ? BORDER : 'transparent'}`,
@@ -470,21 +471,21 @@ export function SettingsPanel(props: SettingsPanelProps) {
         <div style={HINT}>{t('settingsPanel.calendarHint')}</div>
         <div style={HINT}>{t('settingsPanel.crossCleared')}</div>
         {error === null ? null : (
-          <div data-testid="settings-error" style={{ fontSize: 11, color: 'var(--oe-blocked)', marginTop: 6 }}>
+          <div data-testid="settings-error" style={{ fontSize: fs(11), color: 'var(--oe-blocked)', marginTop: sp(6) }}>
             {error}
           </div>
         )}
 
         {/* ── 关于 ── */}
         <div style={SECTION_TITLE}>{t('settingsPanel.about')}</div>
-        <div data-testid="settings-about" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div data-testid="settings-about" style={{ display: 'flex', flexDirection: 'column', gap: sp(4) }}>
           {aboutRows.map((row) => (
-            <div key={row.label} style={{ display: 'flex', gap: 8, fontSize: 11 }}>
-              <span style={{ flex: '0 0 64px', color: MUTED }}>{row.label}</span>
+            <div key={row.label} style={{ display: 'flex', gap: sp(8), fontSize: fs(11) }}>
+              <span style={{ flex: px('0 0 64px'), color: MUTED }}>{row.label}</span>
               <span style={{ flex: 1, minWidth: 0, color: SECONDARY, wordBreak: 'break-all' }}>{row.value}</span>
             </div>
           ))}
-          <div data-testid="settings-counts" style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>
+          <div data-testid="settings-counts" style={{ fontSize: fs(11), color: MUTED, marginTop: sp(2) }}>
             {t('settingsPanel.aboutCounts', {
               tasks: vault.tasks.length,
               topics: vault.topics.length,

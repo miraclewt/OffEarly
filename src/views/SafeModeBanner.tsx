@@ -11,6 +11,7 @@ import { useState } from 'react'
 import type { CSSProperties } from 'react'
 
 import type { SafeModeSnapshotRef } from '../persistence/vaultRepository'
+import { fs, sp, px } from '../styles/scale'
 
 const AMBER_BG = 'var(--oe-blocked-bg)'
 const AMBER_BORDER = 'var(--oe-blocked-border)'
@@ -63,8 +64,8 @@ function errorText(e: unknown): string {
 }
 
 const BUTTON: CSSProperties = {
-  padding: '4px 12px',
-  fontSize: 12,
+  padding: px('4px 12px'),
+  fontSize: fs(12),
   background: 'var(--oe-surface)',
   border: `1px solid ${BORDER}`,
   borderRadius: 'var(--oe-radius-control)',
@@ -120,15 +121,15 @@ export function SafeModeBanner(props: SafeModeBannerProps) {
         display: 'flex',
         flexWrap: 'wrap',
         alignItems: 'center',
-        gap: 12,
-        padding: '8px 16px',
+        gap: sp(12),
+        padding: px('8px 16px'),
         background: AMBER_BG,
         borderBottom: `1px solid ${AMBER_BORDER}`,
-        fontSize: 12,
+        fontSize: fs(12),
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 260, flex: 1 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: AMBER_TEXT }}>{text.title}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: sp(2), minWidth: sp(260), flex: 1 }}>
+        <div style={{ fontSize: fs(13), fontWeight: 600, color: AMBER_TEXT }}>{text.title}</div>
         <div style={{ color: MUTED, lineHeight: 1.6 }}>{text.hint}</div>
         <div data-testid="safe-mode-reason" style={{ color: AMBER_TEXT, lineHeight: 1.6 }}>
           {reason}
@@ -140,7 +141,7 @@ export function SafeModeBanner(props: SafeModeBannerProps) {
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: sp(4) }}>
         <button
           type="button"
           data-testid="safe-mode-restore"
@@ -152,10 +153,10 @@ export function SafeModeBanner(props: SafeModeBannerProps) {
         >
           {text.restore}
         </button>
-        <span style={{ fontSize: 11, color: MUTED }}>{text.restoreHint}</span>
+        <span style={{ fontSize: fs(11), color: MUTED }}>{text.restoreHint}</span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: sp(4) }}>
         <button
           type="button"
           data-testid="safe-mode-choose-other"
@@ -167,10 +168,10 @@ export function SafeModeBanner(props: SafeModeBannerProps) {
         >
           {text.chooseOther}
         </button>
-        <span style={{ fontSize: 11, color: MUTED }}>{text.chooseOtherHint}</span>
+        <span style={{ fontSize: fs(11), color: MUTED }}>{text.chooseOtherHint}</span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: sp(4) }}>
         <button
           type="button"
           data-testid="safe-mode-export"
@@ -182,7 +183,7 @@ export function SafeModeBanner(props: SafeModeBannerProps) {
         >
           {text.exportCurrent}
         </button>
-        <span style={{ fontSize: 11, color: MUTED }}>{text.exportCurrentHint}</span>
+        <span style={{ fontSize: fs(11), color: MUTED }}>{text.exportCurrentHint}</span>
       </div>
 
       {busy ? (

@@ -86,6 +86,8 @@ import type { MindMapPointerPoint } from './MindMapCanvas'
 import { exportMindMap, probePngSupport } from './MindMapExporter'
 import type { MindMapExportFormat, MindMapExportRange } from './MindMapExporter'
 import { Icon } from './IconSprite'
+import { fs, px, sp } from '../styles/scale'
+import { useUiScale } from '../styles/useUiScale'
 
 type Translate = (key: MsgKey, params?: TranslateParams) => string
 
@@ -168,6 +170,8 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
   // T47 · 全部折叠：纯视图本地态（foldAll 进 buildMindMapModel 的展示口径，root-inclusive，
   // 模型只剩中心主题）。不写库、零 undo——「展开全部」= 该态置 false。
   const [foldAllView, setFoldAllView] = useState(false)
+  // T40：导图的行高/间距/节点宽都在模型里按尺度算，视图只需订阅并在变化时重算
+  const uiScale = useUiScale()
   // T47 · 图重命名：inline input 开关。renamingRef 与 state 同步（同 editingRef 手法）：
   // Enter 提交后卸载前浏览器补发的 blur 靠 ref 守卫吃掉，不会二次提交。
   const [renaming, setRenaming] = useState(false)
@@ -190,8 +194,8 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
   const [nodeDrag, setNodeDrag] = useState<{ nodeId: string; targetId: string | null } | null>(null)
 
   const model = useMemo(
-    () => (selectedMap === null ? null : buildMindMapModel(selectedMap, { foldAll: foldAllView })),
-    [selectedMap, foldAllView],
+    () => (selectedMap === null ? null : buildMindMapModel(selectedMap, { foldAll: foldAllView, uiScale })),
+    [selectedMap, foldAllView, uiScale],
   )
 
   // ---- T48 · 导出菜单（照 GanttView 的弹层交互与 R3 探针） ----------------------
@@ -301,7 +305,7 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
       if (box === undefined || !(box.width > 0) || !Number.isFinite(box.height)) return
       viewport.setViewportSize({
         width: Math.max(0, box.width),
-        height: Math.max(0, box.height - TOOLBAR_HEIGHT),
+        height: Math.max(0, box.height - TOOLBAR_HEIGHT * uiScale),
       })
     })
     observer.observe(element)
@@ -750,7 +754,8 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
         display: 'flex',
         flexDirection: 'column',
         minWidth: 0,
-        height: state.height + TOOLBAR_HEIGHT,
+        height: '100%',
+        minHeight: 0,
         background: 'var(--oe-surface)',
         color: TEXT,
         fontFamily: BODY_FONT,
@@ -770,8 +775,8 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
               flex: `0 0 ${TOOLBAR_HEIGHT}px`,
               display: 'flex',
               alignItems: 'center',
-              gap: 8,
-              padding: '0 12px',
+              gap: sp(8),
+              padding: px('0 12px'),
               borderBottom: '1px solid var(--oe-separator)',
               boxSizing: 'border-box',
             }}
@@ -830,7 +835,7 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
             <button type="button" data-testid="mindmap-delete-map" onClick={handleDeleteMap} style={chipStyle}>
               {t(deleteConfirmingFor === selectedMap.id ? 'mindmap.deleteConfirm' : 'mindmap.deleteMap')}
             </button>
-            <span style={{ flex: 1, minWidth: 8 }} />
+            <span style={{ flex: 1, minWidth: sp(8) }} />
             {/* T47 · 全部折叠/展开：单 toggle 走视图本地 foldAll 态，不写库、零 undo。 */}
             <button
               type="button"
@@ -849,7 +854,7 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
             {exportHint === null ? null : (
               <span
                 data-testid="mindmap-export-hint"
-                style={{ fontSize: 12, color: TEXT_MUTED, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                style={{ fontSize: fs(12), color: TEXT_MUTED, maxWidth: sp(180), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
               >
                 {exportHint}
               </span>
@@ -875,14 +880,14 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
                   aria-label={t('ganttExport.button')}
                   style={{
                     position: 'absolute',
-                    top: 26,
+                    top: sp(26),
                     right: 0,
                     zIndex: 5,
-                    width: 198,
+                    width: sp(198),
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 8,
-                    padding: 10,
+                    gap: sp(8),
+                    padding: sp(10),
                     boxSizing: 'border-box',
                     background: 'var(--oe-surface)',
                     border: '1px solid var(--oe-separator)',
@@ -891,8 +896,8 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
                     color: TEXT,
                   }}
                 >
-                  <div style={{ fontSize: 12, color: TEXT_MUTED }}>{t('ganttExport.format')}</div>
-                  <div role="radiogroup" aria-label={t('ganttExport.format')} style={{ display: 'flex', gap: 6 }}>
+                  <div style={{ fontSize: fs(12), color: TEXT_MUTED }}>{t('ganttExport.format')}</div>
+                  <div role="radiogroup" aria-label={t('ganttExport.format')} style={{ display: 'flex', gap: sp(6) }}>
                     {EXPORT_FORMAT_ORDER.map((format) => {
                       const disabled = format === 'png' && pngSupported === false
                       return (
@@ -916,8 +921,8 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
                     })}
                   </div>
 
-                  <div style={{ fontSize: 12, color: TEXT_MUTED }}>{t('ganttExport.range')}</div>
-                  <div role="radiogroup" aria-label={t('ganttExport.range')} style={{ display: 'flex', gap: 6 }}>
+                  <div style={{ fontSize: fs(12), color: TEXT_MUTED }}>{t('ganttExport.range')}</div>
+                  <div role="radiogroup" aria-label={t('ganttExport.range')} style={{ display: 'flex', gap: sp(6) }}>
                     {EXPORT_RANGE_ORDER.map((range) => (
                       <button
                         key={range}
@@ -934,12 +939,12 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
                   </div>
 
                   {pngSupported === false ? (
-                    <div data-testid="mindmap-export-png-hint" style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--oe-blocked)' }}>
+                    <div data-testid="mindmap-export-png-hint" style={{ fontSize: fs(11), lineHeight: 1.45, color: 'var(--oe-blocked)' }}>
                       {t('mindmap.exportPngUnsupported')}
                     </div>
                   ) : null}
 
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  <div style={{ display: 'flex', gap: sp(6), justifyContent: 'flex-end' }}>
                     <button
                       type="button"
                       data-testid="mindmap-export-cancel"
@@ -1009,11 +1014,11 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
                   width: editingView.width * zoom,
                   height: editingView.height * zoom,
                   // 缩到 12px 以下就钳住并 overflow hidden——「块可见」降级，xmind 同款
-                  fontSize: Math.max(12, MINDMAP_FONT_SIZE * zoom),
+                  fontSize: Math.max(12, MINDMAP_FONT_SIZE * uiScale * zoom),
                   overflow: 'hidden',
                   boxSizing: 'border-box',
                   margin: 0,
-                  padding: '0 4px',
+                  padding: px('0 4px'),
                   color: TEXT,
                   background: 'var(--oe-surface)',
                   border: '1px solid var(--oe-accent-deep)',
@@ -1062,10 +1067,10 @@ export function MindMapView(props: MindMapViewProps): ReactElement {
 /** 空库引导卡：一句标题 + 一句说明 + 一个新建按钮（唯一的 T45 写入口）。 */
 function MindMapEmptyCard(props: { t: Translate; onCreate: () => void }): ReactElement {
   return (
-    <div data-testid="mindmap-empty" style={{ flex: 1, display: 'grid', placeItems: 'center', padding: 24 }}>
-      <div style={{ maxWidth: 360, textAlign: 'center' }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: TEXT }}>{props.t('mindmap.emptyTitle')}</div>
-        <p style={{ margin: '8px 0 16px', fontSize: 12, lineHeight: 1.6, color: TEXT_MUTED }}>
+    <div data-testid="mindmap-empty" style={{ flex: 1, display: 'grid', placeItems: 'center', padding: sp(24) }}>
+      <div style={{ maxWidth: sp(360), textAlign: 'center' }}>
+        <div style={{ fontSize: fs(14), fontWeight: 600, color: TEXT }}>{props.t('mindmap.emptyTitle')}</div>
+        <p style={{ margin: px('8px 0 16px'), fontSize: fs(12), lineHeight: 1.6, color: TEXT_MUTED }}>
           {props.t('mindmap.emptyHint')}
         </p>
         <button type="button" data-testid="mindmap-create" onClick={props.onCreate} style={chipStyle}>
@@ -1077,9 +1082,9 @@ function MindMapEmptyCard(props: { t: Translate; onCreate: () => void }): ReactE
 }
 
 const selectStyle: CSSProperties = {
-  height: 24,
-  padding: '0 6px',
-  fontSize: 12,
+  height: sp(24),
+  padding: px('0 6px'),
+  fontSize: fs(12),
   color: TEXT,
   background: 'var(--oe-fill)',
   border: '1px solid var(--oe-separator)',
@@ -1090,13 +1095,13 @@ const selectStyle: CSSProperties = {
 /** 图重命名 inline input：与 select 同族外观，宽度给到能看清中长图名。 */
 const renameInputStyle: CSSProperties = {
   ...selectStyle,
-  width: 160,
+  width: sp(160),
 }
 
 const chipStyle: CSSProperties = {
-  padding: '2px 10px',
-  fontSize: 12,
-  lineHeight: '20px',
+  padding: px('2px 10px'),
+  fontSize: fs(12),
+  lineHeight: px('20px'),
   color: TEXT,
   background: 'var(--oe-fill)',
   border: 'none',
@@ -1110,10 +1115,10 @@ const iconButtonStyle: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 26,
-  height: 24,
+  width: sp(26),
+  height: sp(24),
   padding: 0,
-  fontSize: 12,
+  fontSize: fs(12),
   color: TEXT,
   background: 'transparent',
   border: 'none',
@@ -1123,9 +1128,9 @@ const iconButtonStyle: CSSProperties = {
 
 // T48 导出弹层的选项 chip（格式 / 范围 / 取消 / 导出共用一套，甘特同款）
 const exportChipStyle: CSSProperties = {
-  padding: '2px 8px',
-  fontSize: 12,
-  lineHeight: '18px',
+  padding: px('2px 8px'),
+  fontSize: fs(12),
+  lineHeight: px('18px'),
   color: TEXT,
   background: 'var(--oe-fill)',
   border: 'none',

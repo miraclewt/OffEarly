@@ -21,6 +21,7 @@ import {
 import type { GanttColumnWindow, GanttRowWindow } from '../controllers/ganttViewport'
 import type { DependencyArrow, GanttBar, GanttModel, GanttRow } from '../domain/ganttModel'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
+import { currentUiScale, fs, px, sp } from '../styles/scale'
 
 /**
  * 注意（T30）：本文件里这一组色值**必须保持字面量 hex，不能换成 CSS 变量**。
@@ -128,20 +129,22 @@ export function resolveTaskLabel(
   barWidth: number,
   progressWidth: number,
 ): GanttLabelPlacement {
-  const inner = barWidth - GANTT_LABEL_PAD_X * 2
-  const inside = truncateGanttLabel(label, inner, GANTT_LABEL_FONT_SIZE)
+  // 标签的边距与字号都跟着界面尺度走；传入的 barWidth 已经是模型放大后的像素
+  const s = currentUiScale()
+  const inner = barWidth - GANTT_LABEL_PAD_X * 2 * s
+  const inside = truncateGanttLabel(label, inner, GANTT_LABEL_FONT_SIZE * s)
   if (inside !== '') {
-    const width = Math.min(estimateGanttLabelWidth(inside, GANTT_LABEL_FONT_SIZE), inner)
+    const width = Math.min(estimateGanttLabelWidth(inside, GANTT_LABEL_FONT_SIZE * s), inner)
     return {
       text: inside,
-      x: barX + GANTT_LABEL_PAD_X,
+      x: barX + GANTT_LABEL_PAD_X * s,
       fill: labelOverProgress(progressWidth, width) ? GANTT_LABEL_ON_PROGRESS_FILL : GANTT_LABEL_FILL,
       placement: 'inside',
     }
   }
   return {
     text: label,
-    x: barX + barWidth + GANTT_LABEL_OUTSIDE_GAP,
+    x: barX + barWidth + GANTT_LABEL_OUTSIDE_GAP * s,
     fill: GANTT_LABEL_FILL,
     placement: 'outside',
   }
@@ -149,7 +152,8 @@ export function resolveTaskLabel(
 
 /** 菱形右侧的标签起点 x。 */
 export function milestoneLabelX(cx: number): number {
-  return cx + MILESTONE_SIZE / 2 + GANTT_LABEL_OUTSIDE_GAP
+  const s = currentUiScale()
+  return cx + (MILESTONE_SIZE / 2 + GANTT_LABEL_OUTSIDE_GAP) * s
 }
 
 /** 折线拐点（模型坐标）。 */
@@ -316,7 +320,7 @@ function GanttBarLabel(props: GanttLabelPlacement & { id: string; y: number; opa
       data-placement={props.placement}
       x={props.x}
       y={props.y}
-      fontSize={GANTT_LABEL_FONT_SIZE}
+      fontSize={GANTT_LABEL_FONT_SIZE * currentUiScale()}
       fill={props.fill}
       opacity={props.opacity}
       pointerEvents="none"
@@ -328,14 +332,15 @@ function GanttBarLabel(props: GanttLabelPlacement & { id: string; y: number; opa
 }
 
 function MilestoneDiamond(props: { id: string; cx: number; cy: number; fill: string; title: string }) {
-  const half = MILESTONE_SIZE / 2
+  const size = MILESTONE_SIZE * currentUiScale()
+  const half = size / 2
   return (
     <g data-gantt-milestone={props.id} transform={`translate(${props.cx} ${props.cy}) rotate(45)`}>
       <rect
         x={-half}
         y={-half}
-        width={MILESTONE_SIZE}
-        height={MILESTONE_SIZE}
+        width={size}
+        height={size}
         rx={1}
         fill={props.fill}
         stroke="#FFFFFF"
@@ -465,8 +470,8 @@ export function GanttCanvas(props: GanttCanvasProps) {
       <div
         data-testid="gantt-header"
         style={{
-          height: GANTT_HEADER_HEIGHT,
-          flex: `0 0 ${GANTT_HEADER_HEIGHT}px`,
+          height: GANTT_HEADER_HEIGHT * currentUiScale(),
+          flex: `0 0 ${GANTT_HEADER_HEIGHT * currentUiScale()}px`,
           position: 'relative',
           overflow: 'hidden',
           borderBottom: `1px solid ${GRID_COLOR}`,
@@ -478,7 +483,7 @@ export function GanttCanvas(props: GanttCanvasProps) {
             top: 0,
             left: 0,
             width: contentWidth,
-            height: GANTT_HEADER_HEIGHT,
+            height: GANTT_HEADER_HEIGHT * currentUiScale(),
             transform: `translateX(-${props.scrollLeft}px)`,
           }}
         >
@@ -491,12 +496,12 @@ export function GanttCanvas(props: GanttCanvasProps) {
                 top: 0,
                 left: cell.x * zoom,
                 width: cell.width * zoom,
-                height: 20,
+                height: sp(20),
                 boxSizing: 'border-box',
-                paddingLeft: 4,
+                paddingLeft: sp(4),
                 borderLeft: `1px solid ${GRID_COLOR}`,
-                fontSize: 11,
-                lineHeight: '20px',
+                fontSize: fs(11),
+                lineHeight: px('20px'),
                 color: TEXT_MUTED,
                 overflow: 'hidden',
                 whiteSpace: 'nowrap',
@@ -510,15 +515,15 @@ export function GanttCanvas(props: GanttCanvasProps) {
               key={`h1-${cell.label}-${cell.x}`}
               style={{
                 position: 'absolute',
-                top: 20,
+                top: sp(20),
                 left: cell.x * zoom,
                 width: cell.width * zoom,
-                height: 20,
+                height: sp(20),
                 boxSizing: 'border-box',
-                paddingLeft: 4,
+                paddingLeft: sp(4),
                 borderLeft: `1px solid ${GRID_COLOR}`,
-                fontSize: 11,
-                lineHeight: '20px',
+                fontSize: fs(11),
+                lineHeight: px('20px'),
                 color: TEXT,
                 overflow: 'hidden',
                 whiteSpace: 'nowrap',
@@ -532,17 +537,17 @@ export function GanttCanvas(props: GanttCanvasProps) {
               data-testid="gantt-today-label"
               style={{
                 position: 'absolute',
-                top: 1,
+                top: sp(1),
                 left: todayX,
                 transform: 'translateX(-50%)',
-                padding: '0 6px',
-                height: 16,
-                lineHeight: '16px',
-                fontSize: 10,
+                padding: px('0 6px'),
+                height: sp(16),
+                lineHeight: px('16px'),
+                fontSize: fs(10),
                 fontWeight: 600,
                 color: GANTT_TODAY_COLOR,
                 background: 'rgba(255, 59, 48, 0.12)',
-                borderRadius: 999,
+                borderRadius: sp(999),
                 whiteSpace: 'nowrap',
               }}
             >
@@ -555,7 +560,7 @@ export function GanttCanvas(props: GanttCanvasProps) {
       {empty ? (
         <div
           data-testid="gantt-empty"
-          style={{ flex: 1, display: 'grid', placeItems: 'center', fontSize: 12, color: TEXT_MUTED }}
+          style={{ flex: 1, display: 'grid', placeItems: 'center', fontSize: fs(12), color: TEXT_MUTED }}
         >
           {t('gantt.empty')}
         </div>

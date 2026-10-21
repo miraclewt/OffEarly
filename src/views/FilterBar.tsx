@@ -46,6 +46,7 @@ import type { VaultStore } from '../domain/store'
 import type { Filter } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
+import { fs, sp, px } from '../styles/scale'
 
 const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
@@ -57,8 +58,8 @@ const SURFACE = 'var(--oe-surface)'
 const PANEL_WIDTH = 300
 
 const INPUT: CSSProperties = {
-  padding: '4px 6px',
-  fontSize: 12,
+  padding: px('4px 6px'),
+  fontSize: fs(12),
   color: TEXT,
   background: SURFACE,
   border: `1px solid ${BORDER}`,
@@ -70,14 +71,14 @@ const INPUT: CSSProperties = {
 const SECTION_LABEL: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 6,
-  fontSize: 11,
+  gap: sp(6),
+  fontSize: fs(11),
   fontWeight: 600,
   color: MUTED,
-  marginBottom: 4,
+  marginBottom: sp(4),
 }
 
-const ROW: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 4 }
+const ROW: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: sp(4) }
 
 export interface FilterBarProps {
   store: VaultStore
@@ -112,8 +113,8 @@ function Chip(props: {
       {...(props.title === undefined ? {} : { title: props.title })}
       onClick={props.onClick}
       style={{
-        padding: '3px 8px',
-        fontSize: 12,
+        padding: px('3px 8px'),
+        fontSize: fs(12),
         lineHeight: 1.5,
         color: props.active ? ACCENT : SECONDARY,
         background: props.active ? 'var(--oe-fill)' : 'transparent',
@@ -138,9 +139,9 @@ function RemoveChip(props: { testId: string; label: string; onClick: () => void;
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 4,
-        padding: '3px 6px 3px 8px',
-        fontSize: 12,
+        gap: sp(4),
+        padding: px('3px 6px 3px 8px'),
+        fontSize: fs(12),
         color: ACCENT,
         background: 'var(--oe-fill)',
         border: `1px solid ${ACCENT}`,
@@ -260,10 +261,10 @@ export function FilterBar(props: FilterBarProps) {
         aria-label={t('filterBar.title')}
         style={{
           position: 'fixed',
-          left: 8,
-          bottom: 52,
+          left: sp(8),
+          bottom: sp(52),
           width: PANEL_WIDTH,
-          maxHeight: 'min(640px, 72vh)',
+          maxHeight: px('min(640px, 72vh)'),
           display: 'flex',
           flexDirection: 'column',
           background: 'var(--oe-material-overlay)',
@@ -278,11 +279,11 @@ export function FilterBar(props: FilterBarProps) {
           ...props.style,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 10px 8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: sp(6), padding: px('9px 10px 8px') }}>
           <Icon name="filter" size={15} />
-          <span style={{ fontSize: 13, fontWeight: 600, color: TEXT }}>{t('filterBar.title')}</span>
+          <span style={{ fontSize: fs(13), fontWeight: 600, color: TEXT }}>{t('filterBar.title')}</span>
           {activeCount > 0 ? (
-            <span data-testid="filter-active-count" style={{ fontSize: 11, color: MUTED }}>
+            <span data-testid="filter-active-count" style={{ fontSize: fs(11), color: MUTED }}>
               {t('filterBar.activeCount', { n: activeCount })}
             </span>
           ) : null}
@@ -295,7 +296,7 @@ export function FilterBar(props: FilterBarProps) {
             onClick={requestClose}
             style={{
               display: 'flex',
-              padding: 2,
+              padding: sp(2),
               color: MUTED,
               background: 'transparent',
               border: 'none',
@@ -311,14 +312,14 @@ export function FilterBar(props: FilterBarProps) {
             flex: 1,
             minHeight: 0,
             overflowY: 'auto',
-            padding: '0 10px 10px',
+            padding: px('0 10px 10px'),
             display: 'flex',
             flexDirection: 'column',
-            gap: 10,
+            gap: sp(10),
           }}
         >
           {/* 全文搜索：草稿态 + Enter/blur 提交（逐字写库会把撤销栈刷满） */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: MUTED }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: sp(5), color: MUTED }}>
             <Icon name="search" size={13} />
             <input
               data-testid="filter-text-input"
@@ -390,7 +391,7 @@ export function FilterBar(props: FilterBarProps) {
 
           <Section label={t('filterBar.topics')}>
             {filter.topicIds.length === 0 ? (
-              <div style={{ fontSize: 11, color: MUTED }}>{t('filterBar.topicHint')}</div>
+              <div style={{ fontSize: fs(11), color: MUTED }}>{t('filterBar.topicHint')}</div>
             ) : (
               <div style={ROW}>
                 {filter.topicIds.map((topicId) => {
@@ -414,7 +415,7 @@ export function FilterBar(props: FilterBarProps) {
           <Section
             label={t('filterBar.tags')}
             extra={
-              <span style={{ display: 'flex', gap: 3, marginLeft: 'auto' }}>
+              <span style={{ display: 'flex', gap: sp(3), marginLeft: 'auto' }}>
                 {(['any', 'all'] as const).map((mode) => (
                   <button
                     key={mode}
@@ -425,8 +426,8 @@ export function FilterBar(props: FilterBarProps) {
                       apply((current) => setTagMode(current, mode))
                     }}
                     style={{
-                      padding: '0 6px',
-                      fontSize: 11,
+                      padding: px('0 6px'),
+                      fontSize: fs(11),
                       color: filter.tagMode === mode ? ACCENT : MUTED,
                       background: filter.tagMode === mode ? 'var(--oe-fill)' : 'transparent',
                       border: `1px solid ${filter.tagMode === mode ? ACCENT : BORDER}`,
@@ -441,7 +442,7 @@ export function FilterBar(props: FilterBarProps) {
             }
           >
             {filter.tags.length > 0 ? (
-              <div style={{ ...ROW, marginBottom: 4 }}>
+              <div style={{ ...ROW, marginBottom: sp(4) }}>
                 {filter.tags.map((tag, index) => (
                   <RemoveChip
                     key={tag}
@@ -469,7 +470,7 @@ export function FilterBar(props: FilterBarProps) {
               style={{ ...INPUT, width: '100%' }}
             />
             {tagSuggestions.length > 0 ? (
-              <div style={{ ...ROW, marginTop: 4 }}>
+              <div style={{ ...ROW, marginTop: sp(4) }}>
                 {tagSuggestions.map((tag, index) => (
                   <Chip
                     key={tag}
@@ -487,7 +488,7 @@ export function FilterBar(props: FilterBarProps) {
 
           <Section label={t('filterBar.assignees')}>
             {filter.assignees.length > 0 ? (
-              <div style={{ ...ROW, marginBottom: 4 }}>
+              <div style={{ ...ROW, marginBottom: sp(4) }}>
                 {filter.assignees.map((name, index) => (
                   <RemoveChip
                     key={name}
@@ -515,7 +516,7 @@ export function FilterBar(props: FilterBarProps) {
               style={{ ...INPUT, width: '100%' }}
             />
             {assigneeSuggestions.length > 0 ? (
-              <div style={{ ...ROW, marginTop: 4 }}>
+              <div style={{ ...ROW, marginTop: sp(4) }}>
                 {assigneeSuggestions.map((name, index) => (
                   <Chip
                     key={name}
@@ -545,7 +546,7 @@ export function FilterBar(props: FilterBarProps) {
                   style={{
                     marginLeft: 'auto',
                     padding: 0,
-                    fontSize: 11,
+                    fontSize: fs(11),
                     color: MUTED,
                     background: 'transparent',
                     border: 'none',
@@ -557,7 +558,7 @@ export function FilterBar(props: FilterBarProps) {
               )
             }
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: sp(4) }}>
               <input
                 data-testid="filter-date-from"
                 type="date"
@@ -569,7 +570,7 @@ export function FilterBar(props: FilterBarProps) {
                 }}
                 style={{ ...INPUT, flex: 1, minWidth: 0 }}
               />
-              <span style={{ color: MUTED, fontSize: 11 }}>–</span>
+              <span style={{ color: MUTED, fontSize: fs(11) }}>–</span>
               <input
                 data-testid="filter-date-to"
                 type="date"
@@ -622,8 +623,8 @@ export function FilterBar(props: FilterBarProps) {
           </Section>
 
           <Section label={t('filterBar.hops')}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: SECONDARY }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: sp(6) }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: sp(4), fontSize: fs(11), color: SECONDARY }}>
                 {t('filterBar.upstream')}
                 <input
                   data-testid="filter-upstream-input"
@@ -635,10 +636,10 @@ export function FilterBar(props: FilterBarProps) {
                     const value = Number.parseInt(event.target.value, 10)
                     apply((current) => setHopDepth(current, 'upstream', value))
                   }}
-                  style={{ ...INPUT, width: 52 }}
+                  style={{ ...INPUT, width: sp(52) }}
                 />
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: SECONDARY }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: sp(4), fontSize: fs(11), color: SECONDARY }}>
                 {t('filterBar.downstream')}
                 <input
                   data-testid="filter-downstream-input"
@@ -650,11 +651,11 @@ export function FilterBar(props: FilterBarProps) {
                     const value = Number.parseInt(event.target.value, 10)
                     apply((current) => setHopDepth(current, 'downstream', value))
                   }}
-                  style={{ ...INPUT, width: 52 }}
+                  style={{ ...INPUT, width: sp(52) }}
                 />
               </label>
             </div>
-            <div style={{ marginTop: 4, fontSize: 11, color: MUTED, lineHeight: 1.6 }}>
+            <div style={{ marginTop: sp(4), fontSize: fs(11), color: MUTED, lineHeight: 1.6 }}>
               {t('filterBar.hopsHint')}
             </div>
           </Section>
@@ -664,15 +665,15 @@ export function FilterBar(props: FilterBarProps) {
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 6,
-            padding: '8px 10px',
+            gap: sp(6),
+            padding: px('8px 10px'),
             borderTop: `1px solid ${BORDER}`,
           }}
         >
           {props.matchCount === undefined ? (
             <span style={{ flex: 1 }} />
           ) : (
-            <span data-testid="filter-match-count" style={{ flex: 1, fontSize: 11, color: MUTED }}>
+            <span data-testid="filter-match-count" style={{ flex: 1, fontSize: fs(11), color: MUTED }}>
               {t('filterBar.matchCount', { n: props.matchCount })}
             </span>
           )}
@@ -683,8 +684,8 @@ export function FilterBar(props: FilterBarProps) {
               apply(() => clearFilter())
             }}
             style={{
-              padding: '4px 10px',
-              fontSize: 12,
+              padding: px('4px 10px'),
+              fontSize: fs(12),
               color: ACCENT,
               background: 'transparent',
               border: `1px solid ${ACCENT}`,

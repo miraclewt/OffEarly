@@ -20,6 +20,7 @@ import type { SnapshotInfo } from '../persistence/snapshotStore'
 import type { ExportSummary } from '../persistence/backupIO'
 import type { BackupGcPort } from '../controllers/backupGc'
 import type { BackupExportPort, BackupImportPort, BackupSnapshotPort } from '../controllers/backupPort'
+import { fs, sp, px } from '../styles/scale'
 
 const BORDER = 'var(--oe-border)'
 const TEXT = 'var(--oe-text)'
@@ -131,15 +132,15 @@ function errorText(e: unknown): string {
 }
 
 const ROW: CSSProperties = {
-  padding: '8px 12px',
+  padding: px('8px 12px'),
   background: 'var(--oe-surface)',
   border: `1px solid ${BORDER}`,
   borderRadius: 'var(--oe-radius-control)',
 }
 
 const BUTTON: CSSProperties = {
-  padding: '6px 14px',
-  fontSize: 13,
+  padding: px('6px 14px'),
+  fontSize: fs(13),
   fontWeight: 600,
   color: INDIGO,
   background: 'var(--oe-surface)',
@@ -155,11 +156,11 @@ const GHOST: CSSProperties = {
 }
 
 const SECTION_TITLE: CSSProperties = {
-  fontSize: 13,
+  fontSize: fs(13),
   fontWeight: 600,
   color: TEXT,
-  marginTop: 20,
-  marginBottom: 8,
+  marginTop: sp(20),
+  marginBottom: sp(8),
 }
 
 export interface BackupPanelProps {
@@ -383,7 +384,7 @@ export function BackupPanel(props: BackupPanelProps) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 24,
+        padding: sp(24),
         background: 'var(--oe-scrim)',
         backdropFilter: 'blur(8px) saturate(140%)',
         WebkitBackdropFilter: 'blur(8px) saturate(140%)',
@@ -394,10 +395,10 @@ export function BackupPanel(props: BackupPanelProps) {
         data-testid="backup-panel"
         style={{
           width: '100%',
-          maxWidth: 560,
+          maxWidth: sp(560),
           maxHeight: '100%',
           overflowY: 'auto',
-          padding: 16,
+          padding: sp(16),
           background: 'var(--oe-surface)',
           border: '1px solid var(--oe-separator)',
           borderRadius: 'var(--oe-radius-overlay)',
@@ -406,13 +407,13 @@ export function BackupPanel(props: BackupPanelProps) {
         }}
       >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: TEXT }}>{text.title}</div>
+        <div style={{ fontSize: fs(15), fontWeight: 600, color: TEXT }}>{text.title}</div>
         {onOpenChange === undefined ? null : (
           <button
             type="button"
             data-testid="backup-close"
             onClick={() => onOpenChange(false)}
-            style={{ ...GHOST, padding: '2px 8px', fontSize: 16, lineHeight: 1 }}
+            style={{ ...GHOST, padding: px('2px 8px'), fontSize: fs(16), lineHeight: 1 }}
             aria-label={text.cancel}
           >
             ×
@@ -421,14 +422,14 @@ export function BackupPanel(props: BackupPanelProps) {
       </div>
 
       {/* ── T26 附件概况 + 清理 ── */}
-      <div style={{ fontSize: 12, color: MUTED, marginTop: 10 }}>
+      <div style={{ fontSize: fs(12), color: MUTED, marginTop: sp(10) }}>
         {assetCount === 0
           ? text.noAssets
           : fill(text.attachments, { count: assetCount, bytes: formatBytes(assetTotalBytes) })}
       </div>
 
       {preview === null ? (
-        <div style={{ marginTop: 16 }}>
+        <div style={{ marginTop: sp(16) }}>
           <button
             type="button"
             data-testid="backup-gc-scan"
@@ -438,29 +439,29 @@ export function BackupPanel(props: BackupPanelProps) {
           >
             {busy ? text.scanning : text.scan}
           </button>
-          <div style={{ fontSize: 11, color: MUTED, marginTop: 6 }}>{text.scanHint}</div>
+          <div style={{ fontSize: fs(11), color: MUTED, marginTop: sp(6) }}>{text.scanHint}</div>
         </div>
       ) : (
-        <div data-testid="backup-gc-preview" style={{ marginTop: 16 }}>
+        <div data-testid="backup-gc-preview" style={{ marginTop: sp(16) }}>
           {preview.unreferenced.length === 0 ? (
-            <div style={{ fontSize: 12, color: MUTED }}>{text.empty}</div>
+            <div style={{ fontSize: fs(12), color: MUTED }}>{text.empty}</div>
           ) : (
             <>
-              <div style={{ fontSize: 12, color: TEXT }}>
+              <div style={{ fontSize: fs(12), color: TEXT }}>
                 {fill(text.unreferenced, { count: preview.unreferenced.length })}
               </div>
-              <div data-testid="backup-gc-reclaim" style={{ fontSize: 12, color: AMBER, marginTop: 4 }}>
+              <div data-testid="backup-gc-reclaim" style={{ fontSize: fs(12), color: AMBER, marginTop: sp(4) }}>
                 {fill(text.reclaimable, { bytes: formatBytes(preview.reclaimableBytes) })}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: sp(6), marginTop: sp(12) }}>
                 {preview.unreferenced.map((candidate) => (
                   <div
                     key={candidate.id}
                     data-testid={`backup-gc-item-${candidate.id}`}
                     style={{ ...ROW, display: 'flex', justifyContent: 'space-between' }}
                   >
-                    <span style={{ fontSize: 12, color: TEXT }}>{candidate.filename}</span>
-                    <span style={{ fontSize: 11, color: MUTED }}>{formatBytes(candidate.sizeBytes)}</span>
+                    <span style={{ fontSize: fs(12), color: TEXT }}>{candidate.filename}</span>
+                    <span style={{ fontSize: fs(11), color: MUTED }}>{formatBytes(candidate.sizeBytes)}</span>
                   </div>
                 ))}
               </div>
@@ -471,23 +472,23 @@ export function BackupPanel(props: BackupPanelProps) {
                 onClick={() => {
                   runCleanup(preview.unreferenced.map((c) => c.id))
                 }}
-                style={{ ...BUTTON, marginTop: 12 }}
+                style={{ ...BUTTON, marginTop: sp(12) }}
               >
                 {busy ? text.cleaning : fill(text.confirm, { count: preview.unreferenced.length })}
               </button>
-              <div style={{ fontSize: 11, color: MUTED, marginTop: 6 }}>{text.confirmHint}</div>
+              <div style={{ fontSize: fs(11), color: MUTED, marginTop: sp(6) }}>{text.confirmHint}</div>
             </>
           )}
         </div>
       )}
 
       {cleaned === null ? null : (
-        <div data-testid="backup-gc-status" style={{ fontSize: 12, color: MUTED, marginTop: 12 }}>
+        <div data-testid="backup-gc-status" style={{ fontSize: fs(12), color: MUTED, marginTop: sp(12) }}>
           {fill(text.cleaned, { count: cleaned.count, bytes: formatBytes(cleaned.bytes) })}
         </div>
       )}
       {error === null ? null : (
-        <div data-testid="backup-gc-error" style={{ fontSize: 12, color: DANGER, marginTop: 12 }}>
+        <div data-testid="backup-gc-error" style={{ fontSize: fs(12), color: DANGER, marginTop: sp(12) }}>
           {text.failed}：{errorText(error)}
         </div>
       )}
@@ -503,26 +504,26 @@ export function BackupPanel(props: BackupPanelProps) {
       >
         {snapshotBusy ? text.snapshotting : text.snapshotNow}
       </button>
-      <div style={{ fontSize: 11, color: MUTED, marginTop: 6 }}>{text.snapshotHint}</div>
+      <div style={{ fontSize: fs(11), color: MUTED, marginTop: sp(6) }}>{text.snapshotHint}</div>
 
       {snapshotList.length === 0 ? (
-        <div style={{ fontSize: 12, color: MUTED, marginTop: 10 }}>{text.snapshotEmpty}</div>
+        <div style={{ fontSize: fs(12), color: MUTED, marginTop: sp(10) }}>{text.snapshotEmpty}</div>
       ) : (
-        <div data-testid="backup-snapshot-list" style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+        <div data-testid="backup-snapshot-list" style={{ display: 'flex', flexDirection: 'column', gap: sp(6), marginTop: sp(10) }}>
           {snapshotList.map((snapshot) => (
             <div
               key={snapshot.id}
               data-testid={`backup-snapshot-item-${snapshot.id}`}
-              style={{ ...ROW, display: 'flex', flexDirection: 'column', gap: 4 }}
+              style={{ ...ROW, display: 'flex', flexDirection: 'column', gap: sp(4) }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 12, color: TEXT }}>{formatTime(snapshot.createdAt)}</span>
-                <span style={{ fontSize: 11, color: MUTED }}>
+                <span style={{ fontSize: fs(12), color: TEXT }}>{formatTime(snapshot.createdAt)}</span>
+                <span style={{ fontSize: fs(11), color: MUTED }}>
                   {formatBytes(snapshot.sizeBytes)} · {fill(text.taskCount, { count: snapshot.taskCount })}
                 </span>
               </div>
               {restoreConfirmId === snapshot.id ? (
-                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <div style={{ display: 'flex', gap: sp(8), marginTop: sp(4) }}>
                   <button
                     type="button"
                     data-testid="backup-snapshot-restore-confirm"
@@ -541,7 +542,7 @@ export function BackupPanel(props: BackupPanelProps) {
                   >
                     {text.cancel}
                   </button>
-                  <div style={{ fontSize: 11, color: MUTED, alignSelf: 'center' }}>{text.restoreConfirm}</div>
+                  <div style={{ fontSize: fs(11), color: MUTED, alignSelf: 'center' }}>{text.restoreConfirm}</div>
                 </div>
               ) : (
                 <button
@@ -549,7 +550,7 @@ export function BackupPanel(props: BackupPanelProps) {
                   data-testid={`backup-snapshot-restore-${snapshot.id}`}
                   disabled={restoring}
                   onClick={() => setRestoreConfirmId(snapshot.id)}
-                  style={{ ...GHOST, marginTop: 4, alignSelf: 'flex-start' }}
+                  style={{ ...GHOST, marginTop: sp(4), alignSelf: 'flex-start' }}
                 >
                   {text.restore}
                 </button>
@@ -559,12 +560,12 @@ export function BackupPanel(props: BackupPanelProps) {
         </div>
       )}
       {snapshotError === null ? null : (
-        <div data-testid="backup-snapshot-error" style={{ fontSize: 12, color: DANGER, marginTop: 10 }}>
+        <div data-testid="backup-snapshot-error" style={{ fontSize: fs(12), color: DANGER, marginTop: sp(10) }}>
           {text.failed}：{errorText(snapshotError)}
         </div>
       )}
       {restored ? (
-        <div data-testid="backup-snapshot-restored" style={{ fontSize: 12, color: MUTED, marginTop: 10 }}>
+        <div data-testid="backup-snapshot-restored" style={{ fontSize: fs(12), color: MUTED, marginTop: sp(10) }}>
           {text.restored}
         </div>
       ) : null}
@@ -581,12 +582,12 @@ export function BackupPanel(props: BackupPanelProps) {
         {exportBusy ? text.exporting : text.export}
       </button>
       {exportResult === null ? null : (
-        <div data-testid="backup-export-result" style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>
+        <div data-testid="backup-export-result" style={{ fontSize: fs(12), color: MUTED, marginTop: sp(8) }}>
           {fill(text.exported, { files: exportResult.files, bytes: formatBytes(exportResult.bytes) })}
         </div>
       )}
       {exportError === null ? null : (
-        <div data-testid="backup-export-error" style={{ fontSize: 12, color: DANGER, marginTop: 8 }}>
+        <div data-testid="backup-export-error" style={{ fontSize: fs(12), color: DANGER, marginTop: sp(8) }}>
           {text.failed}：{errorText(exportError)}
         </div>
       )}
@@ -602,7 +603,7 @@ export function BackupPanel(props: BackupPanelProps) {
         onChange={onFileChosen}
       />
       {importPreviewVault === null ? (
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: sp(8) }}>
           <button
             type="button"
             data-testid="backup-import-file"
@@ -623,15 +624,15 @@ export function BackupPanel(props: BackupPanelProps) {
           </button>
         </div>
       ) : (
-        <div data-testid="backup-import-preview" style={{ marginTop: 8 }}>
-          <div style={{ fontSize: 12, color: TEXT }}>
+        <div data-testid="backup-import-preview" style={{ marginTop: sp(8) }}>
+          <div style={{ fontSize: fs(12), color: TEXT }}>
             {fill(text.importPreview, {
               tasks: importPreviewVault.tasks.length,
               milestones: importPreviewVault.milestones.length,
               assets: importPreviewVault.assets.length,
             })}
           </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+          <div style={{ display: 'flex', gap: sp(8), marginTop: sp(10) }}>
             <button
               type="button"
               data-testid="backup-import-confirm"
@@ -650,19 +651,19 @@ export function BackupPanel(props: BackupPanelProps) {
               {text.cancel}
             </button>
           </div>
-          <div style={{ fontSize: 11, color: MUTED, marginTop: 6 }}>{text.importConfirmHint}</div>
+          <div style={{ fontSize: fs(11), color: MUTED, marginTop: sp(6) }}>{text.importConfirmHint}</div>
         </div>
       )}
       {importBusy ? (
-        <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>{text.importing}</div>
+        <div style={{ fontSize: fs(12), color: MUTED, marginTop: sp(8) }}>{text.importing}</div>
       ) : null}
       {importError === null ? null : (
-        <div data-testid="backup-import-error" style={{ fontSize: 12, color: DANGER, marginTop: 8 }}>
+        <div data-testid="backup-import-error" style={{ fontSize: fs(12), color: DANGER, marginTop: sp(8) }}>
           {text.failed}：{errorText(importError)}
         </div>
       )}
       {imported ? (
-        <div data-testid="backup-import-status" style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>
+        <div data-testid="backup-import-status" style={{ fontSize: fs(12), color: MUTED, marginTop: sp(8) }}>
           {text.imported}
         </div>
       ) : null}

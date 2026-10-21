@@ -53,6 +53,7 @@ import type { AssetRejectReason } from '../persistence/assetStore'
 import { Icon } from './IconSprite'
 import type { IconName } from './IconSprite'
 import { Lightbox } from './Lightbox'
+import { fs, sp, px } from '../styles/scale'
 
 const BORDER = 'var(--oe-border)'
 const SEPARATOR = 'var(--oe-separator)'
@@ -244,13 +245,13 @@ function NoteImageView({ node, extension }: NodeViewProps) {
 const IMAGE_CHIP: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 6,
-  padding: '2px 8px',
+  gap: sp(6),
+  padding: px('2px 8px'),
   border: `1px dashed ${BORDER}`,
   borderRadius: RADIUS_CONTROL,
   background: FILL,
   color: MUTED,
-  fontSize: 11,
+  fontSize: fs(11),
 }
 
 const IMAGE_TAG: CSSProperties = {
@@ -801,9 +802,9 @@ function filenameOf(src: string): string {
 const TOOLBAR: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 2,
+  gap: sp(2),
   flexWrap: 'wrap',
-  padding: '4px 6px',
+  padding: px('4px 6px'),
   borderBottom: `1px solid ${SEPARATOR}`,
 }
 
@@ -811,8 +812,8 @@ const TOOL_BUTTON: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 24,
-  height: 24,
+  width: sp(24),
+  height: sp(24),
   padding: 0,
   color: MUTED,
   background: 'transparent',
@@ -829,16 +830,16 @@ const TOOL_BUTTON_ACTIVE: CSSProperties = {
 
 const LINK_MENU: CSSProperties = {
   position: 'absolute',
-  left: 8,
-  right: 8,
-  bottom: 8,
+  left: sp(8),
+  right: sp(8),
+  bottom: sp(8),
   zIndex: 6,
-  maxHeight: 180,
+  maxHeight: sp(180),
   overflowY: 'auto',
-  padding: 6,
+  padding: sp(6),
   display: 'flex',
   flexDirection: 'column',
-  gap: 2,
+  gap: sp(2),
   background: SURFACE,
   border: `1px solid ${SEPARATOR}`,
   borderRadius: RADIUS_OVERLAY,
@@ -846,23 +847,23 @@ const LINK_MENU: CSSProperties = {
 }
 
 const LINK_MENU_TITLE: CSSProperties = {
-  padding: '2px 6px',
-  fontSize: 10,
+  padding: px('2px 6px'),
+  fontSize: fs(10),
   color: MUTED,
 }
 
 const LINK_MENU_EMPTY: CSSProperties = {
-  padding: '6px',
-  fontSize: 11,
+  padding: px('6px'),
+  fontSize: fs(11),
   color: MUTED,
 }
 
 const LINK_MENU_ITEM: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 6,
-  padding: '4px 6px',
-  fontSize: 11,
+  gap: sp(6),
+  padding: px('4px 6px'),
+  fontSize: fs(11),
   color: TEXT,
   borderRadius: RADIUS_CONTROL,
   cursor: 'pointer',
@@ -874,12 +875,12 @@ const LINK_MENU_ITEM_ACTIVE: CSSProperties = {
 
 const ASSET_HINT: CSSProperties = {
   position: 'absolute',
-  left: 8,
-  right: 8,
-  bottom: 8,
+  left: sp(8),
+  right: sp(8),
+  bottom: sp(8),
   zIndex: 7,
-  padding: '4px 8px',
-  fontSize: 11,
+  padding: px('4px 8px'),
+  fontSize: fs(11),
   color: 'var(--oe-overdue)',
   background: SURFACE,
   border: `1px solid ${BORDER}`,
@@ -888,7 +889,7 @@ const ASSET_HINT: CSSProperties = {
 
 const LINK_MENU_KIND: CSSProperties = {
   flex: '0 0 auto',
-  fontSize: 10,
+  fontSize: fs(10),
   color: MUTED,
 }
 
