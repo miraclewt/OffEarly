@@ -440,6 +440,8 @@ function makeVault(): Vault {
     links: [],
     assets: [],
     mindmaps: [],
+    notebooks: [],
+    noteDocs: [],
   }
 }
 

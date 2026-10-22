@@ -90,6 +90,34 @@ export interface MindMap {
   updatedAt: string
 }
 
+/**
+ * T49 · 笔记本（知识库）：一个库里可以有多个笔记本，每个笔记本下是一棵文档树。
+ * 与思维导图同属「用户内容」，但仍住在 vault.json 里——备份、冲突保护、导出都天然覆盖。
+ */
+export interface Notebook {
+  id: string
+  name: string
+  /** 笔记本之间的排序键，复用 domain/lexorank.mid */
+  order: string
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * T49 · 知识库文档：`content` 与 `Task.note` 同口径，永远存 Markdown 纯文本。
+ * `parentId` 构成文档树（null = 知识库顶层），`order` 只在其兄弟之间比较。
+ */
+export interface NoteDoc {
+  id: string
+  notebookId: string
+  parentId: string | null
+  title: string
+  content: string
+  order: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Asset {
   id: string
   filename: string
@@ -144,4 +172,7 @@ export interface Vault {
   links: Dependency[]
   assets: Asset[]
   mindmaps: MindMap[]
+  /** T49：知识库。旧库缺键由 schema 补空数组，schemaVersion 不升、不注册迁移。 */
+  notebooks: Notebook[]
+  noteDocs: NoteDoc[]
 }

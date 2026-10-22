@@ -89,6 +89,7 @@ export const zh = {
     viewBoard: '看板',
     viewGantt: '甘特',
     viewMindmap: '导图',
+    viewNotebook: '笔记本',
     remoteUpdated: '另一端已更新磁盘版本，保存时会询问',
     panelPending: '{name} 面板尚未实现',
     drawerHost: '详情抽屉',
@@ -300,6 +301,18 @@ export const zh = {
     linkEmpty: '没有匹配的标题',
     kindTask: '任务',
     kindMilestone: '里程碑',
+    kindDoc: '文档',
+    // T49 追加：排版 / 源码模式 / 图片缩放（只增不改，既有键一律不动）
+    placeholder: '开始记录…支持 Markdown 语法，可直接粘贴或拖入图片',
+    markdownMode: 'MD',
+    richMode: '富文本',
+    markdownModeHint: '切换到 Markdown 源码编辑',
+    richModeHint: '回到所见即所得',
+    markdownSource: 'Markdown 源码',
+    imageResize: '拖动调整图片大小，方向键微调',
+    imageResetSize: '原始',
+    imageWidthValue: '图片宽度 {n}%',
+    charCount: '{n} 字',
   },
 
   // T25 尾部追加：图片灯箱与附件提示（只增不改，既有键一律不动）
@@ -399,6 +412,36 @@ export const zh = {
     // 也不能借「SVG 或 CSV」把用户引向不存在的出口。
     exportPngUnsupported: '当前环境不支持 PNG 导出，请改用 SVG',
     deleteConfirm: '删除整张思维导图？',
+  },
+
+  // T49 尾部追加：知识库（笔记本 / 文档树 / 编辑区；只增不改，既有键一律不动）
+  notebook: {
+    title: '笔记本',
+    create: '新建笔记本',
+    exists: '已有笔记本',
+    untitled: '未命名笔记本',
+    namePlaceholder: '笔记本名称',
+    rename: '重命名笔记本',
+    delete: '删除笔记本',
+    confirmDelete: '确认删除？',
+    emptyTitle: '还没有笔记本',
+    emptyHint: '把零散的想法、会议记录、方案草稿放进笔记本：支持 Markdown、图片粘贴与缩放，数据与任务一起存在你的库文件夹里。',
+    newDoc: '新建文档',
+    newChildDoc: '新建子文档',
+    renameDoc: '重命名文档',
+    deleteDoc: '删除文档',
+    noDocs: '还没有文档，点上方 + 新建第一篇',
+    search: '搜索文档',
+    searchPlaceholder: '搜索标题与正文…',
+    searchEmpty: '没有匹配的文档',
+    emptyDocTitle: '选一篇文档开始写',
+    emptyDocHint: '左侧是一棵可以无限嵌套的文档树；正文支持 Markdown、表格、任务列表与图片。',
+    docTitle: '文档标题',
+    untitledDoc: '未命名文档',
+    updatedAt: '更新于 {date}',
+    docPlaceholder: '开始写这篇文档…支持 Markdown，可直接粘贴或拖入图片',
+    expand: '展开子文档',
+    collapse: '收起子文档',
   },
 } as const
 

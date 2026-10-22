@@ -66,6 +66,8 @@ function vaultWith(mindmaps: MindMap[]): Vault {
     links: [],
     assets: [],
     mindmaps,
+    notebooks: [],
+    noteDocs: [],
   }
 }
 

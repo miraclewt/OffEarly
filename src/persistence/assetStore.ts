@@ -174,8 +174,13 @@ export interface AssetGcPreview {
   reclaimableBytes: number
 }
 
-/** 与 controllers/noteAssets.ts 的 noteAssetRefs 同一正则口径（T25 已定）：只认 `![](assets/…)` 图片语法。 */
-const ASSET_REF_PATTERN = /!\[[^\]]*\]\(([^)\s]+)\)/g
+/**
+ * 与 controllers/noteAssets.ts 的 noteAssetRefs 同一口径：Markdown 图片语法 + 带宽度信息的
+ * `<img>` HTML（T49 起「可缩放的图片」会写成 `<img src="assets/x.png" width="62%">`）。
+ * 只扫一种语法会漏掉另一种的引用，回收就会误删——这是破坏性操作，宁可多认。
+ */
+const ASSET_REF_PATTERN = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+const ASSET_HTML_IMG_PATTERN = /<img\b[^>]*?\bsrc\s*=\s*("([^"]*)"|'([^']*)')/gi
 
 /** 纯函数：从一段 note markdown 里解析出 `assets/<id>.<ext>` 图片引用（外链 / 子目录不算）。 */
 export function assetRefsIn(markdown: string): string[] {
@@ -184,19 +189,24 @@ export function assetRefsIn(markdown: string): string[] {
     const src = match[1] ?? ''
     if (isAssetRef(src)) refs.add(src)
   }
+  for (const match of markdown.matchAll(ASSET_HTML_IMG_PATTERN)) {
+    const src = match[2] ?? match[3] ?? ''
+    if (isAssetRef(src)) refs.add(src)
+  }
   return [...refs]
 }
 
 /**
- * 纯函数：扫描整个 vault 所有 note（任务 + 里程碑）得到被引用附件 id 集合。
+ * 纯函数：扫描整个 vault 所有 note（任务 + 里程碑 + T49 知识库文档）得到被引用附件 id 集合。
  * 里程碑也带 note（T24），只扫 task.note 会漏掉「只被里程碑引用」的图、回收时误删——
- * 回收是破坏性操作，安全侧宁可多认一个引用。
+ * 知识库文档同理；回收是破坏性操作，安全侧宁可多认一个引用。
  */
 export function referencedAssetIds(vault: Vault): Set<string> {
   const ids = new Set<string>()
   const notes: ReadonlyArray<string | undefined> = [
     ...vault.tasks.map((task) => task.note),
     ...vault.milestones.map((milestone) => milestone.note),
+    ...vault.noteDocs.map((doc) => doc.content),
   ]
   for (const note of notes) {
     if (typeof note !== 'string' || note === '') continue

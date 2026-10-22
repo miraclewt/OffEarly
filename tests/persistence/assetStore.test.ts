@@ -56,6 +56,8 @@ function emptyVault(): Vault {
     links: [],
     assets: [],
     mindmaps: [],
+    notebooks: [],
+    noteDocs: [],
   }
 }
 

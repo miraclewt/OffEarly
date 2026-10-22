@@ -151,6 +151,8 @@ function makeVault(): Vault {
     links: [{ id: 'l1', from: 't2', to: 't1', type: 'FS', lagDays: 0 }],
     assets: [],
     mindmaps: [],
+    notebooks: [],
+    noteDocs: [],
   }
 }
 

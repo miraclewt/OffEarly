@@ -11,19 +11,17 @@
 // 节点视图就只需「读 → 订阅 → 重画」三步，不必知道任何 I/O 细节。
 
 import type { VaultStore } from '../domain/store'
-import { isAssetRef, recordAsset } from '../persistence/assetStore'
+import { assetRefsIn, recordAsset } from '../persistence/assetStore'
 import type { AssetStore } from '../persistence/assetStore'
 import type { NoteAssetsPort } from '../views/NoteEditor'
 
-/** note 里 `![](assets/<id>.<ext>)` 的引用集合（T26 的 gc 也用这一份口径）。 */
+/**
+ * note 里 `![](assets/<id>.<ext>)` 与 `<img src="assets/…" width="…">` 的引用集合
+ * （T26 的 gc 也用这一份口径）。T49 起图片可缩放，带宽度时存 HTML `<img>`——
+ * 只认 Markdown 图片语法会让带尺寸的图片被回收误删。
+ */
 export function noteAssetRefs(markdown: string): string[] {
-  const refs = new Set<string>()
-  const pattern = /!\[[^\]]*\]\(([^)\s]+)\)/g
-  for (const match of markdown.matchAll(pattern)) {
-    const src = match[1] ?? ''
-    if (isAssetRef(src)) refs.add(src)
-  }
-  return [...refs]
+  return assetRefsIn(markdown)
 }
 
 /** 适配器造出来的端口一定有 subscribe（视图侧是可选的，这里补成必填便于接线直接用）。 */

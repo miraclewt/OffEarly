@@ -1,18 +1,20 @@
-// T24 · NoteEditor：任务笔记的富文本编辑器（spec 6.4）。
+// T24 · NoteEditor：任务笔记 / 知识库文档共用的富文本编辑器（spec 6.4；T49 增强）。
 //
-// 存储口径：`Task.note` 永远存 Markdown 纯文本（可读、可迁移、能被 Obsidian 直读）。
+// 存储口径：`Task.note` 与 `NoteDoc.content` 永远存 Markdown 纯文本（可读、可迁移、能被 Obsidian 直读）。
 // 编辑器内部是 ProseMirror 文档，进出都经官方 @tiptap/markdown（MarkedJS）转换；
 // 往返不丢内容的口径由 `roundTripNoteMarkdown()` 固化（导出供单测直接断言）。
 //
-// 三处刻意取舍（都是为了「不丢内容」或不越 T25 的界）：
+// 四处刻意取舍（都是为了「不丢内容」或不越界）：
 //  1) 自补 SafeCodeBlock —— 官方 codeBlock 的 markdown 读写有两个已知缺陷（见其定义处注释），
 //     会把嵌套围栏 / 前导空格的围栏代码块写坏或吞掉；这里覆写两个 handler 修掉。
 //  2) 自补任务列表快捷语法 `[] ` —— StarterKit / TaskItem 3.32 未内置该输入规则（实测无 addInputRules）。
-//  3) 图片只做「形态与接缝」—— assetStore.ts 是 T25 的产出，此处不 import 尚不存在的模块；
-//     图片节点渲染成灰底 chip 而不是碎图，但 `![](assets/<id>.<ext>)` 语法原样往返。
+//  3) 图片渲染走 React 节点视图（blob URL 是异步来的），markdown 读写由扩展负责。
+//  4) 图片缩放（T49）：宽度以百分比存进 `<img width="62%">` 这种 HTML 写法——标准 Markdown 图片
+//     语法没有尺寸位，塞进 title 会污染悬浮提示；HTML img 是 Typora / Obsidian 都认的既有约定，
+//     读回来仍是 `image` 节点（`parseHTML` 自带 width 映射），往返不丢。
 //
-// 写路径：编辑 debounce 后 onCommit（宿主用 patchTaskCommand 落库 → 进 CommandBus 撤销栈）；
-// 组件自己不碰 store、不碰文件系统。撤销粒度 = 一个 debounce 窗口一条命令。
+// 写路径：编辑 debounce 后 onCommit（宿主用 patchTaskCommand / patchNoteDocCommand 落库 →
+// 进 CommandBus 撤销栈）；组件自己不碰 store、不碰文件系统。撤销粒度 = 一个 debounce 窗口一条命令。
 // 可挂载性：默认导出 + 显式 props（value / onCommit / linkTargets / t 全部由外部传入）。
 
 import {
@@ -36,6 +38,8 @@ import { TaskItem } from '@tiptap/extension-task-item'
 import { TaskList } from '@tiptap/extension-task-list'
 import { Markdown } from '@tiptap/markdown'
 import StarterKit from '@tiptap/starter-kit'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   ChangeEvent as ReactChangeEvent,
@@ -44,6 +48,7 @@ import type {
   DragEvent as ReactDragEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
   ReactElement,
 } from 'react'
 
@@ -58,6 +63,7 @@ import { fs, sp, px } from '../styles/scale'
 const BORDER = 'var(--oe-border)'
 const SEPARATOR = 'var(--oe-separator)'
 const TEXT = 'var(--oe-text)'
+const SECONDARY = 'var(--oe-text-secondary)'
 const MUTED = 'var(--oe-text-muted)'
 const SURFACE = 'var(--oe-surface)'
 const FILL = 'var(--oe-fill)'
@@ -75,6 +81,67 @@ const LINK_MENU_LIMIT = 8
 const IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml'
 /** 插入失败的提示停留时长。 */
 const HINT_MS = 3000
+
+// ── T49 · 图片缩放（百分比宽度） ─────────────────────────────────────────
+// 为什么用百分比而不是像素：同一个笔记在任务弹窗（760 宽）与知识库（更宽）里显示，
+// 像素宽度在其中一处必然过窄/过宽；百分比跟着正文宽度走，且窗口缩放后仍然合理。
+// 存法见文件头第 4 条；min 15% 是「还看得清是什么图」的下限，再小不如删掉。
+
+export const NOTE_IMAGE_WIDTH_MIN = 15
+export const NOTE_IMAGE_WIDTH_MAX = 100
+export const NOTE_IMAGE_WIDTH_PRESETS = [25, 50, 75, 100] as const
+
+/** 把 markdown / HTML 里的宽度写法归一成 15–100 的整数百分比；无法识别返回 null（= 原始尺寸）。 */
+export function parseImageWidth(raw: unknown): number | null {
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return Math.min(NOTE_IMAGE_WIDTH_MAX, Math.max(NOTE_IMAGE_WIDTH_MIN, Math.round(raw)))
+  }
+  if (typeof raw !== 'string') return null
+  const matched = /^\s*(\d+(?:\.\d+)?)\s*%?\s*$/.exec(raw)
+  if (matched === null) return null
+  const value = Number(matched[1])
+  if (!Number.isFinite(value) || value <= 0) return null
+  return Math.min(NOTE_IMAGE_WIDTH_MAX, Math.max(NOTE_IMAGE_WIDTH_MIN, Math.round(value)))
+}
+
+/** 宽度的落盘写法（HTML img 的 width 属性）。 */
+export function formatImageWidth(percent: number): string {
+  return `${parseImageWidth(percent) ?? NOTE_IMAGE_WIDTH_MAX}%`
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+/**
+ * 图片的 markdown 写法：有宽度 → HTML `<img>`（标准 Markdown 没有尺寸位）；
+ * 没有宽度 → 常规 `![alt](src)`，保证「没缩放过」的笔记保持最干净的可读形态。
+ */
+export function imageMarkdown(attrs: { src: string; alt?: string | null; width?: unknown }): string {
+  const src = attrs.src
+  const alt = attrs.alt ?? ''
+  const width = parseImageWidth(attrs.width)
+  if (width === null) return `![${alt}](${src})`
+  return `<img src="${escapeHtmlAttribute(src)}" alt="${escapeHtmlAttribute(alt)}" width="${width}%">`
+}
+
+/**
+ * 字数（非空白字符数）：只是给写作者一个体量提示，不追求语言学的「词」。
+ * 图片语法与 HTML 标签不计入——它们不是正文。
+ */
+export function countNoteChars(markdown: string): number {
+  return markdown
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/<img\b[^>]*>/gi, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/[#*`~]/g, '')
+    .replace(/\s+/g, '')
+    .length
+}
 
 /** 从剪贴板 / 拖放载荷里挑出图片文件（粗筛：只看是不是 image/*）。 */
 export function imageFilesOf(transfer: DataTransfer | null | undefined): File[] {
@@ -135,6 +202,39 @@ const TaskListShortcut = Extension.create({
 })
 
 /**
+ * NotePlaceholder：空文档时给首段挂一个装饰，CSS 用 `::before` 画出提示语。
+ * 不装 @tiptap/extensions 的 Placeholder，是因为那要新增一条直接依赖（它现在只是传递依赖）；
+ * 这里只需要「整篇为空」这一种形态，20 行足够，也不会在保存时写进任何内容。
+ */
+const NotePlaceholder = Extension.create<{ text: string }>({
+  name: 'notePlaceholder',
+  addOptions() {
+    return { text: '' }
+  },
+  addProseMirrorPlugins() {
+    const text = this.options.text
+    return [
+      new Plugin({
+        key: new PluginKey('notePlaceholder'),
+        props: {
+          decorations: ({ doc }) => {
+            const first = doc.firstChild
+            if (doc.childCount !== 1 || first === null || first.content.size !== 0) return null
+            return DecorationSet.create(doc, [
+              Decoration.node(0, first.nodeSize, {
+                class: 'oe-note-empty',
+                'data-placeholder': text,
+              }),
+            ])
+          },
+        },
+      }),
+    ]
+  },
+})
+
+
+/**
  * WikiLink：`[[标题]]` 双向链接的最小落地（spec 6.4）。
  * atom inline 节点，markdown 侧用 tokenizer / parseMarkdown / renderMarkdown 三件套保证
  * `[[标题]]` 原样往返；DOM 侧渲染成可点击的文字（点击经 onNavigate 外送，接线归集成窗口）。
@@ -192,20 +292,48 @@ export interface NoteImagePort {
   subscribe?: (listener: () => void) => () => void
 }
 
+/** 节点视图要用的两条文案（由视图注 t()，扩展本身不 import i18n）。 */
+export interface NoteImageLabels {
+  resize: string
+  resetSize: string
+  widthValue: string
+}
+
 interface NoteImageStorage {
   port: NoteImagePort | null
+  labels: NoteImageLabels
+}
+
+/** 像素位移 → 百分比：内容宽度未知（jsdom / 未布局）时退回 100%，绝不算出 NaN 写进文档。 */
+export function widthPercentFromPixels(pixels: number, contentWidth: number): number {
+  if (!(contentWidth > 0) || !Number.isFinite(pixels)) return NOTE_IMAGE_WIDTH_MAX
+  return parseImageWidth((pixels / contentWidth) * 100) ?? NOTE_IMAGE_WIDTH_MAX
 }
 
 /**
  * NoteImageView：图片用 React 节点视图渲染，而不是 ProseMirror 的静态 renderHTML——
  * 因为 blob URL 是**异步**来的（getFile() → createObjectURL），静态 HTML 一旦画出来就没机会改 src；
- * 节点视图是 React 组件，能等通知重画。markdown 读写一字未动（节点视图只影响 DOM）。
+ * 节点视图是 React 组件，能等通知重画。markdown 往返由扩展的 renderMarkdown 负责。
+ *
+ * T49 缩放交互（三种入口，全部落到同一个属性 `width`）：
+ *  · 右下角把手拖拽：拖动时只改本地预览，抬手才写一次属性（一次拖拽 = 一条撤销命令）；
+ *  · 选中图片后的 25/50/75/100% 预设条：「原始尺寸」清掉宽度；
+ *  · 把手聚焦后左右方向键 ±5%（role=slider，键盘用户不是二等公民）。
  */
-function NoteImageView({ node, extension }: NodeViewProps) {
+function NoteImageView(props: NodeViewProps) {
+  const { node, extension, editor, selected, updateAttributes } = props
   const src = typeof node.attrs.src === 'string' ? node.attrs.src : ''
   const alt = typeof node.attrs.alt === 'string' ? node.attrs.alt : ''
-  const port = (extension.storage as NoteImageStorage).port
+  const storage = extension.storage as NoteImageStorage
+  const port = storage.port
+  const labels = storage.labels
+  const width = parseImageWidth(node.attrs.width)
   const [url, setUrl] = useState<string | null>(() => port?.resolve?.(src) ?? null)
+  /** 拖拽中的预览值（null = 没在拖）。 */
+  const [preview, setPreview] = useState<number | null>(null)
+  /** 悬停：让缩放预设不依赖「先选中」——点击图片是开灯箱（T25 既有行为），不能拿它当选中。 */
+  const [hovering, setHovering] = useState(false)
+  const imageRef = useRef<HTMLImageElement | null>(null)
 
   useEffect(() => {
     const read = (): void => setUrl(port?.resolve?.(src) ?? null)
@@ -215,6 +343,51 @@ function NoteImageView({ node, extension }: NodeViewProps) {
   }, [src, port])
 
   const label = alt !== '' ? alt : src
+  const shown = preview ?? width
+
+  const commitWidth = useCallback(
+    (next: number | null): void => {
+      updateAttributes({ width: next === null ? null : formatImageWidth(next) })
+    },
+    [updateAttributes],
+  )
+
+  const startResize = useCallback(
+    (event: ReactPointerEvent<HTMLSpanElement>): void => {
+      if (url === null) return
+      event.preventDefault()
+      event.stopPropagation()
+      const contentWidth = editor.view.dom.clientWidth
+      const startX = event.clientX
+      const box = imageRef.current?.getBoundingClientRect()
+      const startPixels = box !== undefined && box.width > 0 ? box.width : contentWidth * ((width ?? 100) / 100)
+      const startPercent = width ?? 100
+      const target = event.currentTarget
+      try {
+        target.setPointerCapture(event.pointerId)
+      } catch {
+        // jsdom / 老浏览器：没有指针捕获也能靠 window 监听完成拖拽
+      }
+      setPreview(startPercent)
+
+      const onMove = (move: PointerEvent): void => {
+        const pixels = startPixels + (move.clientX - startX)
+        // 内容宽度为 0（未布局）时用起始百分比兜底，避免把 NaN 显示给用户
+        setPreview(contentWidth > 0 ? widthPercentFromPixels(pixels, contentWidth) : startPercent)
+      }
+      const onUp = (up: PointerEvent): void => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        const pixels = startPixels + (up.clientX - startX)
+        const next = contentWidth > 0 ? widthPercentFromPixels(pixels, contentWidth) : startPercent
+        setPreview(null)
+        commitWidth(next)
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    },
+    [commitWidth, editor, url, width],
+  )
 
   // 未就绪（刚打开弹窗、图片还在读）：渲染灰底 chip 而不是碎图——
   // 内容取 alt / 路径，都是数据不是文案，不涉 i18n。
@@ -230,14 +403,81 @@ function NoteImageView({ node, extension }: NodeViewProps) {
 
   return (
     <NodeViewWrapper as="span">
-      <img
-        data-note-image={src}
-        data-testid="note-image"
-        src={url}
-        alt={alt}
-        onClick={() => port?.open?.(src, alt)}
-        style={IMAGE_TAG}
-      />
+      <span
+        data-note-image-wrap={src}
+        onMouseEnter={() => setHovering(true)}
+        onMouseLeave={() => setHovering(false)}
+        style={{ ...IMAGE_WRAP, ...(selected ? IMAGE_WRAP_SELECTED : null) }}
+      >
+        <img
+          ref={imageRef}
+          data-note-image={src}
+          data-testid="note-image"
+          src={url}
+          alt={alt}
+          onClick={() => port?.open?.(src, alt)}
+          style={{ ...IMAGE_TAG, width: shown === null ? undefined : `${shown}%` }}
+        />
+        <span
+          data-note-image-handle=""
+          data-testid="note-image-resize"
+          role="slider"
+          tabIndex={0}
+          aria-label={labels.resize}
+          aria-valuemin={NOTE_IMAGE_WIDTH_MIN}
+          aria-valuemax={NOTE_IMAGE_WIDTH_MAX}
+          aria-valuenow={shown ?? NOTE_IMAGE_WIDTH_MAX}
+          aria-valuetext={labels.widthValue.replace('{n}', String(shown ?? NOTE_IMAGE_WIDTH_MAX))}
+          title={labels.resize}
+          contentEditable={false}
+          onPointerDown={startResize}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+            event.preventDefault()
+            event.stopPropagation()
+            const base = shown ?? NOTE_IMAGE_WIDTH_MAX
+            const next = Math.min(
+              NOTE_IMAGE_WIDTH_MAX,
+              Math.max(NOTE_IMAGE_WIDTH_MIN, base + (event.key === 'ArrowRight' ? 5 : -5)),
+            )
+            commitWidth(next)
+          }}
+          style={IMAGE_HANDLE}
+        />
+        {preview === null ? null : (
+          <span data-testid="note-image-width-badge" style={IMAGE_WIDTH_BADGE}>
+            {preview}%
+          </span>
+        )}
+        {selected || hovering ? (
+          <span data-testid="note-image-tools" contentEditable={false} style={IMAGE_TOOLS}>
+            {NOTE_IMAGE_WIDTH_PRESETS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                data-testid={`note-image-width-${preset}`}
+                aria-pressed={width === preset}
+                aria-label={labels.widthValue.replace('{n}', String(preset))}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => commitWidth(preset)}
+                style={{ ...IMAGE_TOOL_CHIP, ...(width === preset ? IMAGE_TOOL_CHIP_ACTIVE : null) }}
+              >
+                {preset}%
+              </button>
+            ))}
+            <button
+              type="button"
+              data-testid="note-image-width-reset"
+              aria-pressed={width === null}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => commitWidth(null)}
+              style={{ ...IMAGE_TOOL_CHIP, ...(width === null ? IMAGE_TOOL_CHIP_ACTIVE : null) }}
+            >
+              {labels.resetSize}
+            </button>
+          </span>
+        ) : null}
+      </span>
     </NodeViewWrapper>
   )
 }
@@ -254,6 +494,20 @@ const IMAGE_CHIP: CSSProperties = {
   fontSize: fs(11),
 }
 
+const IMAGE_WRAP: CSSProperties = {
+  position: 'relative',
+  display: 'inline-block',
+  maxWidth: '100%',
+  lineHeight: 0,
+  verticalAlign: 'middle',
+}
+
+const IMAGE_WRAP_SELECTED: CSSProperties = {
+  outline: `2px solid var(--oe-accent)`,
+  outlineOffset: sp(2),
+  borderRadius: RADIUS_CONTROL,
+}
+
 const IMAGE_TAG: CSSProperties = {
   maxWidth: '100%',
   height: 'auto',
@@ -262,19 +516,98 @@ const IMAGE_TAG: CSSProperties = {
   verticalAlign: 'middle',
 }
 
-function createNoteImage(port: NoteImagePort | null) {
+const IMAGE_HANDLE: CSSProperties = {
+  position: 'absolute',
+  right: sp(-4),
+  bottom: sp(-4),
+  width: sp(12),
+  height: sp(12),
+  borderRadius: '50%',
+  background: 'var(--oe-accent)',
+  border: `2px solid var(--oe-surface)`,
+  boxShadow: 'var(--oe-shadow-card)',
+  cursor: 'nwse-resize',
+  outline: 'none',
+}
+
+const IMAGE_WIDTH_BADGE: CSSProperties = {
+  position: 'absolute',
+  left: sp(4),
+  top: sp(4),
+  padding: px('1px 6px'),
+  fontSize: fs(10),
+  lineHeight: 1.6,
+  color: 'var(--oe-on-accent)',
+  background: 'var(--oe-accent)',
+  borderRadius: RADIUS_CONTROL,
+  pointerEvents: 'none',
+}
+
+const IMAGE_TOOLS: CSSProperties = {
+  position: 'absolute',
+  // 贴着图片右上角内侧：放图片外面（尤其下方）时，图片正好在滚动区底部就会被裁掉，
+  // 用户只看得见一个孤零零的把手。叠在图上反正是半透明浮层，代价最小。
+  top: sp(6),
+  right: sp(6),
+  display: 'flex',
+  alignItems: 'center',
+  gap: sp(2),
+  padding: px('3px 4px'),
+  background: 'var(--oe-material-overlay)',
+  border: `1px solid ${SEPARATOR}`,
+  borderRadius: RADIUS_CONTROL,
+  boxShadow: 'var(--oe-shadow-pop)',
+  lineHeight: 1,
+  whiteSpace: 'nowrap',
+}
+
+const IMAGE_TOOL_CHIP: CSSProperties = {
+  padding: px('2px 6px'),
+  fontSize: fs(10),
+  lineHeight: 1.6,
+  color: SECONDARY,
+  background: 'transparent',
+  border: 'none',
+  borderRadius: 'var(--oe-radius-control)',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+}
+
+const IMAGE_TOOL_CHIP_ACTIVE: CSSProperties = {
+  color: 'var(--oe-on-accent)',
+  background: INDIGO,
+}
+
+function createNoteImage(port: NoteImagePort | null, labels: NoteImageLabels) {
   return Image.extend<object, NoteImageStorage>({
     addStorage() {
-      return { port }
+      return { port, labels }
     },
     addNodeView() {
       return ReactNodeViewRenderer(NoteImageView)
     },
+    // 与官方实现只差一点：有宽度时写成 HTML img（标准 Markdown 图片语法没有尺寸位）。
+    renderMarkdown: (node) =>
+      imageMarkdown({
+        src: typeof node.attrs?.src === 'string' ? node.attrs.src : '',
+        alt: typeof node.attrs?.alt === 'string' ? node.attrs.alt : '',
+        width: node.attrs?.width,
+      }),
   })
 }
 
-/** 笔记编辑器的扩展集（导出供单测复用，保证测试与产品走同一套 schema）。 */
-export function createNoteExtensions(port?: NoteImagePort) {
+/** 未注入文案时的兜底（纯函数往返、独立挂载的组件测试都会走到）。 */
+const FALLBACK_IMAGE_LABELS: NoteImageLabels = {
+  resize: 'Resize image',
+  resetSize: 'Original',
+  widthValue: '{n}%',
+}
+
+/**
+ * 笔记编辑器的扩展集（导出供单测复用，保证测试与产品走同一套 schema）。
+ * `labels` 只影响图片节点视图上的可访问名，不影响 markdown 往返。
+ */
+export function createNoteExtensions(port?: NoteImagePort, labels?: NoteImageLabels, placeholder = '') {
   return [
     StarterKit.configure({
       // 换成自补的 SafeCodeBlock（见其注释）
@@ -289,9 +622,10 @@ export function createNoteExtensions(port?: NoteImagePort) {
     TaskList,
     TaskItem.configure({ nested: true }),
     TableKit,
-    createNoteImage(port ?? null),
+    createNoteImage(port ?? null, labels ?? FALLBACK_IMAGE_LABELS),
     WikiLink,
     TaskListShortcut,
+    NotePlaceholder.configure({ text: placeholder }),
   ]
 }
 
@@ -312,10 +646,10 @@ export function roundTripNoteMarkdown(markdown: string): string {
   return output
 }
 
-/** 双链候选：任务或里程碑。同名多任务时列表里会出现多条同 title 的候选。 */
+/** 双链候选：任务、里程碑，或知识库文档（T49）。同名多任务时列表里会出现多条同 title 的候选。 */
 export interface NoteLinkTarget {
   id: string
-  kind: 'task' | 'milestone'
+  kind: 'task' | 'milestone' | 'doc'
   title: string
 }
 
@@ -353,6 +687,17 @@ export interface NoteEditorProps {
   onReady?: (editor: Editor | null) => void
   /** 覆盖 debounce 毫秒数（测试确定化用）。 */
   debounceMs?: number
+  /** 空内容时的占位提示；省略用通用文案。 */
+  placeholder?: string
+  /** 正文区最小高度（设计稿 px，经界面尺度换算）；默认 200。 */
+  minHeight?: number
+  /**
+   * true：正文区吃满父容器高度、内部滚动（知识库文档页）；
+   * false/省略：随内容增长（任务详情弹窗，外层本来就滚）。
+   */
+  grow?: boolean
+  /** 底部右侧的字数统计；默认显示。 */
+  showStats?: boolean
   t?: (key: MsgKey, params?: TranslateParams) => string
   style?: CSSProperties
 }
@@ -410,6 +755,10 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   const [editorReady, setEditorReady] = useState(false)
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null)
   const [rejectReason, setRejectReason] = useState<AssetRejectReason | 'failed' | null>(null)
+  /** 富文本 / Markdown 源码两种模式（T49）。源码模式是给「想直接改 md」的人开的后门。 */
+  const [mode, setMode] = useState<'rich' | 'source'>('rich')
+  const [sourceDraft, setSourceDraft] = useState(props.value)
+  const [charCount, setCharCount] = useState(() => countNoteChars(props.value))
 
   const editorRef = useRef<Editor | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -421,6 +770,11 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   const lastSyncedRef = useRef(props.value)
   /** 程序化 setContent 期间抑制 onUpdate 的自动提交（否则「打开即规范化」会污染撤销栈）。 */
   const suppressRef = useRef(false)
+  /**
+   * 源码 → 富文本切换后，props.value 还是上一帧的旧值（宿主下一次渲染才追平）。
+   * 这一次外部同步必须跳过，否则刚载入的源码内容会被旧值覆盖回去。
+   */
+  const skipSyncRef = useRef(false)
   const commitRef = useRef(props.onCommit)
   commitRef.current = props.onCommit
   const assetsRef = useRef(props.assets)
@@ -442,6 +796,20 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   }
   const imagePort = imagePortRef.current
 
+  /** 节点视图的可访问名同样只在首次挂载时取一次（扩展集只建一次）。 */
+  const imageLabelsRef = useRef<NoteImageLabels | null>(null)
+  if (imageLabelsRef.current === null) {
+    imageLabelsRef.current = {
+      resize: t('noteEditor.imageResize'),
+      resetSize: t('noteEditor.imageResetSize'),
+      widthValue: t('noteEditor.imageWidthValue'),
+    }
+  }
+  const imageLabels = imageLabelsRef.current
+  const placeholderRef = useRef(props.placeholder ?? t('noteEditor.placeholder'))
+  const minHeight = props.minHeight ?? 200
+  const grow = props.grow ?? false
+
   /** 插入一张图：落盘（宿主）→ 拿到 src → 在光标处插图片节点（markdown 由编辑器生成）。 */
   const insertFiles = useCallback(async (files: readonly File[]) => {
     const assets = assetsRef.current
@@ -461,6 +829,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
 
   const emit = useCallback(() => {
     const markdown = latestRef.current
+    setCharCount(countNoteChars(markdown))
     if (markdown === lastSyncedRef.current) return
     lastSyncedRef.current = markdown
     commitRef.current(markdown)
@@ -493,6 +862,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
     (instance: Editor) => {
       const markdown = instance.getMarkdown()
       latestRef.current = markdown
+      setCharCount(countNoteChars(markdown))
       if (suppressRef.current) {
         // 程序化载入（打开/撤销/换任务）不算用户编辑
         lastSyncedRef.current = markdown
@@ -508,7 +878,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   updateRef.current = handleUpdate
 
   const editor = useEditor({
-    extensions: createNoteExtensions(imagePort),
+    extensions: createNoteExtensions(imagePort, imageLabels, placeholderRef.current),
     content: props.value,
     contentType: 'markdown',
     // TipTap v3 默认「事务后不重渲染」；工具栏的 aria-pressed / 高亮要跟着选区与标记即时刷新，
@@ -518,6 +888,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
       attributes: {
         'data-testid': 'note-editor-content',
         'aria-label': t('noteEditor.content'),
+        // 占位提示走装饰节点的 data-placeholder（见 NotePlaceholder），这里不再重复
       },
     },
     onUpdate: ({ editor: instance }) => updateRef.current(instance),
@@ -552,22 +923,35 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
     return () => window.clearTimeout(timer)
   }, [rejectReason])
 
-  // 外部值变化（撤销 / 重做 / 换任务）：非自身回声才写回编辑器
+  // 外部值变化（撤销 / 重做 / 换任务）：非自身回声才写回编辑器。
+  // 源码模式下不碰编辑器（它被 textarea 遮住了），只同步草稿——切回富文本时再整体载入。
   useEffect(() => {
+    if (skipSyncRef.current) {
+      skipSyncRef.current = false
+      return
+    }
+    if (props.value === lastSyncedRef.current) return
+    if (mode === 'source') {
+      lastSyncedRef.current = props.value
+      latestRef.current = props.value
+      setSourceDraft(props.value)
+      setCharCount(countNoteChars(props.value))
+      return
+    }
     const instance = editorRef.current
     if (instance === null) return
-    if (props.value === lastSyncedRef.current) return
     suppressRef.current = true
     try {
       instance.commands.setContent(props.value, { contentType: 'markdown' })
       lastSyncedRef.current = instance.getMarkdown()
       latestRef.current = lastSyncedRef.current
+      setCharCount(countNoteChars(lastSyncedRef.current))
     } finally {
       suppressRef.current = false
     }
     setLinkQuery(null)
     anchorRef.current = null
-  }, [props.value])
+  }, [props.value, mode])
 
   const candidates = useMemo(() => {
     if (linkQuery === null) return []
@@ -592,6 +976,51 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
     anchorRef.current = null
     setLinkQuery(null)
   }, [])
+
+  /**
+   * 富文本 ↔ Markdown 源码。
+   * 进源码：草稿取编辑器当前 markdown（已规范化）；
+   * 回富文本：先把源码整体载入编辑器（程序化载入，不进撤销栈），再按差异提交一次。
+   */
+  const switchMode = useCallback(() => {
+    if (mode === 'rich') {
+      const current = latestRef.current
+      setSourceDraft(current)
+      setCharCount(countNoteChars(current))
+      setMode('source')
+      setLinkQuery(null)
+      anchorRef.current = null
+      return
+    }
+    const draft = sourceDraft
+    const instance = editorRef.current
+    let normalized = draft
+    if (instance !== null) {
+      suppressRef.current = true
+      try {
+        instance.commands.setContent(draft, { contentType: 'markdown' })
+        normalized = instance.getMarkdown()
+        latestRef.current = normalized
+      } finally {
+        suppressRef.current = false
+      }
+    }
+    lastSyncedRef.current = normalized
+    setCharCount(countNoteChars(normalized))
+    if (normalized !== props.value) commitRef.current(normalized)
+    skipSyncRef.current = true
+    setMode('rich')
+    setLinkQuery(null)
+  }, [mode, sourceDraft, props.value])
+
+  /** 源码模式的输入：照旧走 debounce，与富文本共用一条写路径。 */
+  const changeSource = (value: string): void => {
+    setSourceDraft(value)
+    latestRef.current = value
+    setCharCount(countNoteChars(value))
+    if (value === lastSyncedRef.current) return
+    scheduleCommit()
+  }
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
     if (linkQuery === null) return
@@ -679,6 +1108,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   return (
     <div
       data-testid="note-editor"
+      data-mode={mode}
       onKeyDown={handleKeyDown}
       onClick={handleClick}
       onPaste={handlePaste}
@@ -689,6 +1119,10 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
         display: 'flex',
         flexDirection: 'column',
         minWidth: 0,
+        minHeight: 0,
+        // grow 模式下编辑器自己吃满父容器（正文内部滚动）；否则由内容撑高（任务弹窗）
+        flex: grow ? '1 1 auto' : undefined,
+        height: grow ? '100%' : undefined,
         background: SURFACE,
         border: `1px solid ${BORDER}`,
         borderRadius: RADIUS_CARD,
@@ -697,7 +1131,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
         ...props.style,
       }}
     >
-      {editorReady ? (
+      {editorReady && mode === 'rich' ? (
         <div data-testid="note-toolbar" role="toolbar" aria-label={t('noteEditor.toolbar')} style={TOOLBAR}>
           {tools.map((tool) => {
             const instance = editorRef.current
@@ -745,7 +1179,70 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
         style={{ display: 'none' }}
       />
 
-      <EditorContent editor={editor} />
+      {mode === 'source' ? (
+        <textarea
+          data-testid="note-source"
+          aria-label={t('noteEditor.markdownSource')}
+          value={sourceDraft}
+          spellCheck={false}
+          onChange={(event) => {
+            changeSource(event.target.value)
+          }}
+          onKeyDown={(event) => {
+            event.stopPropagation() // 源码模式里的 Esc / Ctrl+Z 归浏览器（文本撤销），不关弹窗
+            if (event.key === 'Tab') {
+              // 纯文本域默认把 Tab 交给焦点链；这里给缩进——写 md 的列表/代码块需要它
+              event.preventDefault()
+              const area = event.currentTarget
+              const { selectionStart, selectionEnd, value } = area
+              const next = `${value.slice(0, selectionStart)}  ${value.slice(selectionEnd)}`
+              changeSource(next)
+              requestAnimationFrame(() => {
+                area.selectionStart = selectionStart + 2
+                area.selectionEnd = selectionStart + 2
+              })
+            }
+          }}
+          style={{
+            ...SOURCE_AREA,
+            flex: grow ? '1 1 auto' : undefined,
+            minHeight: sp(minHeight),
+            resize: grow ? 'none' : 'vertical',
+          }}
+        />
+      ) : (
+        <div
+          className="oe-prose"
+          data-testid="note-body"
+          style={{
+            ...NOTE_BODY,
+            flex: grow ? '1 1 auto' : undefined,
+            minHeight: sp(minHeight),
+            overflowY: grow ? 'auto' : undefined,
+          }}
+        >
+          <EditorContent editor={editor} />
+        </div>
+      )}
+
+      <div data-testid="note-statusbar" style={STATUSBAR}>
+        <button
+          type="button"
+          data-testid="note-mode-toggle"
+          aria-pressed={mode === 'source'}
+          title={mode === 'rich' ? t('noteEditor.markdownModeHint') : t('noteEditor.richModeHint')}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={switchMode}
+          style={{ ...MODE_BUTTON, ...(mode === 'source' ? MODE_BUTTON_ACTIVE : null) }}
+        >
+          {mode === 'rich' ? t('noteEditor.markdownMode') : t('noteEditor.richMode')}
+        </button>
+        {props.showStats === false ? null : (
+          <span data-testid="note-char-count" style={STATS}>
+            {t('noteEditor.charCount', { n: charCount })}
+          </span>
+        )}
+      </div>
 
       {linkQuery !== null ? (
         <div data-testid="note-link-menu" role="listbox" aria-label={t('noteEditor.linkSearch')} style={LINK_MENU}>
@@ -766,7 +1263,15 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
                 onClick={() => insertLink(candidate)}
                 style={{ ...LINK_MENU_ITEM, ...(index === activeIndex ? LINK_MENU_ITEM_ACTIVE : null) }}
               >
-                <span style={{ ...LINK_MENU_KIND }}>{t(candidate.kind === 'task' ? 'noteEditor.kindTask' : 'noteEditor.kindMilestone')}</span>
+                <span style={{ ...LINK_MENU_KIND }}>
+                  {t(
+                    candidate.kind === 'task'
+                      ? 'noteEditor.kindTask'
+                      : candidate.kind === 'milestone'
+                        ? 'noteEditor.kindMilestone'
+                        : 'noteEditor.kindDoc',
+                  )}
+                </span>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{candidate.title}</span>
               </div>
             ))
@@ -806,6 +1311,68 @@ const TOOLBAR: CSSProperties = {
   flexWrap: 'wrap',
   padding: px('4px 6px'),
   borderBottom: `1px solid ${SEPARATOR}`,
+  // 任务弹窗的外层会整体滚动；工具栏吸顶，长笔记里随时能加粗 / 插图
+  position: 'sticky',
+  top: 0,
+  zIndex: 4,
+  background: SURFACE,
+  borderTopLeftRadius: RADIUS_CARD,
+  borderTopRightRadius: RADIUS_CARD,
+}
+
+/** 正文容器：排版交给 theme.css 的 `.oe-prose`，这里只管盒模型（内边距/滚动由 CSS 承担）。 */
+const NOTE_BODY: CSSProperties = {
+  minWidth: 0,
+  background: SURFACE,
+}
+
+const SOURCE_AREA: CSSProperties = {
+  width: '100%',
+  boxSizing: 'border-box',
+  margin: 0,
+  padding: px('12px 16px'),
+  border: 'none',
+  outline: 'none',
+  color: TEXT,
+  background: SURFACE,
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+  fontSize: fs(12),
+  lineHeight: 1.75,
+  tabSize: 2,
+}
+
+const STATUSBAR: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: sp(8),
+  flex: '0 0 auto',
+  padding: px('2px 8px 3px'),
+  borderTop: `1px solid ${SEPARATOR}`,
+}
+
+const MODE_BUTTON: CSSProperties = {
+  padding: px('1px 6px'),
+  fontSize: fs(10),
+  lineHeight: 1.7,
+  color: MUTED,
+  background: 'transparent',
+  border: `1px solid ${BORDER}`,
+  borderRadius: RADIUS_CONTROL,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+}
+
+const MODE_BUTTON_ACTIVE: CSSProperties = {
+  color: 'var(--oe-on-accent)',
+  background: INDIGO,
+  border: `1px solid ${INDIGO}`,
+}
+
+const STATS: CSSProperties = {
+  fontSize: fs(10),
+  color: MUTED,
+  fontVariantNumeric: 'tabular-nums',
 }
 
 const TOOL_BUTTON: CSSProperties = {

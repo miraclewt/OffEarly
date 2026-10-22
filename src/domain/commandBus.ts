@@ -11,7 +11,17 @@
 // dirty 不在这里标记：Store 一变，T08 的 Autosave 就通过 store.subscribe 进入 dirty 态。
 // 撤销栈与 dirty 因此天然对齐，不存在「改了但没标脏」的野写路径。
 
-import type { Dependency, MindMap, MindNode, Settings, Status, Task, Vault } from './types'
+import type {
+  Dependency,
+  MindMap,
+  MindNode,
+  NoteDoc,
+  Notebook,
+  Settings,
+  Status,
+  Task,
+  Vault,
+} from './types'
 import {
   findNode,
   findParent,
@@ -20,6 +30,7 @@ import {
   mapTree,
   removeNode,
 } from './mindmapTree'
+import { docSubtreeIds } from './notebookTree'
 import type { VaultStore } from './store'
 
 /** 任务的可改字段；id 与 createdAt 不可改。 */
@@ -31,6 +42,9 @@ export type LinkPatch = Partial<Omit<Dependency, 'id' | 'from' | 'to'>>
 // 节点级只改 text/folded（id/order/children 由 add/delete/move 命令负责）。
 export type MapPatch = Partial<Omit<MindMap, 'id' | 'createdAt' | 'root' | 'order'>>
 export type NodePatch = Partial<Omit<MindNode, 'id' | 'order' | 'children'>>
+// T49：笔记本只改 name/updatedAt；文档可改标题 / 正文 / 父级 / 归属 / 排序（id 与 createdAt 不可改）。
+export type NotebookPatch = Partial<Omit<Notebook, 'id' | 'createdAt' | 'order'>>
+export type NoteDocPatch = Partial<Omit<NoteDoc, 'id' | 'createdAt'>>
 
 export interface MutationPayloads {
   'task.create': { task: Task; index: number | null }
@@ -52,6 +66,20 @@ export interface MutationPayloads {
   'mindmap.node.delete': { mapId: string; nodeId: string }
   'mindmap.node.patch': { mapId: string; nodeId: string; patch: NodePatch }
   'mindmap.node.move': { mapId: string; nodeId: string; newParentId: string; index: number }
+  // T49 追加：知识库命令。删除是级联的（笔记本删文档、文档删子树），
+  // 所以逆元必须携完整被删对象与它们的原始下标——undo 后连数组位置一起还原。
+  'notebook.create': { notebook: Notebook; index: number | null }
+  'notebook.patch': { id: string; patch: NotebookPatch }
+  'notebook.delete': { id: string }
+  'notebook.restore': {
+    notebook: Notebook
+    index: number
+    docs: { doc: NoteDoc; index: number }[]
+  }
+  'doc.create': { doc: NoteDoc; index: number | null }
+  'doc.patch': { id: string; patch: NoteDocPatch }
+  'doc.delete': { id: string }
+  'doc.restore': { docs: { doc: NoteDoc; index: number }[] }
 }
 
 export type MutationType = keyof MutationPayloads
@@ -166,6 +194,59 @@ function invertNodePatch(node: MindNode, patch: NodePatch): NodePatch {
   return inverse as NodePatch
 }
 
+// ── T49 · 知识库：定位 / 逆 patch / 批量插入 ─────────────────────────────
+
+function findNotebook(vault: Vault, id: string): Notebook {
+  const notebook = vault.notebooks.find((candidate) => candidate.id === id)
+  if (notebook === undefined) throw new Error(`commandBus: 笔记本不存在（${id}）`)
+  return notebook
+}
+
+function findNoteDoc(vault: Vault, id: string): NoteDoc {
+  const doc = vault.noteDocs.find((candidate) => candidate.id === id)
+  if (doc === undefined) throw new Error(`commandBus: 文档不存在（${id}）`)
+  return doc
+}
+
+function invertNotebookPatch(notebook: Notebook, patch: NotebookPatch): NotebookPatch {
+  const source = notebook as unknown as Record<string, unknown>
+  const inverse: Record<string, unknown> = {}
+  for (const key of Object.keys(patch)) inverse[key] = source[key]
+  return inverse as NotebookPatch
+}
+
+function invertNoteDocPatch(doc: NoteDoc, patch: NoteDocPatch): NoteDocPatch {
+  const source = doc as unknown as Record<string, unknown>
+  const inverse: Record<string, unknown> = {}
+  for (const key of Object.keys(patch)) inverse[key] = source[key]
+  return inverse as NoteDocPatch
+}
+
+function mapNotebook(vault: Vault, id: string, recipe: (notebook: Notebook) => Notebook): Vault {
+  findNotebook(vault, id)
+  return {
+    ...vault,
+    notebooks: vault.notebooks.map((notebook) => (notebook.id === id ? recipe(notebook) : notebook)),
+  }
+}
+
+function mapNoteDoc(vault: Vault, id: string, recipe: (doc: NoteDoc) => NoteDoc): Vault {
+  findNoteDoc(vault, id)
+  return {
+    ...vault,
+    noteDocs: vault.noteDocs.map((doc) => (doc.id === id ? recipe(doc) : doc)),
+  }
+}
+
+/** 批量还原：按记录的下标升序 splice，多文档 undo 后顺序与删除前一致。 */
+function insertNoteDocs(vault: Vault, entries: readonly { doc: NoteDoc; index: number }[]): Vault {
+  const noteDocs = [...vault.noteDocs]
+  for (const entry of [...entries].sort((a, b) => a.index - b.index)) {
+    noteDocs.splice(Math.min(entry.index, noteDocs.length), 0, entry.doc)
+  }
+  return { ...vault, noteDocs }
+}
+
 /** 纯函数：命令（或逆命令）作用在 vault 上的结果。不合法输入直接抛错，不静默兜底。 */
 export function reduce(vault: Vault, mutation: Mutation): Vault {
   switch (mutation.type) {
@@ -247,6 +328,58 @@ export function reduce(vault: Vault, mutation: Mutation): Vault {
         return { ...map, root: insertChild(next, newParentId, removed, index) }
       })
     }
+    case 'notebook.create': {
+      const { notebook, index } = mutation.payload
+      const notebooks = [...vault.notebooks]
+      notebooks.splice(index ?? notebooks.length, 0, notebook)
+      return { ...vault, notebooks }
+    }
+    case 'notebook.patch': {
+      const { id, patch } = mutation.payload
+      return mapNotebook(vault, id, (notebook) => ({ ...notebook, ...patch }))
+    }
+    case 'notebook.delete': {
+      const { id } = mutation.payload
+      findNotebook(vault, id)
+      return {
+        ...vault,
+        notebooks: vault.notebooks.filter((notebook) => notebook.id !== id),
+        noteDocs: vault.noteDocs.filter((doc) => doc.notebookId !== id),
+      }
+    }
+    case 'notebook.restore': {
+      const { notebook, index, docs } = mutation.payload
+      const notebooks = [...vault.notebooks]
+      notebooks.splice(Math.min(index, notebooks.length), 0, notebook)
+      return insertNoteDocs({ ...vault, notebooks }, docs)
+    }
+    case 'doc.create': {
+      const { doc, index } = mutation.payload
+      if (!vault.notebooks.some((notebook) => notebook.id === doc.notebookId)) {
+        throw new Error(`commandBus: 笔记本不存在（${doc.notebookId}）`)
+      }
+      const noteDocs = [...vault.noteDocs]
+      noteDocs.splice(index ?? noteDocs.length, 0, doc)
+      return { ...vault, noteDocs }
+    }
+    case 'doc.patch': {
+      const { id, patch } = mutation.payload
+      // 防环：父级落在自己或自己的子树里会造出「看不见的文档」（树化时被当顶层，但仍不可接受）
+      if (patch.parentId !== undefined && patch.parentId !== null) {
+        if (docSubtreeIds(vault.noteDocs, id).includes(patch.parentId)) {
+          throw new Error('commandBus: 文档不能移动到自己的子树里')
+        }
+      }
+      return mapNoteDoc(vault, id, (doc) => ({ ...doc, ...patch }))
+    }
+    case 'doc.delete': {
+      const { id } = mutation.payload
+      findNoteDoc(vault, id)
+      const doomed = new Set(docSubtreeIds(vault.noteDocs, id))
+      return { ...vault, noteDocs: vault.noteDocs.filter((doc) => !doomed.has(doc.id)) }
+    }
+    case 'doc.restore':
+      return insertNoteDocs(vault, mutation.payload.docs)
   }
 }
 
@@ -463,6 +596,94 @@ export function moveNodeCommand(
       type: 'mindmap.node.move',
       payload: { mapId, nodeId, newParentId: located.parent.id, index: located.index },
     },
+  }
+}
+
+// ── T49 · 知识库命令（笔记本与文档树的写入口；既有命令行为不变） ─────────────
+
+/** 新建笔记本（追加到列表尾部）；逆元按 id 删。 */
+export function createNotebookCommand(notebook: Notebook): Command {
+  return {
+    type: 'notebook.create',
+    payload: { notebook, index: null },
+    inverse: { type: 'notebook.delete', payload: { id: notebook.id } },
+  }
+}
+
+/** 改笔记本名 / 时间戳；逆元走字段级还原。 */
+export function patchNotebookCommand(vault: Vault, id: string, patch: NotebookPatch): Command {
+  const notebook = findNotebook(vault, id)
+  if (Object.keys(patch).length === 0) throw new Error('commandBus: 空 patch 不构成变更')
+  return {
+    type: 'notebook.patch',
+    payload: { id, patch },
+    inverse: { type: 'notebook.patch', payload: { id, patch: invertNotebookPatch(notebook, patch) } },
+  }
+}
+
+/**
+ * 删除笔记本（连同其全部文档）。逆元带完整笔记本体、原下标与**全部**文档，
+ * undo 后文档树原样回来——这条命令是「一次删除可能抹掉几十篇文档」的唯一入口。
+ */
+export function deleteNotebookCommand(vault: Vault, id: string): Command {
+  const notebook = findNotebook(vault, id)
+  const index = vault.notebooks.findIndex((candidate) => candidate.id === id)
+  const docs = vault.noteDocs
+    .map((doc, position) => ({ doc, index: position }))
+    .filter((entry) => entry.doc.notebookId === id)
+  return {
+    type: 'notebook.delete',
+    payload: { id },
+    inverse: { type: 'notebook.restore', payload: { notebook, index, docs } },
+  }
+}
+
+/** 新建文档；逆元按 id 删除（级联删除在逆元方向不适用：新建的文档没有子文档）。 */
+export function createNoteDocCommand(doc: NoteDoc): Command {
+  return {
+    type: 'doc.create',
+    payload: { doc, index: null },
+    inverse: { type: 'doc.delete', payload: { id: doc.id } },
+  }
+}
+
+/**
+ * 改标题 / 正文 / 父级 / 归属 / 排序。构造期拦截三种非法：父文档不存在、父级跨笔记本、
+ * 父级落在自己子树里——抛错发生在入栈之前，undo 栈不会被非法命令污染。
+ */
+export function patchNoteDocCommand(vault: Vault, id: string, patch: NoteDocPatch): Command {
+  const doc = findNoteDoc(vault, id)
+  if (Object.keys(patch).length === 0) throw new Error('commandBus: 空 patch 不构成变更')
+  const targetNotebook = patch.notebookId ?? doc.notebookId
+  if (patch.notebookId !== undefined && !vault.notebooks.some((notebook) => notebook.id === patch.notebookId)) {
+    throw new Error(`commandBus: 笔记本不存在（${patch.notebookId}）`)
+  }
+  if (patch.parentId !== undefined && patch.parentId !== null) {
+    const parent = vault.noteDocs.find((candidate) => candidate.id === patch.parentId)
+    if (parent === undefined) throw new Error(`commandBus: 父文档不存在（${patch.parentId}）`)
+    if (parent.notebookId !== targetNotebook) throw new Error('commandBus: 父文档不在同一个笔记本')
+    if (docSubtreeIds(vault.noteDocs, id).includes(parent.id)) {
+      throw new Error('commandBus: 文档不能移动到自己的子树里')
+    }
+  }
+  return {
+    type: 'doc.patch',
+    payload: { id, patch },
+    inverse: { type: 'doc.patch', payload: { id, patch: invertNoteDocPatch(doc, patch) } },
+  }
+}
+
+/** 删除文档（连同子树）；逆元携整棵子树与原下标，undo 后连位置一起还原。 */
+export function deleteNoteDocCommand(vault: Vault, id: string): Command {
+  findNoteDoc(vault, id)
+  const doomed = new Set(docSubtreeIds(vault.noteDocs, id))
+  const docs = vault.noteDocs
+    .map((doc, index) => ({ doc, index }))
+    .filter((entry) => doomed.has(entry.doc.id))
+  return {
+    type: 'doc.delete',
+    payload: { id },
+    inverse: { type: 'doc.restore', payload: { docs } },
   }
 }
 

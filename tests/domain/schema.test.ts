@@ -80,6 +80,8 @@ function makeVault(overrides: Partial<Vault> = {}): Vault {
     links: [makeLink()],
     assets: [{ id: 'a1f3c9', filename: 'a1f3c9.png', sizeBytes: 20480, createdAt: NOW }],
     mindmaps: [],
+    notebooks: [],
+    noteDocs: [],
     ...overrides,
   }
 }

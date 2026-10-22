@@ -42,6 +42,7 @@ import type { ConflictLabels } from './views/ConflictDialog'
 import { BoardView } from './views/BoardView'
 import { GanttView } from './views/GanttView'
 import { MindMapView } from './views/MindMapView'
+import { NotebookView } from './views/NotebookView'
 import { FilterBar } from './views/FilterBar'
 import { MilestonePanel } from './views/MilestonePanel'
 import { createAssetStore } from './persistence/assetStore'
@@ -367,7 +368,7 @@ function StartupScreen(props: {
  */
 function Workspace(props: {
   store: VaultStore
-  view: 'board' | 'gantt' | 'mindmap'
+  view: 'board' | 'gantt' | 'mindmap' | 'notebook'
   t: (key: MsgKey, params?: TranslateParams) => string
   /** 写入口（T10 CommandBus，可能包了 T29 只读闸门）；BoardView 改列/换序经它落盘。 */
   bus: CommandBus
@@ -375,8 +376,10 @@ function Workspace(props: {
   onOpenMilestone?: (milestoneId: string) => void
   /** 看板卡片 / 甘特条（data-gantt-bar）点击 → 拉起任务详情弹窗（T17 选中契约的落点）。 */
   onOpenTask?: (taskId: string) => void
+  /** T49：知识库文档里的图片插入 / 显示（与任务笔记同一个附件端口）。 */
+  noteAssets?: NoteAssetsPortHandle
 }) {
-  const { store, view, t, bus, onOpenMilestone, onOpenTask } = props
+  const { store, view, t, bus, onOpenMilestone, onOpenTask, noteAssets } = props
   const vault = useStore(store, (state) => state.vault)
   // spec §6.2：看板与甘特共用同一份筛选结果，切视图不丢条件
   const filter = useMemo<Filter>(() => vault.settings.lastFilter ?? createEmptyFilter(), [vault.settings.lastFilter])
@@ -422,6 +425,16 @@ function Workspace(props: {
           // T45：导图自带 onClick（节点选中留在视图本地 state），不经上面的事件委托；
           // 空态「新建」经 Workspace 的 bus（可能包了 T29 只读闸门）落盘。
           <MindMapView vault={vault} bus={bus} t={t} />
+        ) : view === 'notebook' ? (
+          // T49：知识库。选中态留在视图本地；文档里的 [[任务]] / [[里程碑]] 经回调拉起既有面板。
+          <NotebookView
+            vault={vault}
+            bus={bus}
+            t={t}
+            assets={noteAssets}
+            onOpenTask={onOpenTask}
+            onOpenMilestone={onOpenMilestone}
+          />
         ) : view === 'gantt' ? (
           <GanttView
             vault={vault}
@@ -455,7 +468,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
   // 反复 setPhase 形成渲染死循环，用户点击推进的相位会被立刻覆盖回 need-dir。
   const ports = useMemo(() => props.ports ?? startupPorts(), [props.ports])
   const [phase, setPhase] = useState<Phase>({ kind: 'booting' })
-  const [view, setView] = useState<'board' | 'gantt' | 'mindmap'>('board')
+  const [view, setView] = useState<'board' | 'gantt' | 'mindmap' | 'notebook'>('board')
   const [conflict, setConflict] = useState<ConflictReport | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   // 里程碑面板（T18）：受控开合 + 选中态。侧栏入口与甘特菱形点击共用同一面板。
@@ -766,6 +779,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
             setDrawerTaskId(id)
             setDrawerOpen(true)
           }}
+          noteAssets={phase.noteAssets}
         />
       )
       break
@@ -949,7 +963,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
             {/* 视图切换与顶栏提示；撤销/重做按钮随 T15 的卡片交互一起挂 */}
             {session === null ? null : (
               <div role="group" className="oe-seg" style={{ marginRight: 'auto' }}>
-                {(['board', 'gantt', 'mindmap'] as const).map((mode) => (
+                {(['board', 'gantt', 'mindmap', 'notebook'] as const).map((mode) => (
                   <button
                     key={mode}
                     type="button"
@@ -959,7 +973,13 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
                       setView(mode)
                     }}
                   >
-                    {mode === 'board' ? t('shell.viewBoard') : mode === 'gantt' ? t('shell.viewGantt') : t('shell.viewMindmap')}
+                    {mode === 'board'
+                      ? t('shell.viewBoard')
+                      : mode === 'gantt'
+                        ? t('shell.viewGantt')
+                        : mode === 'mindmap'
+                          ? t('shell.viewMindmap')
+                          : t('shell.viewNotebook')}
                   </button>
                 ))}
               </div>

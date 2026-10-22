@@ -33,6 +33,8 @@ function emptyVault(): Vault {
     links: [],
     assets: [],
     mindmaps: [],
+    notebooks: [],
+    noteDocs: [],
   }
 }
 
@@ -137,7 +139,9 @@ describe('T25-3 · dispose 与引用解析', () => {
       '![外链](https://a.bc/x.png)',
       '![相对子目录](assets/sub/a3.png)',
       '![同图第二次](assets/a1.png)',
+      // T49：缩放过的图片写成 HTML img，同样要算引用（否则回收会误删）
+      '<img src="assets/a4.png" alt="缩放" width="62%">',
     ].join('\n')
-    expect(noteAssetRefs(markdown).sort()).toEqual(['assets/a1.png', 'assets/a2.jpg'])
+    expect(noteAssetRefs(markdown).sort()).toEqual(['assets/a1.png', 'assets/a2.jpg', 'assets/a4.png'])
   })
 })

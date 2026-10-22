@@ -280,3 +280,211 @@ input[type='checkbox'] {
     animation: none;
   }
 }
+
+/* ── T49 · 笔记正文排版（任务笔记 + 知识库文档共用）───────────────────────
+   此前编辑器没有任何正文样式：列表缩进、代码块底色、表格边框全走浏览器默认，
+   同一篇笔记在任务弹窗与知识库里的观感不一致，标题也比正文大得离谱。
+   这里以 .oe-prose 为唯一入口，字号/间距一律跟界面尺度走（T40 口径）。 */
+.oe-prose {
+  color: var(--oe-text);
+  font-size: calc(13px * var(--oe-ui-scale, 1));
+  line-height: 1.75;
+  overflow-wrap: break-word;
+}
+
+.oe-prose .ProseMirror {
+  min-height: 100%;
+  padding: calc(12px * var(--oe-ui-scale, 1)) calc(16px * var(--oe-ui-scale, 1));
+  outline: none;
+  caret-color: var(--oe-accent);
+}
+
+.oe-prose .ProseMirror > * + * {
+  margin-top: 0.62em;
+}
+
+.oe-prose p {
+  margin: 0;
+}
+
+.oe-prose h1,
+.oe-prose h2,
+.oe-prose h3,
+.oe-prose h4,
+.oe-prose h5,
+.oe-prose h6 {
+  margin: 0;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--oe-text);
+}
+
+.oe-prose h1 {
+  font-size: 1.5em;
+  letter-spacing: -0.01em;
+}
+
+.oe-prose h2 {
+  font-size: 1.24em;
+}
+
+.oe-prose h3 {
+  font-size: 1.08em;
+}
+
+.oe-prose h4,
+.oe-prose h5,
+.oe-prose h6 {
+  font-size: 1em;
+  color: var(--oe-text-secondary);
+}
+
+.oe-prose ul,
+.oe-prose ol {
+  margin: 0;
+  padding-left: 1.45em;
+}
+
+.oe-prose li {
+  margin: 0.18em 0;
+}
+
+.oe-prose li::marker {
+  color: var(--oe-text-faint);
+}
+
+.oe-prose li > p {
+  margin: 0;
+}
+
+/* 任务列表：TipTap 3.32 的结构是 <ul data-type="taskList"><li data-checked><label/><div/></li>，
+   li 上没有 data-type（旧写法会落空，复选框与正文被迫换行）。勾选框与首行文字对齐，
+   缩进比普通列表紧一档。 */
+.oe-prose ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0.15em;
+}
+
+.oe-prose ul[data-type='taskList'] > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45em;
+}
+
+.oe-prose ul[data-type='taskList'] > li > label {
+  flex: 0 0 auto;
+  padding-top: 0.28em;
+}
+
+.oe-prose ul[data-type='taskList'] > li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.oe-prose ul[data-type='taskList'] > li > div > p {
+  margin: 0;
+}
+
+.oe-prose blockquote {
+  margin: 0;
+  padding: 0.1em 0 0.1em 0.85em;
+  border-left: 3px solid var(--oe-border);
+  color: var(--oe-text-secondary);
+}
+
+.oe-prose code {
+  padding: 0.1em 0.35em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  color: var(--oe-text);
+  background: var(--oe-fill);
+  border-radius: 4px;
+}
+
+.oe-prose pre {
+  padding: calc(10px * var(--oe-ui-scale, 1)) calc(12px * var(--oe-ui-scale, 1));
+  overflow-x: auto;
+  background: var(--oe-fill-subtle);
+  border: 1px solid var(--oe-separator);
+  border-radius: var(--oe-radius-control);
+  line-height: 1.6;
+}
+
+.oe-prose pre code {
+  padding: 0;
+  font-size: 0.92em;
+  background: none;
+  border-radius: 0;
+}
+
+.oe-prose hr {
+  margin: 1.1em 0;
+  border: none;
+  border-top: 1px solid var(--oe-separator);
+}
+
+.oe-prose a {
+  color: var(--oe-accent-deep);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.oe-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--oe-radius-control);
+}
+
+.oe-prose table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.96em;
+}
+
+.oe-prose th,
+.oe-prose td {
+  padding: calc(4px * var(--oe-ui-scale, 1)) calc(8px * var(--oe-ui-scale, 1));
+  border: 1px solid var(--oe-separator);
+  vertical-align: top;
+  text-align: left;
+}
+
+.oe-prose th {
+  font-weight: 600;
+  background: var(--oe-fill-subtle);
+}
+
+.oe-prose .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--oe-accent-tint);
+  pointer-events: none;
+}
+
+/* 空文档占位：装饰节点挂 class 与 data-placeholder（见 NotePlaceholder） */
+.oe-prose .ProseMirror p.oe-note-empty::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--oe-text-faint);
+  pointer-events: none;
+}
+
+/* 图片缩放把手：静止隐藏，悬停 / 键盘聚焦才出现（不抢图片本身的点击） */
+[data-note-image-wrap] [data-note-image-handle] {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+[data-note-image-wrap]:hover [data-note-image-handle],
+[data-note-image-handle]:focus-visible {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-note-image-wrap] [data-note-image-handle] {
+    transition: none;
+  }
+}

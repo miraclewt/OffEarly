@@ -103,6 +103,8 @@ function makeVault(overrides: Partial<Vault> = {}): Vault {
     links: [],
     assets: [],
     mindmaps: [],
+    notebooks: [],
+    noteDocs: [],
     ...overrides,
   }
 }

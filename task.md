@@ -165,6 +165,9 @@ tests/**                         与 src 镜像
 - [x] **T39** 甘特任务名标签（条内 + 深浅自适应）+ 左侧任务表可折叠 / 未排期为空自动收 → done (2026-10-17, qoder:sess-1017h, commit: "T39: gantt task-name labels and collapsible left table / unscheduled panel")
 - [x] **T40** 界面尺度层（按视口宽自动分档，字号与间距同源缩放；覆盖全视图，甘特/导图几何在领域模型内同步） → done (2026-10-21, workbuddy:sess-1021a, commit: "T40: viewport-driven ui scale layer across all views")
 
+### Phase 10 · 知识库（T49；用户新增需求：知识库笔记 + 编辑器增强）
+- [x] **T49** 笔记本（知识库：笔记本 / 文档树 / 子文档 / 全文检索，全部可撤销）+ 笔记编辑器增强（Markdown 源码模式、正文排版、图片缩放且尺寸持久化） → done (2026-10-22, workbuddy:sess-1022a, commit: "T49: notebook knowledge base, markdown source mode and image resizing in the note editor")
+
 ---
 
 ## 任务明细
@@ -1107,6 +1110,48 @@ tests/**                         与 src 镜像
 
 ---
 
+### T49 · 知识库（笔记本）+ 笔记编辑器增强
+
+**背景：** 用户原话：「优化任务详情的笔记记录；新增一栏笔记本，能够像语雀一样进行知识库笔记记录，支持 md 语法和正常的富文本语法，支持插入图片和缩放图片」。拆成四件事：① 任务弹窗里的笔记要更好用（排版、可读）；② 新增「笔记本」这一栏，不是第二个笔记框，而是一棵能长出层级的知识库；③ 同一份正文既能富文本编辑又能按 Markdown 编辑；④ 图片能缩放，且**尺寸必须随正文一起落盘、重开还在**。
+有一件事必须先定：**存储只留一种格式**。富文本与 Markdown 若各存一份，迟早对不上；故正文永远是 Markdown 纯文本，富文本编辑器只是它的一种视图，源码模式是同一条写路径的另一个入口。带尺寸的图片没有标准 Markdown 语法，最终选 `<img src alt width="62%">`（见实施注记 1）。
+
+**编号说明：** 取 T49 而非 T41——T41 已被思维导图在代码中占用（`src/domain/mindmapTree.ts`、`commandBus` 的 `mindmap.*` 段），T42–T48 留空以避免与并行车道撞号。
+
+**依赖：** T24（`NoteEditor` / TipTap 3.32 + `@tiptap/markdown`）/ T25（`AssetStore` + 图片三路径 + 灯箱）/ T26（未引用附件扫描，**改它才敢存新写法**）/ T36（任务详情居中弹窗）/ T40（`fs()/sp()/px()` 尺度层，新视图必须一起走）
+
+**产出：** 新增 `src/domain/notebookTree.ts`（扁平 `NoteDoc[]` → 树、路径、排序键、全文匹配，全纯函数）、`src/controllers/notebookActions.ts`（构造层）、`src/views/NotebookView.tsx`（三栏）；改 `src/domain/{types,schema,commandBus}.ts`（`Notebook`/`NoteDoc` + 6 条命令 + 2 条 restore）、`src/views/NoteEditor.tsx`（源码模式 / 排版容器 / 图片缩放）、`src/persistence/assetStore.ts` + `src/controllers/noteAssets.ts`（引用扫描认 `<img>`）、`src/views/IconSprite.tsx`（5 个图标）、`src/App.tsx`（第五个视图 + 附件端口下传）、`src/locales/{zh,en}.ts`、`src/styles/theme.css`（`.oe-prose` 正文排版）；测试 `tests/domain/notebookCommands.test.ts`（14）、`tests/views/NotebookView.test.tsx`（10）、`tests/views/noteEditorRich.test.tsx`（11）、`tests/persistence/assetGc.test.ts`（+2）、`tests/controllers/noteAssets.test.ts`（+1）、`e2e/10-notebook.spec.ts`（2）
+
+**验收标准：**
+- [x] 新增「笔记本」视图入口（顶栏分段控件第五项），与看板/甘特/导图平级，不做成浮层
+- [x] 笔记本 CRUD：新建 / 改名 / 删除（两段确认，3 秒内点第二下才执行）；重名拒绝并提示
+- [x] 文档树：文档可建在任意层级（子文档）、可折叠、可改名、可删除；父级不存在时退化为顶层而不是抛错
+- [x] 全文检索：跨全部笔记本匹配标题与正文，命中列表可直接跳转并展开祖先
+- [x] 所有写操作经 `CommandBus`：删除笔记本 / 删除文档（含子树）都能**撤销回原样**（逆元携完整对象与原始下标），不是「删了就没了」
+- [x] 同一份正文支持富文本与 Markdown 源码两种模式，随时切换，**落盘始终是同一份 Markdown**；切换不产生多余的历史条目
+- [x] 任务弹窗里的笔记与知识库文档共用同一个编辑器组件（`NoteEditor`），排版一致
+- [x] 正文排版落地：标题 1–6 级、列表、任务列表（复选框与文字同行）、引用、代码块、表格、分割线、链接
+- [x] 图片可缩放：右下角把手拖拽 / 悬停预设 25·50·75·100% / 把手聚焦后方向键 ±5%，三种入口写同一个 `width` 属性
+- [x] 图片尺寸持久化：落盘为 `<img … width="50%">`，重开后尺寸仍在；「原始尺寸」清掉宽度回到纯 `![](…)`
+- [x] 附件回收不被新写法骗过：gc 的引用扫描同时认 `![](assets/…)` 与 `<img src="assets/…">`，带尺寸的图**不会**被当成未引用误删
+- [x] 既有契约零破坏：`TaskDrawer` 组件名与 `data-presentation="modal"` 保留、笔记既有 testid 保留、单文件不变式（零外链 / 无 `type="module"`）复测通过、禁 emoji lint 干净
+- [x] `tsc` 0 / `npm test` **1017 passed（56 files）** / `npm run e2e` **40 passed + 1 skipped** / `npm run build` **10/10**（产物 1195479 字节，上限 1677721）
+- [x] 真 Chromium 截图逐张核对（空库 / 文档树展开 / 富文本与源码双模式 / 图片缩放中与缩放后），修掉实测发现的两处排版缺陷
+
+**实施注记（T49）**
+1. **为什么把宽度写成 `<img width="62%">` 而不是 `![alt](src =400x)`**：标准 Markdown 没有尺寸位，各家扩展互不兼容；HTML `<img>` 是 Typora、Obsidian、语雀导出都能读的共同子集。TipTap 官方 `Image` 扩展的 `parseHTML` 本来就带 `width` 映射，**输入方向不用自己写**；丢的是输出方向——它的 `renderMarkdown` 只吐 `![alt](src)`，故必须覆写 `renderMarkdown` 走自写的 `imageMarkdown()`（无宽度才退回纯 Markdown，有宽度转义引号写 HTML）。往返实测一致。
+2. **改存储写法就必须同步改 gc 的引用扫描**，否则「加宽过的图」在清理未引用附件时会被当成孤儿删掉——这是不可逆的破坏性操作，所以扫描器宁多认：`ASSET_REF_PATTERN`（Markdown）+ `ASSET_HTML_IMG_PATTERN`（`<img src>`）两路并行，且 `referencedAssetIds` 把 `noteDocs` 的正文也算进引用集合（否则知识库里的图全被判孤儿）。`noteAssetRefs()` 改成直接复用 `assetRefsIn()`，让「插图的引用」与「gc 的引用」从此只有一套口径。
+3. **源码模式不是第二个编辑器**：它和富文本共用 `latestRef` 与同一个 400ms debounce 写路径，切回富文本时先 `setContent` 把源码规范化一次（用户可能手写了对不上的语法），再走一次提交；`skipSyncRef` 首行短路外部 `value` 同步，否则切回来会被**上一轮的 props** 盖掉（这个 bug 实测出现过：`data-mode` 已回 rich，正文还是旧的）。
+4. **空文档占位不自造依赖**：TipTap 官方的 Placeholder 是另一个包，这里用自绘 `Decoration`（`NotePlaceholder` 扩展，给首段挂 `class='oe-note-empty'` + `data-placeholder`）——省一个依赖，也让文案能跟着 i18n 走。
+5. **删除必须带逆元才叫「可撤销」**：删笔记本的逆元携全部下属文档与各自原始下标；删文档的逆元携整棵子树。还原不是「重建一个同名对象」而是把原对象按原下标插回去，否则撤销后 id 变了、排序变了、别的文档的外链全断。
+6. **`NoteEditor` 一个组件两种身份**：新增 `placeholder` / `minHeight` / `grow` / `showStats` 四个可选 props，任务笔记用默认（固定高度、有字数），知识库文档用 `grow`（撑满右栏、编辑区自己滚）。刻意**没改** `TaskDrawer` 的名字——改它要掀约 200 条断言，收益是零。
+7. **一次拖拽 = 一条撤销命令**：拖拽期间只改本地 `preview`（把手跟着走、右上角显示百分比），抬手时才 `updateAttributes` 一次。若每次 `pointermove` 都写属性，一次拖拽会往撤销栈里塞几十条，Ctrl+Z 就变成逐帧回放。`setPointerCapture` 放在 try 里，jsdom 与老浏览器没有它也要能用（window 监听兜底）。
+8. **两处只有真截图才能发现的排版缺陷**：① 任务列表复选框与文字换行——CSS 选择器写成 `li[data-type='taskItem']` 落空，TipTap 实际结构是 `ul[data-type='taskList'] > li[data-checked]`；② 图片缩放预设条挂在图片下方，被编辑器底边裁掉一半，改成叠在图片右上角内侧。
+9. **e2e 踩的两个坑（都记在用例注释里）**：① `openAppWith` 少传 `page` 时报的是 `page.addInitScript is not a function`——因为形参 `page` 收到的是假 FS 对象，错误位置指向 fixture 而不是调用点，容易误判成 fixtures 坏了；② `waitSaved()` 只是等「已保存」这三个字，而笔记写入是「编辑器 debounce 400ms → 命令 → autosave」，点击后文案仍是上一轮的「已保存」，读完即断言必然读到旧内容 → 一律改成 `expect.poll` 对着**落盘内容**轮询。
+
+**预估：** 1d（实际：同日完成，含视觉核对与两轮 e2e 修正）
+
+---
+
 ## 完成记录（只追加）
 
 <!-- 格式：
@@ -1218,3 +1263,5 @@ tests/**                         与 src 镜像
 - [2026-10-21] 工具 | agent: workbuddy:sess-1021a | commit: "chore: promote the conflict-union helper into the repo with guardrails" | 备注: ①**背景**：`scripts/resolve-conflict.mjs` 自 wave-3 起被反复使用却一直未跟踪，记录里多处写着「未入库」（T34 遗留、wave-4 遗留、T37 遗留）——历史条目是 append-only，不改，本条据此宣告**作废**。②**入库前先加固**，因为原脚本按原样入库会害人：它把 `src/locales/en.ts` / `zh.ts` / `task.md` 三个路径写死（一次性脚本，换波次就得改源码），且对 `task.md` **整文件并集**——而 wave-4 已踩过「总表同两行被两侧各改一次 → 并集出两行且状态相反」，那条教训当时靠人工兜底，原脚本对此毫无防护。③**四处改造**：**(a)** 参数化（位置参数 = 待处理文件，`--brace-after-head <文件…>` 替代写死的 zh.ts 特例，可多次、可多文件）；**(b)** **总表禁区**——同一任务号在冲突块的 head 与 incoming 两侧各出现时**直接报错退出**并打印任务号，提示「先人工按状态取较晚完成者去重再重跑」，这是把 wave-4 的手工规矩落成机器断言；两侧是**不同**任务号时照常并集（不误伤正常合入）；**(c)** 默认 **dry-run**，加 `--write` 才落盘（原脚本无预演，误跑一次就覆盖工作区）；**(d)** 保持原文件行尾（原脚本用 `split('\n')`，在 `core.autocrlf=true` 的 checkout 上会把 CRLF 文件打成半 CRLF）；另加「标记不完整（缺 `>>>>>>>`）→ 报错且不写盘」与「未知参数 → 报错」两处容错。④**补 9 条回归**（`tests/scripts/resolveConflict.test.ts`，照 `noEmoji.test.ts` 的 `execFileSync` + 临时目录手法，不 import 脚本以免触发顶层执行）：纯追加并集 / dry-run 不写盘 / 无冲突块跳过 / CRLF 保持 / 总表同号报错且不写盘 / 总表异号照常并集 / `--brace-after-head` 补闭合（钉住 zh.ts 嵌套表那个坑）/ 标记不完整报错 / 缺文件与未知参数报错。⑤**验证**：`tsc` 0 / `npm test` **973 passed (53 files)**（= 964 + 本工具 9）。脚本仍是**手动工具**、未接进 `build` 或任何 hook（它只服务于车道合入，不该拦日常构建）。 | 遗留: ①仍不做「总表自动去重」——取较晚完成者是判断，不是格式，机器只负责拦下；②`--brace-after-head` 的补入位置仍是「head 段之后」，若将来有「两侧各缺两个闭合」的嵌套更深的情形需另加档位
 
 - [2026-10-21] 修复 | agent: workbuddy:sess-1021 | commit: "fix: gantt keeps a minimum time horizon; new tasks/milestones are actually visible after creation" | 验收: 用户报的两处现象都在真产物（file:// 单文件）上复现并消失 | 备注: ①**甘特时间线太短**：派生范围原本 = 已排期数据 ±3 天，库小就只剩十来个格子。新增 `resolveAutoRange()`（`src/domain/ganttModel.ts`，`GANTT_MIN_SPAN_DAYS = 42`）三条规则：缺口按 2/3 给未来补足最小跨度；今天离数据不超过一个最小跨度时把窗口扩到含今天（隔半年的旧项目不硬塞，否则撑成全空白长卷）；起点对齐 ISO 周一（week 次行表头此前从周中开始会缺首格文案）。**显式给出的一侧全程不参与拉伸**，导出 `range='full'` 与既有单测口径不变。②**「创建后不显示」不是渲染慢**：15 任务库实测「回车 → 卡片上屏」5ms，300 任务库 27ms，所以先排除了 React。真因是**新卡片插在已聚焦的新建输入框上方**，列体滚到底时这一插把卡片顶到视野外（e2e 实测创建前 scrollTop 1446/上限 1464，创建后若不自救就是 1446/1531 → 卡片在框外）→ `BoardColumn` 提交后把列体滚到底；里程碑面板同理（列表按日期排序，新条可能落在滚动区外）→ `MilestonePanel` 用 `scrollIntoView({block:'nearest'})` 带到可见处。③**顺带把同一片操作的手感修掉**（都是可量化的掉帧，不是重写）：`TaskCard` 包 `memo` + `BoardView.onOpenTask` 改 `useCallback`（未改动的卡片引用不变，300 任务库「创建到上屏」**58ms → 27ms**，长任务 68/84ms **两条 → 0**）；`GanttView` 的模型 memo 依赖从整个 `vault` 收窄到 `buildGanttModel` 真正读的五个切片（autosave 回写 `revision/updatedAt` 换了对象但内容没变，此前每存一次盘就把列/行/箭头整套重算）→ 切到甘特 **173ms → 98ms**。④**入场反馈**：`.oe-card` / `.oe-row` 各 140/160ms 淡入（此前「创建成功」与「什么都没发生」长得一模一样）。**卡片关键帧刻意不碰 `transform`**——那是 dnd-kit 写在行内样式上的，CSS 动画优先级高于行内样式且 `fill-mode` 会驻留，一写就让拖拽整段失灵；同时尊重 `prefers-reduced-motion`。⑤**测试**：`tests/domain/ganttModel.test.ts` 新增 6 条（最小跨度 / 含今天 / 远数据不硬塞今天 / 周一对齐且表头覆盖到画布右缘 / 显式范围不拉伸 / 单侧显式只补另一侧），两条旧断言按新口径改写（24 格 → 47 格、单列 → 最小跨度且含今天）；`tests/views/BoardView.test.tsx` 新增 1 条「新建后列体滚到底」，**已验证把修复注掉即红**。⑥**全量验证**：`tsc` 0 / `npm test` **979 passed (53 files)** / `npm run e2e` **38 passed + 1 skipped** / `npm run build` **10/10**（产物 1158kB，上限 1677721）| 遗留: ①甘特首屏仍从范围起点开始，数据跨三个月时「今天」线会落在右侧视口外——要不要「打开就把今天滚进视野」未定；②里程碑面板宽度仍是固定 340px、未跟随 `uiScale`（T40 遗留，本次未碰）
+
+- [2026-10-22] T49 | agent: workbuddy:sess-1022a | commit: "T49: notebook knowledge base, markdown source mode and image resizing in the note editor" | 验收: 14/14 全部勾选（其中截图核对与两轮 e2e 修正均为实跑） | 备注: ①**先定存储口径再动手**：富文本与 Markdown 若各存一份必对不上，故正文永远是 Markdown 纯文本，富文本只是视图、源码模式是同一条写路径的另一个入口（共用 `latestRef` + 400ms debounce）。②**图片尺寸的落点**：标准 Markdown 无尺寸位，选 `<img src alt width="62%">`（Typora / Obsidian / 语雀导出都能读）；官方 `Image.parseHTML` 自带 `width` 映射、输入方向不用写，丢的是输出方向——必须覆写 `renderMarkdown` 走自写 `imageMarkdown()`，实测 `<img src="assets/a.png" alt="shot" width="62%">` 往返一致。③**改写法就必须改 gc**：`AssetStore` 的引用扫描同时认 `![]()` 与 `<img src>`，`referencedAssetIds` 把 `noteDocs` 正文算进引用集；`noteAssetRefs()` 改成复用 `assetRefsIn()`，从此「插图引用」与「gc 引用」只有一套口径（否则加宽过的图会在清理时被当孤儿删掉，不可逆）。④**知识库不是第二个笔记框**：新增 `Notebook`/`NoteDoc`、`notebookTree`（扁平数组 → 树的纯函数）、6 条命令 + 2 条 restore，删除是级联的（删笔记本带走全部文档、删文档带走整棵子树），**逆元携完整被删对象与原始下标**——撤销是真还原，不是「重建个同名对象」（id/顺序/外链都会变）。⑤**同一组件两种身份**：`NoteEditor` 加 `placeholder`/`minHeight`/`grow`/`showStats` 四个可选 props，任务笔记用默认、知识库文档撑满右栏；刻意不改 `TaskDrawer` 名字（改它要掀约 200 条断言，收益为零）。⑥**一次拖拽 = 一条撤销命令**：拖拽只改本地 `preview`，抬手才 `updateAttributes` 一次；`setPointerCapture` 包在 try 里，jsdom 与老浏览器靠 window 监听兜底。⑦**空文档占位不引依赖**：自绘 `NotePlaceholder` 装饰（首段挂 class + `data-placeholder`），不装官方 placeholder 包。⑧**截图才看得见的两处缺陷**：任务列表复选框与文字换行（选择器应为 `ul[data-type='taskList'] > li`，不是 `li[data-type='taskItem']`）、图片预设条被编辑器底边裁掉（改为叠在图片右上角内侧）。⑨**e2e 两个坑**：漏传 `page` 时错误报成 `page.addInitScript is not a function`（形参收到的是假 FS 对象，指向 fixture 而非调用点）；`waitSaved()` 只等「已保存」文案，而写入链路是「编辑 debounce 400ms → 命令 → autosave」，点完立刻读盘必是旧内容 → 一律改为 `expect.poll` 对落盘内容轮询。⑩**新增 5 个图标**（notebook/doc/folder/pencil/trash）沿用 24×24 / 1.5px 线性规范，颜色全走 `currentColor`；`.oe-prose` 排版与图片把手样式写在 `theme.css` 末尾，字号间距一律 `fs()/sp()`，禁写 hex | 越界改动: ① `schema.ts` 给 `Vault` 增两个 `.default([])` 字段（旧库缺键自动补空数组，schemaVersion 不升、不注册迁移——沿用 `mindmaps` 先例），另 21 处测试夹具随之补 `notebooks: []` / `noteDocs: []`；② `src/App.tsx` 顶栏分段控件改四项 → 五项，并把 `noteAssets` 端口下传给 `NotebookView`；③ `NoteEditor` 新增 `NoteLinkTarget.kind = 'doc'`，`[[标题]]` 可跳知识库文档；④ 新增 `e2e/10-notebook.spec.ts`（2 条）；⑤ 未改 `package.json` / `package-lock.json`（无新依赖，图片缩放全部自写） | 遗留: ①文档树的**排序与移动**在领域层已具备（`doc.patch` 支持 `parentId` + `order`），但视图只给了「新建子文档 / 删除」，**没有拖拽排序与「移动到其他父级」的交互入口**；②`[[标题]]` 只做正跳（文档正文里能跳任务/里程碑/文档），**反向链接（backlinks）未做**；③检索是标题 + 正文的 `includes` 全库匹配，无分词、无关键词高亮；④图片宽度只能按百分比（15–100%），没有像素级输入框；⑤知识库的导出（整本导出 Markdown / 打印）未做；⑥`NotePlaceholder` 只处理「全空文档」，表格单元格与列表项内不显示占位 | 全量验证: `tsc` 0 / `npm test` **1017 passed (56 files)**（基线 979 + 本任务 38：领域 14 + 知识库视图 10 + 编辑器 11 + gc 与附件端口 3）/ `npm run e2e` **40 passed + 1 skipped**（+2 条：新建文档→写 Markdown→落盘→重开仍在、图片选 50% 后落成 `<img width="50%">` 且重开尺寸还在；跳过项是既有的 dnd 指针用例）/ `npm run build` **10/10**（产物 **1195479 字节**，上限 1677721，余量约 482KB）

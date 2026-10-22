@@ -55,6 +55,8 @@ function emptyVault(): Vault {
     links: [],
     assets: [],
     mindmaps: [],
+    notebooks: [],
+    noteDocs: [],
   }
 }
 
@@ -67,6 +69,7 @@ function vaultWith(parts: {
   assets?: Asset[]
   taskNotes?: string[]
   milestoneNotes?: string[]
+  docContents?: string[]
 }): Vault {
   return {
     ...emptyVault(),
@@ -79,6 +82,16 @@ function vaultWith(parts: {
       date: '2026-10-16',
       done: false,
       note,
+    })),
+    noteDocs: (parts.docContents ?? []).map((content, i) => ({
+      id: `d${i}`,
+      notebookId: 'nb1',
+      parentId: null,
+      title: `d${i}`,
+      content,
+      order: 'U',
+      createdAt: '2026-10-22T09:00:00.000Z',
+      updatedAt: '2026-10-22T09:00:00.000Z',
     })),
   }
 }
@@ -128,6 +141,22 @@ describe('T26-1 · 引用集合（assetRefsIn / referencedAssetIds）', () => {
   it('空 note / 无图片的 note 不产生引用', () => {
     const vault = vaultWith({ taskNotes: ['', '# 纯文本，没有图'] })
     expect(referencedAssetIds(vault).size).toBe(0)
+  })
+
+  // T49：可缩放的图片存成 <img src width>，只认 Markdown 语法会导致回收误删
+  it('assetRefsIn 也认 <img src> 写法（单双引号都算），仍然忽略外链', () => {
+    const markdown = [
+      '<img src="assets/a4.png" alt="缩放过的图" width="62%">',
+      "<img src='assets/a5.webp' width='30%'>",
+      '<img src="https://a.bc/x.png" width="50%">',
+      '![普通](assets/a6.gif)',
+    ].join('\n')
+    expect(assetRefsIn(markdown).sort()).toEqual(['assets/a4.png', 'assets/a5.webp', 'assets/a6.gif'])
+  })
+
+  it('referencedAssetIds 扫知识库文档正文（T49），被文档引用的图不会被回收', () => {
+    const vault = vaultWith({ docContents: ['![](assets/a7.png)', '<img src="assets/a8.png" width="40%">'] })
+    expect([...referencedAssetIds(vault)].sort()).toEqual(['a7', 'a8'])
   })
 })
 

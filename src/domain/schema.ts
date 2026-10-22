@@ -8,6 +8,8 @@ import type {
   Milestone,
   MindMap,
   MindNode,
+  NoteDoc,
+  Notebook,
   Settings,
   Status,
   Task,
@@ -108,6 +110,27 @@ export const AssetSchema = z.object({
   createdAt: timestamp,
 })
 
+// T49：笔记本与知识库文档。结构与思维导图同属「库内用户内容」，
+// 旧库缺键由默认值补空数组（先例：mindmaps / settings 字段默认值），schemaVersion 保持 1。
+export const NotebookSchema = z.object({
+  id,
+  name: z.string(),
+  order: z.string(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+})
+
+export const NoteDocSchema = z.object({
+  id,
+  notebookId: id,
+  parentId: id.nullable(),
+  title: z.string(),
+  content: z.string(),
+  order: z.string(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+})
+
 export const FilterSchema = z.object({
   topicIds: z.array(id),
   includeDescendants: z.boolean(),
@@ -167,6 +190,8 @@ export const VaultSchema = z.object({
   // 思维导图 spec §2：旧库缺键直接解析补空，schemaVersion 保持 1、不注册迁移
   // （先例：SettingsSchema 的字段默认值）。键序排在 assets 之后，save 的键序约定不变。
   mindmaps: z.array(MindMapSchema).default([]),
+  notebooks: z.array(NotebookSchema).default([]),
+  noteDocs: z.array(NoteDocSchema).default([]),
 })
 
 // 编译期防漂移：schema 推导出的类型必须与 types.ts 完全一致，
@@ -184,6 +209,8 @@ export type SchemaAlignment = [
   Assert<Equal<Milestone, z.infer<typeof MilestoneSchema>>>,
   Assert<Equal<Asset, z.infer<typeof AssetSchema>>>,
   Assert<Equal<MindMap, z.infer<typeof MindMapSchema>>>,
+  Assert<Equal<Notebook, z.infer<typeof NotebookSchema>>>,
+  Assert<Equal<NoteDoc, z.infer<typeof NoteDocSchema>>>,
   Assert<Equal<Filter, z.infer<typeof FilterSchema>>>,
   Assert<Equal<WorkCalendar, z.infer<typeof WorkCalendarSchema>>>,
 ]

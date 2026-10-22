@@ -102,6 +102,8 @@ function makeVault(): Vault {
     ],
     assets: [],
     mindmaps: [],
+    notebooks: [],
+    noteDocs: [],
   }
 }
 
