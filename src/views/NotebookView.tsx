@@ -149,6 +149,14 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
   const [notebookId, setNotebookId] = useState<string | null>(null)
   const [docId, setDocId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  /**
+   * T51 · 左两栏的折叠态（笔记本栏 / 文档树）：纯 UI 态，不进 vault、不进撤销栈——
+   * 它描述的是「界面现在怎么摆」，不是「库里有什么」。与甘特左侧任务表（T39）同一口径：
+   * 收起后只留一条 30px 竖轨，**展开入口就在竖轨上**（面板头部的按钮跟着面板一起消失，
+   * 所以竖轨自身必须是可点的按钮，否则收起就成了单向操作）。
+   */
+  const [booksOpen, setBooksOpen] = useState(true)
+  const [treeOpen, setTreeOpen] = useState(true)
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<Editing | null>(null)
   const [hover, setHover] = useState<string | null>(null)
@@ -421,192 +429,222 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
 
   return (
     <div data-testid="notebook" style={ROOT}>
-      {/* ① 笔记本 */}
-      <aside style={PANE_NOTEBOOKS}>
-        <div style={PANE_HEAD}>
-          <span style={PANE_TITLE}>{t('notebook.title')}</span>
-          <button
-            type="button"
-            data-testid="notebook-add"
-            aria-label={t('notebook.create')}
-            title={t('notebook.create')}
-            onClick={() => setEditing({ kind: 'notebook-create' })}
-            style={ICON_BUTTON}
-          >
-            <Icon name="plus" size={13} />
-          </button>
-        </div>
-
-        <div role="list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: px('0 6px 8px') }}>
-          {notebooks.map((notebook) => {
-            const active = notebook.id === activeNotebook?.id
-            const rowId = `nb:${notebook.id}`
-            return (
-              <div key={notebook.id}>
-                {editing !== null && editing.kind === 'notebook' && editing.id === notebook.id ? (
-                  <InlineInput
-                    testId="notebook-name-input"
-                    ariaLabel={t('notebook.rename')}
-                    initial={notebook.name}
-                    onCommit={(value) => {
-                      setEditing(null)
-                      if (value.trim() !== '') applyRenameNotebook(bus, vault, notebook.id, value, deps)
-                    }}
-                    onCancel={() => setEditing(null)}
-                  />
-                ) : (
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    data-testid={`notebook-row-${notebook.id}`}
-                    aria-current={active ? 'true' : undefined}
-                    onMouseEnter={() => setHover(rowId)}
-                    onMouseLeave={() => setHover((current) => (current === rowId ? null : current))}
-                    onClick={() => {
-                      setNotebookId(notebook.id)
-                      setDocId(null)
-                    }}
-                    onDoubleClick={() => setEditing({ kind: 'notebook', id: notebook.id })}
-                    onKeyDown={(event) => {
-                      if (event.key !== 'Enter' && event.key !== ' ') return
-                      event.preventDefault()
-                      setNotebookId(notebook.id)
-                      setDocId(null)
-                    }}
-                    style={{ ...NB_ROW, ...(hover === rowId && !active ? { background: ROW_HOVER } : null), ...(active ? NB_ROW_ACTIVE : null) }}
-                  >
-                    <span style={{ display: 'flex', flex: '0 0 auto', color: active ? INDIGO : FAINT }}>
-                      <Icon name="notebook" size={14} />
-                    </span>
-                    <span style={ELLIPSIS}>{notebook.name}</span>
-                    {hover === rowId || active ? (
-                      <span style={{ display: 'flex', gap: sp(2), flex: '0 0 auto' }}>
-                        <button
-                          type="button"
-                          data-testid={`notebook-rename-${notebook.id}`}
-                          aria-label={t('notebook.rename')}
-                          title={t('notebook.rename')}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            setEditing({ kind: 'notebook', id: notebook.id })
-                          }}
-                          style={ROW_ACTION}
-                        >
-                          <Icon name="pencil" size={11} />
-                        </button>
-                        <button
-                          type="button"
-                          data-testid={`notebook-delete-${notebook.id}`}
-                          aria-label={isArmed(rowId) ? t('notebook.confirmDelete') : t('notebook.delete')}
-                          title={isArmed(rowId) ? t('notebook.confirmDelete') : t('notebook.delete')}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            armOrRun(rowId, () => deleteNotebook(notebook.id))
-                          }}
-                          style={{ ...ROW_ACTION, ...(isArmed(rowId) ? { color: DANGER } : null) }}
-                        >
-                          <Icon name={isArmed(rowId) ? 'close' : 'trash'} size={11} />
-                        </button>
-                      </span>
-                    ) : (
-                      <span style={{ ...COUNT, flex: '0 0 auto' }}>{counts.get(notebook.id) ?? 0}</span>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-
-          {editing !== null && editing.kind === 'notebook-create' ? (
-            <InlineInput
-              testId="notebook-name-input"
-              ariaLabel={t('notebook.namePlaceholder')}
-              initial=""
-              placeholder={t('notebook.namePlaceholder')}
-              onCommit={createNotebook}
-              onCancel={() => setEditing(null)}
-            />
-          ) : null}
-        </div>
-      </aside>
-
-      {/* ② 文档树 */}
-      <aside style={PANE_TREE}>
-        <div style={PANE_HEAD}>
-          <span style={{ ...PANE_TITLE, ...ELLIPSIS }}>{activeNotebook?.name ?? ''}</span>
-          <span style={COUNT}>{notebookDocs.length}</span>
-          <button
-            type="button"
-            data-testid="notebook-new-doc"
-            aria-label={t('notebook.newDoc')}
-            title={t('notebook.newDoc')}
-            onClick={() => createDoc(null)}
-            style={ICON_BUTTON}
-          >
-            <Icon name="plus" size={13} />
-          </button>
-        </div>
-
-        <div style={{ padding: px('0 8px 6px') }}>
-          <div style={SEARCH_BOX}>
-            <span style={{ display: 'flex', flex: '0 0 auto', color: FAINT }}>
-              <Icon name="search" size={12} />
-            </span>
-            <input
-              data-testid="notebook-search"
-              type="search"
-              value={query}
-              placeholder={t('notebook.searchPlaceholder')}
-              aria-label={t('notebook.search')}
-              onChange={(event) => setQuery(event.target.value)}
-              style={SEARCH_INPUT}
+      {/* ① 笔记本：可收起（T51）——收起后留竖轨，正文能多吃 176px 宽 */}
+      {booksOpen ? (
+        <aside data-testid="notebook-books-pane" style={PANE_NOTEBOOKS}>
+          <div style={PANE_HEAD}>
+            <span style={PANE_TITLE}>{t('notebook.title')}</span>
+            <button
+              type="button"
+              data-testid="notebook-add"
+              aria-label={t('notebook.create')}
+              title={t('notebook.create')}
+              onClick={() => setEditing({ kind: 'notebook-create' })}
+              style={ICON_BUTTON}
+            >
+              <Icon name="plus" size={13} />
+            </button>
+            <PaneToggle
+              testId="notebook-books-collapse"
+              label={t('notebook.collapseBooks')}
+              onCollapse={() => setBooksOpen(false)}
             />
           </div>
-        </div>
 
-        <div role="tree" data-testid="notebook-tree" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: px('0 6px 10px') }}>
-          {searching ? (
-            results.length === 0 ? (
-              <div data-testid="notebook-search-empty" style={HINT}>
-                {t('notebook.searchEmpty')}
-              </div>
-            ) : (
-              results.map((doc) => {
-                const notebookName = vault.notebooks.find((item) => item.id === doc.notebookId)?.name ?? ''
-                return (
-                  <div
-                    key={doc.id}
-                    role="treeitem"
-                    tabIndex={0}
-                    data-testid={`notebook-search-result-${doc.id}`}
-                    onClick={() => focusDoc(doc.notebookId, doc.id)}
-                    style={{ ...DOC_ROW, paddingLeft: sp(8) }}
-                  >
-                    <span style={{ display: 'flex', flex: '0 0 auto', color: FAINT }}>
-                      <Icon name="doc" size={13} />
-                    </span>
-                    <span style={{ ...ELLIPSIS, flex: 1 }}>{doc.title}</span>
-                    <span style={{ ...COUNT, maxWidth: sp(72), ...ELLIPSIS }}>{notebookName}</span>
-                  </div>
-                )
-              })
-            )
-          ) : (
-            <>
-              {visibleRows.map((node) => renderDocRow(node, {
-                active: node.doc.id === activeDoc?.id,
-                isEditing: editingDocId === node.doc.id,
-                collapsed: collapsed.has(node.doc.id),
-              }))}
-              {visibleRows.length === 0 ? (
-                <div data-testid="notebook-tree-empty" style={HINT}>
-                  {t('notebook.noDocs')}
+          <div role="list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: px('0 6px 8px') }}>
+            {notebooks.map((notebook) => {
+              const active = notebook.id === activeNotebook?.id
+              const rowId = `nb:${notebook.id}`
+              return (
+                <div key={notebook.id}>
+                  {editing !== null && editing.kind === 'notebook' && editing.id === notebook.id ? (
+                    <InlineInput
+                      testId="notebook-name-input"
+                      ariaLabel={t('notebook.rename')}
+                      initial={notebook.name}
+                      onCommit={(value) => {
+                        setEditing(null)
+                        if (value.trim() !== '') applyRenameNotebook(bus, vault, notebook.id, value, deps)
+                      }}
+                      onCancel={() => setEditing(null)}
+                    />
+                  ) : (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      data-testid={`notebook-row-${notebook.id}`}
+                      aria-current={active ? 'true' : undefined}
+                      onMouseEnter={() => setHover(rowId)}
+                      onMouseLeave={() => setHover((current) => (current === rowId ? null : current))}
+                      onClick={() => {
+                        setNotebookId(notebook.id)
+                        setDocId(null)
+                      }}
+                      onDoubleClick={() => setEditing({ kind: 'notebook', id: notebook.id })}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return
+                        event.preventDefault()
+                        setNotebookId(notebook.id)
+                        setDocId(null)
+                      }}
+                      style={{ ...NB_ROW, ...(hover === rowId && !active ? { background: ROW_HOVER } : null), ...(active ? NB_ROW_ACTIVE : null) }}
+                    >
+                      <span style={{ display: 'flex', flex: '0 0 auto', color: active ? INDIGO : FAINT }}>
+                        <Icon name="notebook" size={14} />
+                      </span>
+                      <span style={ELLIPSIS}>{notebook.name}</span>
+                      {hover === rowId || active ? (
+                        <span style={{ display: 'flex', gap: sp(2), flex: '0 0 auto' }}>
+                          <button
+                            type="button"
+                            data-testid={`notebook-rename-${notebook.id}`}
+                            aria-label={t('notebook.rename')}
+                            title={t('notebook.rename')}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setEditing({ kind: 'notebook', id: notebook.id })
+                            }}
+                            style={ROW_ACTION}
+                          >
+                            <Icon name="pencil" size={11} />
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`notebook-delete-${notebook.id}`}
+                            aria-label={isArmed(rowId) ? t('notebook.confirmDelete') : t('notebook.delete')}
+                            title={isArmed(rowId) ? t('notebook.confirmDelete') : t('notebook.delete')}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              armOrRun(rowId, () => deleteNotebook(notebook.id))
+                            }}
+                            style={{ ...ROW_ACTION, ...(isArmed(rowId) ? { color: DANGER } : null) }}
+                          >
+                            <Icon name={isArmed(rowId) ? 'close' : 'trash'} size={11} />
+                          </button>
+                        </span>
+                      ) : (
+                        <span style={{ ...COUNT, flex: '0 0 auto' }}>{counts.get(notebook.id) ?? 0}</span>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ) : null}
-            </>
-          )}
-        </div>
-      </aside>
+              )
+            })}
+
+            {editing !== null && editing.kind === 'notebook-create' ? (
+              <InlineInput
+                testId="notebook-name-input"
+                ariaLabel={t('notebook.namePlaceholder')}
+                initial=""
+                placeholder={t('notebook.namePlaceholder')}
+                onCommit={createNotebook}
+                onCancel={() => setEditing(null)}
+              />
+            ) : null}
+          </div>
+        </aside>
+      ) : (
+        <PaneRail
+          testId="notebook-books-rail"
+          label={t('notebook.title')}
+          hint={t('notebook.expandBooks')}
+          background="var(--oe-material-sidebar)"
+          onExpand={() => setBooksOpen(true)}
+        />
+      )}
+
+      {/* ② 文档树：同样可收起 */}
+      {treeOpen ? (
+        <aside data-testid="notebook-tree-pane" style={PANE_TREE}>
+          <div style={PANE_HEAD}>
+            <span style={{ ...PANE_TITLE, ...ELLIPSIS }}>{activeNotebook?.name ?? ''}</span>
+            <span style={COUNT}>{notebookDocs.length}</span>
+            <button
+              type="button"
+              data-testid="notebook-new-doc"
+              aria-label={t('notebook.newDoc')}
+              title={t('notebook.newDoc')}
+              onClick={() => createDoc(null)}
+              style={ICON_BUTTON}
+            >
+              <Icon name="plus" size={13} />
+            </button>
+            <PaneToggle
+              testId="notebook-tree-collapse"
+              label={t('notebook.collapseTree')}
+              onCollapse={() => setTreeOpen(false)}
+            />
+          </div>
+
+          <div style={{ padding: px('0 8px 6px') }}>
+            <div style={SEARCH_BOX}>
+              <span style={{ display: 'flex', flex: '0 0 auto', color: FAINT }}>
+                <Icon name="search" size={12} />
+              </span>
+              <input
+                data-testid="notebook-search"
+                type="search"
+                value={query}
+                placeholder={t('notebook.searchPlaceholder')}
+                aria-label={t('notebook.search')}
+                onChange={(event) => setQuery(event.target.value)}
+                style={SEARCH_INPUT}
+              />
+            </div>
+          </div>
+
+          <div role="tree" data-testid="notebook-tree" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: px('0 6px 10px') }}>
+            {searching ? (
+              results.length === 0 ? (
+                <div data-testid="notebook-search-empty" style={HINT}>
+                  {t('notebook.searchEmpty')}
+                </div>
+              ) : (
+                results.map((doc) => {
+                  const notebookName = vault.notebooks.find((item) => item.id === doc.notebookId)?.name ?? ''
+                  return (
+                    <div
+                      key={doc.id}
+                      role="treeitem"
+                      tabIndex={0}
+                      data-testid={`notebook-search-result-${doc.id}`}
+                      onClick={() => focusDoc(doc.notebookId, doc.id)}
+                      style={{ ...DOC_ROW, paddingLeft: sp(8) }}
+                    >
+                      <span style={{ display: 'flex', flex: '0 0 auto', color: FAINT }}>
+                        <Icon name="doc" size={13} />
+                      </span>
+                      <span style={{ ...ELLIPSIS, flex: 1 }}>{doc.title}</span>
+                      <span style={{ ...COUNT, maxWidth: sp(72), ...ELLIPSIS }}>{notebookName}</span>
+                    </div>
+                  )
+                })
+              )
+            ) : (
+              <>
+                {visibleRows.map((node) => renderDocRow(node, {
+                  active: node.doc.id === activeDoc?.id,
+                  isEditing: editingDocId === node.doc.id,
+                  collapsed: collapsed.has(node.doc.id),
+                }))}
+                {visibleRows.length === 0 ? (
+                  <div data-testid="notebook-tree-empty" style={HINT}>
+                    {t('notebook.noDocs')}
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        </aside>
+      ) : (
+        <PaneRail
+          testId="notebook-tree-rail"
+          label={t('notebook.railTree')}
+          hint={t('notebook.expandTree')}
+          background={SURFACE}
+          onExpand={() => setTreeOpen(true)}
+        />
+      )}
 
       {/* ③ 编辑区 */}
       <main style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--oe-bg)' }}>
@@ -884,6 +922,79 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
 
 }
 
+/**
+ * T51 · 面板头部的折叠按钮：常驻但不抢戏——平时静音，悬停才给底色与正文色。
+ * 用一个极小的本地 hover state 而不是 CSS `:hover`，与侧栏 / 文档行（同一文件的 `hover`）保持一套写法。
+ */
+function PaneToggle(props: { testId: string; label: string; onCollapse: () => void }): ReactElement {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      type="button"
+      data-testid={props.testId}
+      aria-expanded={true}
+      aria-label={props.label}
+      title={props.label}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={props.onCollapse}
+      style={{
+        ...COLLAPSE_BUTTON,
+        color: hover ? TEXT : MUTED,
+        background: hover ? ROW_HOVER : 'transparent',
+      }}
+    >
+      <span aria-hidden="true" style={CHEVRON_LEFT}>
+        <Icon name="chevron-right" size={12} />
+      </span>
+    </button>
+  )
+}
+
+/**
+ * T51 · 面板收起后的竖轨（30px）：一个朝右的箭头 + 竖排标签，整条轨道本身就是一个按钮。
+ *
+ * 只做「点一下把那一栏换回来」这一件事：收起时面板头部的折叠按钮跟着面板一起消失了，
+ * 所以展开入口必须落在这里，否则收起就是单向的。键盘可达性天然由 `<button>` 提供。
+ */
+function PaneRail(props: {
+  testId: string
+  label: string
+  hint: string
+  background: string
+  onExpand: () => void
+}): ReactElement {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      type="button"
+      data-testid={props.testId}
+      aria-expanded={false}
+      aria-label={props.hint}
+      title={props.hint}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={props.onExpand}
+      style={{ ...RAIL, background: hover ? ROW_HOVER : props.background }}
+    >
+      <span aria-hidden="true" style={{ display: 'inline-flex', color: INDIGO }}>
+        <Icon name="chevron-right" size={12} />
+      </span>
+      <span
+        aria-hidden="true"
+        style={{
+          writingMode: 'vertical-rl',
+          fontSize: fs(11),
+          letterSpacing: sp(2),
+          color: hover ? TEXT : MUTED,
+        }}
+      >
+        {props.label}
+      </span>
+    </button>
+  )
+}
+
 // ── 样式 ────────────────────────────────────────────────────────────────
 
 const ROOT: CSSProperties = {
@@ -913,6 +1024,50 @@ const PANE_TREE: CSSProperties = {
   minHeight: 0,
   borderRight: `1px solid ${SEPARATOR}`,
   background: SURFACE,
+}
+
+/** T51 · 收起后的竖轨宽度：与甘特任务表（T39）的 30px 竖轨同宽，两处收起看起来是一套语言。 */
+const RAIL_WIDTH = 30
+
+/** 收起后的竖轨：整条轨道是一个按钮（展开入口），因此要抹掉 button 的默认外观。 */
+const RAIL: CSSProperties = {
+  width: sp(RAIL_WIDTH),
+  flex: `0 0 ${sp(RAIL_WIDTH)}`,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: sp(10),
+  padding: px('10px 0'),
+  boxSizing: 'border-box',
+  border: 'none',
+  borderRight: `1px solid ${SEPARATOR}`,
+  background: SURFACE,
+  color: MUTED,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+}
+
+/** 面板头部的折叠按钮：压到 18px，紧跟在右侧的 + 号后面，不抢标题的位置。 */
+const COLLAPSE_BUTTON: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: sp(18),
+  height: sp(18),
+  padding: 0,
+  color: MUTED,
+  background: 'transparent',
+  border: 'none',
+  borderRadius: 'var(--oe-radius-control)',
+  cursor: 'pointer',
+  flex: '0 0 auto',
+}
+
+/** 「收起」= 朝左的箭头：把同一份 chevron-right 几何转 180°，不另造图标。 */
+const CHEVRON_LEFT: CSSProperties = {
+  display: 'inline-flex',
+  transform: 'rotate(180deg)',
+  transition: 'transform 120ms ease',
 }
 
 const PANE_HEAD: CSSProperties = {

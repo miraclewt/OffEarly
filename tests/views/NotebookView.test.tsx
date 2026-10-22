@@ -284,3 +284,68 @@ describe('T50 · 导出与正文字号', () => {
     expect(store.getVault().settings.noteFontSize).toBe(13)
   })
 })
+
+// T51 · 左两栏（笔记本 / 文档树）可折叠：收起只留竖轨，竖轨自己就是展开入口
+describe('T51 · 面板折叠', () => {
+  const seed = {
+    notebooks: [notebook('nb1', '研发手册'), notebook('nb2', '随笔', 'V')],
+    noteDocs: [doc('d1', 'nb1', null, 'U', '发布流程', '# 发布流程\n\n正文一段。')],
+  }
+
+  it('收起笔记本栏：只留竖轨，文档树与正文照旧', () => {
+    setup(seed)
+    const collapse = screen.getByTestId('notebook-books-collapse')
+    expect(collapse.getAttribute('aria-expanded')).toBe('true')
+    expect(collapse.getAttribute('aria-label')).toBe('收起笔记本栏')
+
+    fireEvent.click(collapse)
+    expect(screen.queryByTestId('notebook-books-pane')).toBeNull()
+    // 头部按钮跟着面板一起消失（所以展开入口必须在竖轨上）
+    expect(screen.queryByTestId('notebook-add')).toBeNull()
+
+    const rail = screen.getByTestId('notebook-books-rail')
+    expect(rail.getAttribute('aria-expanded')).toBe('false')
+    expect(rail.getAttribute('aria-label')).toBe('展开笔记本栏')
+    // 另外两栏不受影响：树还在、正文还在
+    expect(screen.getByTestId('notebook-tree')).toBeTruthy()
+    expect(screen.getByTestId('note-editor-content')).toBeTruthy()
+
+    fireEvent.click(rail)
+    expect(screen.getByTestId('notebook-books-pane')).toBeTruthy()
+    expect(screen.getByTestId('notebook-row-nb2')).toBeTruthy()
+    expect(screen.queryByTestId('notebook-books-rail')).toBeNull()
+  })
+
+  it('收起文档树：搜索框与树一起收，正文仍然可读', () => {
+    setup(seed)
+    fireEvent.click(screen.getByTestId('notebook-tree-collapse'))
+
+    expect(screen.queryByTestId('notebook-tree-pane')).toBeNull()
+    expect(screen.queryByTestId('notebook-tree')).toBeNull()
+    expect(screen.queryByTestId('notebook-search')).toBeNull()
+    expect(screen.getByTestId('notebook-tree-rail').getAttribute('aria-label')).toBe('展开文档树')
+    // 正文没有被一起收走：当前文档仍然渲染着
+    expect(screen.getByTestId('note-editor-content').textContent).toContain('正文一段')
+
+    fireEvent.click(screen.getByTestId('notebook-tree-rail'))
+    expect(screen.getByTestId('doc-row-d1')).toBeTruthy()
+  })
+
+  it('两栏同时收起仍然能读能写，且折叠是纯 UI 态（不写库、不进撤销栈）', () => {
+    const { store, bus } = setup(seed)
+    const before = JSON.stringify(store.getVault())
+
+    fireEvent.click(screen.getByTestId('notebook-books-collapse'))
+    fireEvent.click(screen.getByTestId('notebook-tree-collapse'))
+
+    expect(screen.getByTestId('notebook-books-rail')).toBeTruthy()
+    expect(screen.getByTestId('notebook-tree-rail')).toBeTruthy()
+    // 编辑区还在唯一的 main 里，标题输入框也还在
+    expect(screen.getByTestId('notebook-title-input')).toBeTruthy()
+    expect(screen.getByTestId('note-editor-content')).toBeTruthy()
+
+    // 纯 UI 态：vault 一个字节都不该动，撤销栈也不该多一条「收起面板」
+    expect(JSON.stringify(store.getVault())).toBe(before)
+    expect(bus.undoDepth()).toBe(0)
+  })
+})

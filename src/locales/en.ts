@@ -398,6 +398,12 @@ export const en: Record<MsgKey, string> = {
   'notebook.docPlaceholder': 'Start writing… Markdown is supported; paste or drop images directly',
   'notebook.expand': 'Expand sub-docs',
   'notebook.collapse': 'Collapse sub-docs',
+  // T51: collapsible left panes
+  'notebook.collapseBooks': 'Collapse notebook list',
+  'notebook.expandBooks': 'Expand notebook list',
+  'notebook.collapseTree': 'Collapse document tree',
+  'notebook.expandTree': 'Expand document tree',
+  'notebook.railTree': 'Docs',
   // T50 tail-append: export (key set must match zh.ts exactly)
   'notebook.export': 'Export',
   'notebook.exportDoc': 'Export this doc as HTML',

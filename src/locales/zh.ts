@@ -450,6 +450,12 @@ export const zh = {
     docPlaceholder: '开始写这篇文档…支持 Markdown，可直接粘贴或拖入图片',
     expand: '展开子文档',
     collapse: '收起子文档',
+    // T51 追加：左两栏面板可折叠（收起后只留一条竖轨）
+    collapseBooks: '收起笔记本栏',
+    expandBooks: '展开笔记本栏',
+    collapseTree: '收起文档树',
+    expandTree: '展开文档树',
+    railTree: '文档',
     // T50 追加：导出
     export: '导出',
     exportDoc: '导出本文档为 HTML',

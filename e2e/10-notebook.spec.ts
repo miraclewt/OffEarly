@@ -254,3 +254,40 @@ test('导出本文档为 HTML：浏览器下载一份自包含文件，图已渲
   expect(html).not.toMatch(/<link\b/i)
   expect(html).not.toMatch(/<script\b[^>]*src=/i)
 })
+
+test('收起两栏面板（T51）：面板变竖轨、正文变宽，点竖轨能原样展开', async ({ page }) => {
+  await openAppWith(page, withNotebooks([{ title: '正文', content: '# 正文\n\n收起面板之后这一行还得在。' }]))
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-notebook').click()
+
+  // 编辑区宽度用标题输入框量：它铺满编辑列（它的宽度不依赖正文内容）
+  const width = async (): Promise<number> => {
+    const box = await page.getByTestId('notebook-title-input').boundingBox()
+    return box?.width ?? 0
+  }
+
+  const start = await width()
+  expect(start).toBeGreaterThan(0)
+
+  await page.getByTestId('notebook-books-collapse').click()
+  await expect(page.getByTestId('notebook-books-rail')).toBeVisible()
+  await expect(page.getByTestId('notebook-books-pane')).toHaveCount(0)
+  const afterBooks = await width()
+  expect(afterBooks).toBeGreaterThan(start + 100)
+
+  await page.getByTestId('notebook-tree-collapse').click()
+  await expect(page.getByTestId('notebook-tree-rail')).toBeVisible()
+  const afterBoth = await width()
+  expect(afterBoth).toBeGreaterThan(afterBooks + 150)
+
+  // 收起的是面板，不是内容：正文与标题都还在
+  await expect(page.getByTestId('note-editor-content')).toContainText('收起面板之后这一行还得在')
+  await expect(page.getByTestId('notebook-title-input')).toHaveValue('正文')
+
+  // 竖轨自己就是展开入口；展开后宽度回到起点
+  await page.getByTestId('notebook-tree-rail').click()
+  await expect(page.getByTestId('notebook-tree')).toBeVisible()
+  await page.getByTestId('notebook-books-rail').click()
+  await expect(page.getByTestId('notebook-books-pane')).toBeVisible()
+  expect(await width()).toBeCloseTo(start, 0)
+})

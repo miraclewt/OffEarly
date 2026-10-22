@@ -171,6 +171,9 @@ tests/**                         与 src 镜像
 ### Phase 11 · 知识库导出 / 正文字号 / Mermaid（T50；用户新增需求）
 - [x] **T50** 笔记本导出（自包含 HTML + 浏览器打印成 PDF）+ 笔记正文字号可调（12–20px，落 settings 且可撤销）+ Mermaid 代码块渲染（引擎内联进单文件，离线可用） → done (2026-10-22, workbuddy:sess-1022c, commit: "T50: notebook export, adjustable note font size and inline mermaid rendering")
 
+### Phase 12 · 知识库两栏折叠（T51；用户新增需求）
+- [x] **T51** 知识库左两栏（笔记本 / 文档树）可折叠：收起只留 30px 竖轨、竖轨本身是展开入口，正文可占满整宽（纯 UI 态，不写库、不进撤销栈） → done (2026-10-22, workbuddy:sess-1022d, commit: "T51: collapsible notebook and doc-tree panes in the knowledge base")
+
 ---
 
 ## 任务明细
@@ -1198,6 +1201,34 @@ tests/**                         与 src 镜像
 
 ---
 
+### T51 · 知识库两栏可折叠
+
+**背景：** 用户原话：「笔记本和随笔支持折叠」——「随笔」是他库里的笔记本名：知识库左侧第一栏的标题是「笔记本」，第二栏的标题就是当前笔记本名。三栏一起把 176 + 248px 的固定宽度吃掉了，写长文时正文只剩半屏；而这两栏都是「看的时候才需要」的信息，不该常驻。
+
+**依赖：** T49（三栏骨架与文档树）/ T40（`fs()/sp()` 尺度层）/ T39（甘特左侧任务表收起后的 30px 竖轨，本任务沿用同一套视觉语言）
+
+**产出：** 改 `src/views/NotebookView.tsx`（`booksOpen` / `treeOpen` 两个 UI 态 + `PaneToggle`（头部折叠按钮）与 `PaneRail`（收起后的竖轨）两个小组件）、`src/locales/{zh,en}.ts`（各 5 键：收起/展开两栏 + 树轨标签）；测试 `tests/views/NotebookView.test.tsx`（+3）、`e2e/10-notebook.spec.ts`（+1）
+
+**验收标准：**
+- [x] 笔记本栏、文档树栏各有一个折叠按钮（在面板头部，悬停给底色），带 `aria-expanded` / `aria-label`
+- [x] 收起后只留 30px 竖轨：竖排标签 + 朝右箭头；**整条轨道就是一个按钮**，点一下原样展开
+- [x] 收起任意一栏都不影响另外两栏：文档树还在、正文还在、标题输入框还在
+- [x] 两栏同时收起时正文占满整宽（真实布局实测：176 + 248px 全额让出）
+- [x] 折叠是纯 UI 态：不写 `vault`、不进撤销栈；重新进入视图恢复默认展开（与甘特任务表同口径）
+- [x] 尺度跟随 `--oe-ui-scale`：宽度 / 字号 / 间距全走 `sp()/fs()`
+- [x] `tsc` 0 / `npm test` **1063 passed（59 files）** / `npm run e2e` **46 passed + 1 skipped** / `npm run build` **10/10**
+
+**实施注记（T51）**
+1. **展开入口必须落在竖轨上**：折叠按钮长在面板头部，一收起头部就跟着消失；竖轨若不可点，收起就成了单向操作。
+2. **不持久化是有意的**：这是「界面现在怎么摆」的纯 UI 态。写进 `settings` 会顺带进撤销栈（`settings.patch` 的逆元本身就是一条命令），Ctrl+Z 会先弹出面板而不是撤销刚打的字。与甘特任务表、文档树展开态保持同一口径。
+3. **不新增图标**：sprite 里只有 `chevron-right`，「收起」就是把同一份路径转 180°。
+4. **悬停用本地 `state` 而不是 CSS `:hover`**：与同一文件的侧栏 / 文档行写法一致（全站只有三条 CSS hover 规则，不在这里开新口子）。
+5. **e2e 用「标题输入框宽度」量编辑区**：它铺满编辑列且宽度与正文内容无关；断言 `afterBooks > start + 100`、`afterBoth > afterBooks + 150`，收回后 `toBeCloseTo(start)`——钉的是真实布局，不是 class 名。
+
+**预估：** 0.5d（实际：同日完成，含两轮截图核对）
+
+---
+
 ## 完成记录（只追加）
 
 <!-- 格式：
@@ -1315,3 +1346,5 @@ tests/**                         与 src 镜像
 - [2026-10-22] 修复 T49（图片尺寸） | agent: workbuddy:sess-1022b | commit: "fix: size note images by height — edit-area-based percentages and an auto height cap" | 验收: 用户反馈「图片调整智能高度，不能宽度」，改动后三条实测口径均达标（见下） | 备注: ①**先量再改**：真 Chromium 里把 `width:50%` 打在图片上，一张 480px 宽的图得到 240px（正文宽 602 的 40%），75%/25% 也不成比例——根因是百分比解析的包含块是 `display:inline-block`（shrink-to-fit）的包装层，算的是**原图固有宽度**。这不是"用户不会用"，是真 bug。②**改基准 + 改语义**：百分比移到包装层（包含块=段落=正文宽），图片自身恒 `width:100%`、高度按原比例，两个方向都不会被拉伸；语义随之明确为「占编辑区正文宽度的百分之多少」。③**没缩放过 = 自适应**：只给 `max-width:100%` + `max-height:62vh`，不写宽度——`width:auto` 时浏览器在两条 max 约束里取更严的那个，等比、绝不变形，长截图不再一插入就吃满一屏。④**长图要「宁可高，不可糊」**：62vh 对 400×2400 的整页截图只剩 74px 宽（实测），于是加一条下限——缩完若不足 `NOTE_IMAGE_MIN_READABLE_WIDTH`(300px) 就放弃限高、按可用宽度显示（实测该图转为 400×2400 原尺寸，比例 0.17 未变）。⑤**拖拽按高度**：位移垂直占优时 `newW = startW × (startH + dy) / startH`（等比 ⇒ 高度变化比例 = 宽度变化比例），水平占优时仍按宽度算；方向键上下左右都认；抬手才写一次属性（一次拖拽仍是一条撤销）。⑥**让高度可见**：hover/选中/拖拽时左上角 badge 显示实际渲染高度（`高 260px` / 自适应档显示「自适应高度」），过去只显示百分比，看不出到底占多高。⑦**文案**：`imageResetSize` 由「原始」改「自适应」（现在清掉宽度不等于原尺寸，而是受限高的自适应），新增 `imageHeightValue` / `imageAutoSize`（zh / en 各两键）。⑧**测试**：单测 12 条（改写 1 条为「百分比落在包装层」+ 新增 1 条「自适应只限高不写宽度」），e2e 新增 1 条钉**基准**（图片宽 ÷ 编辑区宽必须落在 0.45–0.55；旧实现在 0.40，能红能绿）——jsdom 没有布局，这个 bug 只能靠真浏览器抓 | 越界改动: 仅 `src/views/NoteEditor.tsx`、`src/locales/{zh,en}.ts`、`tests/views/noteEditorRich.test.tsx`、`e2e/10-notebook.spec.ts`；未改存储格式（仍是 `<img width="…%">`），未改 gc 扫描、未改 commandBus、未加依赖 | 遗留: ①`62vh` 与「可读下限 300px」都是写死的常数，设置面板里不可调；②超长截图默认仍会很高（这是"可读"的代价），只能靠拖拽/预设缩小或点灯箱；③比例判据用的是 `window.innerHeight`（窗口高度），任务弹窗内可视高度更小，仍按 62vh 限高，偏保守；④图片仍只能按百分比缩放（15–100%），没有像素级输入 | 全量验证: `tsc` 0 / `npm test` **1018 passed (56 files)** / `npm run e2e` **41 passed + 1 skipped** / `npm run build` **10/10**（产物 **1196672 字节**，上限 1677721）
 
 - [2026-10-22] T50 | agent: workbuddy:sess-1022c | commit: "T50: notebook export, adjustable note font size and inline mermaid rendering" | 验收: 15/15 全部勾选（截图核对两轮，首轮抓到 mermaid 全图变黑的真 bug，见备注 ①） | 备注: ①**最难的一处：SVG 的 id 作用域不只是 id**。mermaid 把节点配色写在 `<style>` 的 `#<svgid> .node rect{fill:…}` 选择器上，而同一段代码在缓存命中时会被复用、插到文档两处。最初只重写 `id="…"` / `url(#…)` / `href="#…"`，结果 CSS 选择器全部失配 → 节点退回 `<rect>` 的浏览器默认样式（纯黑填充），整张流程图变成一团黑块与黑三角（截图才看出来）。修法是四处一起改，且 CSS 那条用「`#id` 后不能紧跟标识符字符」的负向断言，否则短 id 会吃掉长 id 的前缀（`#a` 命中 `#a-arrow`）；单测用「颜色值 `#eef0ff` 不许被当 id 改写」钉住。②**体积是唯一躲不开的取舍**：mermaid 12.2.0 进包后产物 1,196,672 → **6,347,769 字节**，`verify-bundle` 上限因此 1.6MB → 8MB，并在脚本里写清理由；库内四个新主机（`www.eclipse.org` 是 ELK 的 XML 命名空间标识符、chevrotain / langium / wikipedia 是解析器报错文案里的文档链接）逐条在产物里复核上下文后进白名单。③**图必须是装饰不能是节点**：存 ` ```mermaid ` 围栏 → Obsidian / Typora / 导出都能原样读走；`Decoration.widget` 挂在代码块之后，代码照旧可编辑（换自定义 atom 节点会把"改一行看效果"变远）。引擎用动态 import，没写过 mermaid 的库首屏不初始化。④**导出必须取编辑器而不是 vault**：编辑器有 400ms debounce，打完字立刻点导出，vault 里还是上一版——`NotebookView` 存编辑器句柄，导出优先 `editor.getMarkdown()`。这是"导出的和屏幕上不一样"的根因。⑤**图片宽度在导出文件里会失效**：`<img width="62%">` 的百分比被浏览器当非法值丢弃（width 属性只认像素），导出前改写成 `style="width:62%"`，否则所有手动缩放过的大图变回原尺寸。⑥**mermaid 源码被 HTML 转义**：`A --> B` 序列化成 `A --&gt; B`，直接喂引擎必解析失败，导出侧先还原实体（单测用箭头图钉住）。⑦**字号是两个旋钮之一**：`--oe-ui-scale`（T40）管高分屏整体放大，`--oe-note-font-size` 管正文想看多大，两者相乘互不覆盖；离散档位而非连续滑块——行高 / 图片限高 / 虚拟化都依赖确定像素。schema 用 `catch + clamp` 而非 min/max：一个坏字号不该让整个库打不开。⑧**标题重复是导出特有的问题**：编辑器里「标题输入框 + 正文 H1」并排有意义，导出后页头已经写着标题，再来一行同名特大号字就是重复（首轮截图很显眼）→ `stripLeadingHeading()` 只剥开篇那一处且必须完全相同（正文中间的同名 H1 是章节分隔，动它就是改内容）。⑨**PDF 走浏览器打印而不是引库**：`window.open` 会被弹窗拦截且用户看到"还没打开完就弹打印"的空页，改用隐藏 iframe 同步写入再 `print()`，`afterprint` + 定时器摘掉；打印样式含 A4 边距与「图表不跨页断开」。⑩**导出菜单的 backdrop 必须 `onMouseDown`**：与 T49 的抽屉语义一致（`onClick` 会在拖选正文后误关菜单） | 越界改动: ①`schema.ts` / `types.ts` 给 Settings 增 `noteFontSize`（旧库缺键补 13，schemaVersion 不升、不注册迁移），25 个测试文件的 26 处夹具随之补 `noteFontSize: 13`；②`App.tsx` 的 `Workspace` 增 `locale` prop 并下传 `NotebookView`（导出文件的 `<html lang>` 与页脚文案）；③`TaskDrawer.tsx` 增字号接线（同一个编辑器共用同一个设置值，不给它留"另一个字号"）；④`package.json` / `package-lock.json` 新增 `mermaid@12.2.0`（+115 个传递依赖），`scripts/verify-bundle.mjs` 调整体积上限与白名单；⑤新增 `docs/t50-notebook-mermaid.png`、`docs/t50-notebook-export.png`（真 Chromium 截图，2x）；⑥`e2e/10-notebook.spec.ts` 追加 4 条（mermaid 渲染 / 语法错误 / 字号落盘重开 / 导出下载），临时截图脚本用完即删、未入库 | 遗留: ①mermaid 图**不能点击放大到灯箱**（当前按正文宽度显示、超宽横向滚动），大图只能靠浏览器缩放；②图内字号固定 13px，不跟随正文字号设置；③渲染在主线程（首次 ~200ms、命中缓存后几乎为 0），没有 Worker，超大图（数百节点）会有一次可感知的停顿；④导出只有 HTML 与「打印/另存为 PDF」，没有 `.docx`（需引转换库且表格/任务列表/mermaid 会走形）与单篇 `.md`（迁移格式，不是成品）；⑤PDF 依赖用户在打印对话框里选"另存为 PDF"，没有直接产出 PDF 二进制的管线；⑥整本导出的目录只有按树缩进的一层列表，没有多级编号与锚点回链；⑦图内字体不随 `--oe-ui-scale` 之外的导出上下文变化（导出文件固定 15px 正文基准） | 全量验证: `tsc` 0 / `npm test` **1060 passed (59 files)**（基线 1018 + 本任务 42：mermaid 15 + 导出 17 + 字号控件 4 + settings 4 + 知识库视图 2）/ `npm run e2e` **45 passed + 1 skipped**（+4：mermaid 渲染、语法错误保留代码、字号落盘并重开仍在、导出下载自包含 HTML）/ `npm run build` **10/10**（产物 **6347769 字节**，上限 8388608，余量约 1.95MB）
+
+- [2026-10-22] T51 | agent: workbuddy:sess-1022d | commit: "T51: collapsible notebook and doc-tree panes in the knowledge base" | 验收: 7/7 全部勾选（真实布局用量宽断言钉住，不是看截图猜） | 备注: ①**先问清「折叠什么」再动手**：这句话有三种读法（两栏面板折叠 / 笔记本与文档合并成一棵树 / 正文按标题折叠），实现代价差一个量级，问一句比返工便宜。②**展开入口必须在竖轨上**：折叠按钮长在面板头部，一收起头部就跟着消失——竖轨若不可点，「收起」就是单向操作，用户只能刷新页面找回面板。所以竖轨整体是一个 `<button>`（`aria-expanded={false}` + `aria-label="展开笔记本栏"`），键盘天然可达。③**没有 chevron-left 图标，也不该有**：sprite 里只有 `chevron-right`，「收起」就是把同一份路径 `rotate(180deg)`；与甘特任务表（T39）收起箭头同一手法，两处收起看起来是一套语言。④**不持久化是刻意的**：折叠是「界面现在怎么摆」，写进 `settings` 会顺带进撤销栈（`patchSettingsCommand` 的逆元本身就是一条命令）——Ctrl+Z 会先弹出面板而不是撤销刚打的字，这是撤销栈卫生问题，不是懒。与甘特 `tableOpen`、文档树 `collapsed` 完全同口径。⑤**首轮截图抓到的问题**：折叠按钮 12px + MUTED 太浅，几乎看不见（用户根本找不到功能入口）→ 改成 `PaneToggle` 小组件：常驻但静音，悬停给底色与正文色；竖轨悬停同理。⑥**e2e 量的是真布局**：用「标题输入框宽度」当编辑区宽度的代理（它铺满编辑列、与正文内容无关），断言 `> start + 100` / `> afterBooks + 150` / 收回 `toBeCloseTo(start)`——jsdom 没有布局，这类「面板真的让出了宽度吗」只能在真 Chromium 里钉住 | 越界改动: 仅 `src/views/NotebookView.tsx`、`src/locales/{zh,en}.ts`（各 +5 键）、`tests/views/NotebookView.test.tsx`（+3）、`e2e/10-notebook.spec.ts`（+1）、新增 `docs/t51-notebook-panes-collapsed.png`；**未改** `schema.ts` / `types.ts`（不持久化）、未加依赖、未动 `theme.css`（悬停走本地 state） | 遗留: ①折叠态**不跨视图切换保留**（去看板再回来恢复默认展开）——要留存得先进 `settings` 并处理撤销栈噪音，本次刻意没做；②两栏都收起后没有任何「当前在哪本笔记本」的提示（只有正文上方面包屑还写着笔记本名）；③两个折叠按钮大小（18px）比工具栏其它图标（20px）略小，密集面板头里够用但不够统一；④没有快捷键（如 `Ctrl+\` 只留正文）；⑤竖轨标签是固定的「笔记本 / 文档」，不显示当前笔记本名（长名字竖排会烂） | 全量验证: `tsc` 0 / `npm test` **1063 passed (59 files)**（基线 1060 + 本任务 3 条视图用例）/ `npm run e2e` **46 passed + 1 skipped**（+1：收起两栏后面板变竖轨、正文变宽、点竖轨原样展开）/ `npm run build` **10/10**（产物 **6350595 字节**，上限 8388608）
