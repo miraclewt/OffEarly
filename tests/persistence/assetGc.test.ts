@@ -48,6 +48,7 @@ function emptyVault(): Vault {
       theme: 'light',
       locale: 'auto',
       lastFilter: null,
+      noteFontSize: 13,
     },
     topics: [],
     tasks: [],

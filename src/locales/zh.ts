@@ -315,6 +315,12 @@ export const zh = {
     imageHeightValue: '高 {n}px',
     imageAutoSize: '自适应高度',
     charCount: '{n} 字',
+    // T50 追加：字号调节与 mermaid 预览
+    fontSize: '正文字号',
+    fontSmaller: '缩小字号',
+    fontLarger: '放大字号',
+    mermaidRendering: '正在绘制图表…',
+    mermaidError: '图表语法有误',
   },
 
   // T25 尾部追加：图片灯箱与附件提示（只增不改，既有键一律不动）
@@ -444,6 +450,16 @@ export const zh = {
     docPlaceholder: '开始写这篇文档…支持 Markdown，可直接粘贴或拖入图片',
     expand: '展开子文档',
     collapse: '收起子文档',
+    // T50 追加：导出
+    export: '导出',
+    exportDoc: '导出本文档为 HTML',
+    exportNotebook: '导出整个笔记本为 HTML',
+    exportPrint: '打印 / 另存为 PDF',
+    exportHint: '导出为单个 HTML 文件，图片与图表已内嵌，可直接分享或打印',
+    exportEmpty: '这篇文档还没有内容',
+    exporting: '正在导出…',
+    exportFailed: '导出失败，请重试',
+    exportDone: '已导出 {name}',
   },
 } as const
 

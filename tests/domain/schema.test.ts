@@ -62,6 +62,8 @@ function makeSettings(overrides: Partial<Settings> = {}): Settings {
     theme: 'light',
     locale: 'zh',
     lastFilter: null,
+
+    noteFontSize: 13,
     ...overrides,
   }
 }
@@ -109,6 +111,8 @@ describe('VaultSchema', () => {
       theme: 'light',
       locale: 'auto',
       lastFilter: null,
+
+      noteFontSize: 13,
     })
   })
 

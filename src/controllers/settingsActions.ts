@@ -11,6 +11,7 @@
 import { patchSettingsCommand } from '../domain/commandBus'
 import type { CommandBus } from '../domain/commandBus'
 import { toDateKey } from '../domain/scheduleEngine'
+import { NOTE_FONT_SIZE_DEFAULT, NOTE_FONT_SIZE_MAX, NOTE_FONT_SIZE_MIN } from '../domain/types'
 import type { GanttScale, LocaleSetting, Vault, WorkCalendar } from '../domain/types'
 
 /** 工作日展示顺序：周一 → 周日（dayjs 的 day() 里 0 = 周日，2026-10-15 既定口径）。 */
@@ -108,5 +109,30 @@ export function patchGanttScale(bus: CommandBus, vault: Vault, scale: GanttScale
 export function patchCalendar(bus: CommandBus, vault: Vault, next: WorkCalendar): boolean {
   if (sameCalendar(vault.settings.calendar, next)) return false
   bus.apply(patchSettingsCommand(vault, { calendar: next }))
+  return true
+}
+
+/**
+ * T50 · 笔记正文字号的唯一写入口。
+ *
+ * 归一放在这里而不是视图里：视图只负责「减去一档 / 加上一档」这个意图，
+ * 真正的合法区间与取整只有一处（`normalizeNoteFontSize`），
+ * 于是「手改 vault.json 写进 41」「撤销回到越界值」「连点十下 A+」都不会把坏值写到界面上。
+ */
+export function normalizeNoteFontSize(value: number): number {
+  if (!Number.isFinite(value)) return NOTE_FONT_SIZE_DEFAULT
+  return Math.min(NOTE_FONT_SIZE_MAX, Math.max(NOTE_FONT_SIZE_MIN, Math.round(value)))
+}
+
+/** 上一档 / 下一档（1px 一档：正文 12–20px 之间的 1px 差别，读起来是能感觉到的）。 */
+export function stepNoteFontSize(current: number, direction: -1 | 1): number {
+  return normalizeNoteFontSize(normalizeNoteFontSize(current) + direction)
+}
+
+/** 改字号；已是当前值即空操作（不在撤销栈里留一条空命令）。 */
+export function patchNoteFontSize(bus: CommandBus, vault: Vault, next: number): boolean {
+  const size = normalizeNoteFontSize(next)
+  if (vault.settings.noteFontSize === size) return false
+  bus.apply(patchSettingsCommand(vault, { noteFontSize: size }))
   return true
 }

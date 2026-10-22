@@ -168,6 +168,9 @@ tests/**                         与 src 镜像
 ### Phase 10 · 知识库（T49；用户新增需求：知识库笔记 + 编辑器增强）
 - [x] **T49** 笔记本（知识库：笔记本 / 文档树 / 子文档 / 全文检索，全部可撤销）+ 笔记编辑器增强（Markdown 源码模式、正文排版、图片缩放且尺寸持久化） → done (2026-10-22, workbuddy:sess-1022a, commit: "T49: notebook knowledge base, markdown source mode and image resizing in the note editor")
 
+### Phase 11 · 知识库导出 / 正文字号 / Mermaid（T50；用户新增需求）
+- [x] **T50** 笔记本导出（自包含 HTML + 浏览器打印成 PDF）+ 笔记正文字号可调（12–20px，落 settings 且可撤销）+ Mermaid 代码块渲染（引擎内联进单文件，离线可用） → done (2026-10-22, workbuddy:sess-1022c, commit: "T50: notebook export, adjustable note font size and inline mermaid rendering")
+
 ---
 
 ## 任务明细
@@ -1155,6 +1158,46 @@ tests/**                         与 src 镜像
 
 ---
 
+### T50 · 笔记本导出 + 正文字号 + Mermaid 渲染
+
+**背景：** 用户原话：「笔记本支持导出，另外当前笔记本无法调节字体大小。笔记本需要支持 mermaid 语法显示」。三件事各自独立，但都落在同一个编辑器与同一个知识库视图上：① 写好的文档要能带走（发给别人、打印成 PDF）；② 正文 13px 是写死的，不同屏幕/年龄/内容类型需要不同字号；③ 技术文档里的流程图、时序图要真的画出来，而不是一段围栏代码。
+导出格式经一次确认后定为 **HTML（含浏览器打印为 PDF）**：`.md` 是迁移格式不是成品；`.docx` 需要一个转换库，而它只能把结构化 HTML 压成段落流（表格、任务列表、mermaid 全部走形），反而更贵。
+
+**依赖：** T49（`NoteEditor` / `NotebookView` / `NoteDoc`）/ T25（附件端口，导出要把图片内联）/ T31（`verify-bundle` 的体积与零外链硬约束）/ T40（`fs()/sp()` 尺度层，字号最终乘 `--oe-ui-scale`）/ T35（`settings.patch` 写入口）
+
+**产出：** 新增 `src/views/mermaid.ts`（引擎懒加载 / 代码块定位 / SVG id 作用域化）、`src/views/notebookExport.ts`（Markdown→自包含 HTML、图片内联、mermaid 转 SVG、打印为 PDF）；改 `src/views/NoteEditor.tsx`（Mermaid 预览装饰 + 字号控件）、`src/views/NotebookView.tsx`（导出菜单 / 字号接线 / 编辑器句柄）、`src/views/TaskDrawer.tsx`（字号接线）、`src/App.tsx`（locale 下传）、`src/domain/{types,schema}.ts`（`settings.noteFontSize`）、`src/controllers/settingsActions.ts`（`normalizeNoteFontSize` / `stepNoteFontSize` / `patchNoteFontSize`）、`src/styles/theme.css`（`--oe-note-font-size` + mermaid 预览）、`src/locales/{zh,en}.ts`、`scripts/verify-bundle.mjs`（体积上限与白名单）、`package.json`（mermaid 12.2.0）；测试 `tests/views/mermaid.test.ts`（13）、`tests/views/notebookExport.test.ts`（14）、`tests/views/noteEditorFont.test.tsx`（4）、`tests/controllers/settingsActions.test.ts`（+4）、`tests/views/NotebookView.test.tsx`（+2）、`e2e/10-notebook.spec.ts`（+4）
+
+**验收标准：**
+- [x] 知识库编辑区顶部有「导出」入口，三个落点：本文档为 HTML / 整个笔记本为 HTML / 打印·另存为 PDF
+- [x] 导出产物是**单个自包含 HTML**：无外链 `<link>`、无 `<script src>`、图片内联为 data URI、mermaid 为内联 SVG；双击可看，可直接分享
+- [x] 整本导出按文档树前序成节，带目录（缩进反映层级），标题层级随深度收敛
+- [x] 排版还原：标题 / 列表 / 任务列表 / 引用 / 代码块 / 表格 / 双链（降级为文字）/ 图片宽度（百分比搬进 `style`）
+- [x] 导出取的是**编辑器当前内容**（含尚在 debounce 中的最后几个字），不是上一次落盘的内容
+- [x] 「打印 / 另存为 PDF」经隐藏 iframe 写入后调起打印对话框，打印样式（A4 边距、避免图表跨页断开）已就位
+- [x] 正文可在 12–20px 之间调（A- / A+，1px 一档，到边界置灰），任务笔记与知识库文档共用同一个设置值
+- [x] 字号落在 `settings.noteFontSize`，一条命令可撤销；旧库缺键自动补 13（= 此前写死值），schemaVersion 不升
+- [x] 字号与界面尺度正交：最终渲染为 `calc(Npx * var(--oe-ui-scale))`，高分屏整体放大不会覆盖用户的选择
+- [x] ` ```mermaid ` / ` ```mmd ` 代码块在编辑器里渲染成图，画在代码块下方；代码块本身仍可编辑、仍按原样存 Markdown
+- [x] 语法错误显示一行原因并保留代码（不吞内容、不抛异常、不弹窗）
+- [x] 引擎内联进单文件（离线可用），首次需要时才初始化；同一段代码在一次会话里只渲染一次
+- [x] 单文件不变式复测通过（零外链 / 无 `type="module"` / favicon 逐字节一致），体积上限按新形态重新标定
+- [x] `tsc` 0 / `npm test` **1055 passed（59 files）** / `npm run e2e` **45 passed + 1 skipped** / `npm run build` **10/10**（产物 6347769 字节，上限 8388608）
+
+**实施注记（T50）**
+1. **体积是这次唯一躲不开的取舍**：mermaid 在真浏览器里跑完整语法与布局，产物从 1,196,672 涨到 6,347,769 字节。三条路只有一条能守住「双击即用、零网络请求」——内联。`verify-bundle` 的上限因此从 1.6MB 调到 8MB，同时在脚本里留了变更理由；顺带把库内新增的四个主机（eclipse.org 的 ELK 命名空间、chevrotain/langium/wikipedia 的报错文档链接）逐条复核后加进白名单，它们全都是字符串常量。
+2. **图必须是装饰，不能是节点**：存 mermaid 代码块（而不是自造的 `mermaidBlock` 节点）才能被 Obsidian / Typora / 导出原样读走；用 `Decoration.widget` 把图挂在代码块**之后**，代码照旧可编辑、光标能进去改一行再看效果。换成自定义 atom 节点会把最常用的操作变远（要先双击进"编辑态"）。
+3. **SVG 的 id 必须作用域化**：mermaid 产出的 SVG 自带 `id`（marker / 渐变 / 滤镜），同一段代码在图里出现两次（缓存命中的必然结果）会在同一文档里撞车。`scopeSvgIds()` 把 `id` / `url(#…)` / `href="#…"` 一起重写，且**先长后短**，否则短 id 会吃掉长 id 的前缀。
+4. **导出不能只读 vault**：编辑器有 400ms debounce，用户打完字立刻点导出，vault 里还是上一版。所以 `NotebookView` 存了编辑器句柄，导出时优先 `editor.getMarkdown()`——这是过去所有"导出的和屏幕上不一样"的根因。
+5. **`<img width="62%">` 在导出文件里会失效**：HTML 的 `width` 属性只接受像素，百分比被浏览器当非法值忽略。导出前必须改写成 `style="width:62%"`（`restoreImageWidths`），否则所有手动缩放过的大图都会变回原尺寸。
+6. **mermaid 源码在 HTML 序列化时被转义了**：`A --> B` 变成 `A --&gt; B`，直接喂给引擎会解析失败。导出侧先 `unescapeHtmlText()` 还原（`<`、`>`、`&`、引号四类），这条在单测里用箭头图钉住。
+7. **字号是"两个旋钮"之一**：`--oe-ui-scale`（T40）管"高分屏整体放大"，`--oe-note-font-size` 管"正文我想看多大"。两者相乘，互不覆盖。滑块式的连续缩放没有采纳：行高/图片限高/虚拟化都依赖确定像素，离散档位才是可验证的。
+8. **schema 用 catch + clamp 而不是 min/max**：字号是一个数字，手改 vault.json 或旧版本写坏一个值不该让整个库打不开。越界夹到最近档位，非数字才当缺失——与「0/false/空串 ≡ 缺省」的既有口径一致。
+9. **导出格式没有第三个选项**：`window.open` 会被弹窗拦截，而且用户看到的是"还没打开完就弹打印"的空页；改用隐藏 iframe 同步写入再 `print()`，内容一定在，打印后 `afterprint` + 定时器把 iframe 摘掉。
+
+**预估：** 0.5d（实际：同日完成）
+
+---
+
 ## 完成记录（只追加）
 
 <!-- 格式：
@@ -1270,3 +1313,5 @@ tests/**                         与 src 镜像
 - [2026-10-22] T49 | agent: workbuddy:sess-1022a | commit: "T49: notebook knowledge base, markdown source mode and image resizing in the note editor" | 验收: 14/14 全部勾选（其中截图核对与两轮 e2e 修正均为实跑） | 备注: ①**先定存储口径再动手**：富文本与 Markdown 若各存一份必对不上，故正文永远是 Markdown 纯文本，富文本只是视图、源码模式是同一条写路径的另一个入口（共用 `latestRef` + 400ms debounce）。②**图片尺寸的落点**：标准 Markdown 无尺寸位，选 `<img src alt width="62%">`（Typora / Obsidian / 语雀导出都能读）；官方 `Image.parseHTML` 自带 `width` 映射、输入方向不用写，丢的是输出方向——必须覆写 `renderMarkdown` 走自写 `imageMarkdown()`，实测 `<img src="assets/a.png" alt="shot" width="62%">` 往返一致。③**改写法就必须改 gc**：`AssetStore` 的引用扫描同时认 `![]()` 与 `<img src>`，`referencedAssetIds` 把 `noteDocs` 正文算进引用集；`noteAssetRefs()` 改成复用 `assetRefsIn()`，从此「插图引用」与「gc 引用」只有一套口径（否则加宽过的图会在清理时被当孤儿删掉，不可逆）。④**知识库不是第二个笔记框**：新增 `Notebook`/`NoteDoc`、`notebookTree`（扁平数组 → 树的纯函数）、6 条命令 + 2 条 restore，删除是级联的（删笔记本带走全部文档、删文档带走整棵子树），**逆元携完整被删对象与原始下标**——撤销是真还原，不是「重建个同名对象」（id/顺序/外链都会变）。⑤**同一组件两种身份**：`NoteEditor` 加 `placeholder`/`minHeight`/`grow`/`showStats` 四个可选 props，任务笔记用默认、知识库文档撑满右栏；刻意不改 `TaskDrawer` 名字（改它要掀约 200 条断言，收益为零）。⑥**一次拖拽 = 一条撤销命令**：拖拽只改本地 `preview`，抬手才 `updateAttributes` 一次；`setPointerCapture` 包在 try 里，jsdom 与老浏览器靠 window 监听兜底。⑦**空文档占位不引依赖**：自绘 `NotePlaceholder` 装饰（首段挂 class + `data-placeholder`），不装官方 placeholder 包。⑧**截图才看得见的两处缺陷**：任务列表复选框与文字换行（选择器应为 `ul[data-type='taskList'] > li`，不是 `li[data-type='taskItem']`）、图片预设条被编辑器底边裁掉（改为叠在图片右上角内侧）。⑨**e2e 两个坑**：漏传 `page` 时错误报成 `page.addInitScript is not a function`（形参收到的是假 FS 对象，指向 fixture 而非调用点）；`waitSaved()` 只等「已保存」文案，而写入链路是「编辑 debounce 400ms → 命令 → autosave」，点完立刻读盘必是旧内容 → 一律改为 `expect.poll` 对落盘内容轮询。⑩**新增 5 个图标**（notebook/doc/folder/pencil/trash）沿用 24×24 / 1.5px 线性规范，颜色全走 `currentColor`；`.oe-prose` 排版与图片把手样式写在 `theme.css` 末尾，字号间距一律 `fs()/sp()`，禁写 hex | 越界改动: ① `schema.ts` 给 `Vault` 增两个 `.default([])` 字段（旧库缺键自动补空数组，schemaVersion 不升、不注册迁移——沿用 `mindmaps` 先例），另 21 处测试夹具随之补 `notebooks: []` / `noteDocs: []`；② `src/App.tsx` 顶栏分段控件改四项 → 五项，并把 `noteAssets` 端口下传给 `NotebookView`；③ `NoteEditor` 新增 `NoteLinkTarget.kind = 'doc'`，`[[标题]]` 可跳知识库文档；④ 新增 `e2e/10-notebook.spec.ts`（2 条）；⑤ 未改 `package.json` / `package-lock.json`（无新依赖，图片缩放全部自写） | 遗留: ①文档树的**排序与移动**在领域层已具备（`doc.patch` 支持 `parentId` + `order`），但视图只给了「新建子文档 / 删除」，**没有拖拽排序与「移动到其他父级」的交互入口**；②`[[标题]]` 只做正跳（文档正文里能跳任务/里程碑/文档），**反向链接（backlinks）未做**；③检索是标题 + 正文的 `includes` 全库匹配，无分词、无关键词高亮；④图片宽度只能按百分比（15–100%），没有像素级输入框；⑤知识库的导出（整本导出 Markdown / 打印）未做；⑥`NotePlaceholder` 只处理「全空文档」，表格单元格与列表项内不显示占位 | 全量验证: `tsc` 0 / `npm test` **1017 passed (56 files)**（基线 979 + 本任务 38：领域 14 + 知识库视图 10 + 编辑器 11 + gc 与附件端口 3）/ `npm run e2e` **40 passed + 1 skipped**（+2 条：新建文档→写 Markdown→落盘→重开仍在、图片选 50% 后落成 `<img width="50%">` 且重开尺寸还在；跳过项是既有的 dnd 指针用例）/ `npm run build` **10/10**（产物 **1195479 字节**，上限 1677721，余量约 482KB）
 
 - [2026-10-22] 修复 T49（图片尺寸） | agent: workbuddy:sess-1022b | commit: "fix: size note images by height — edit-area-based percentages and an auto height cap" | 验收: 用户反馈「图片调整智能高度，不能宽度」，改动后三条实测口径均达标（见下） | 备注: ①**先量再改**：真 Chromium 里把 `width:50%` 打在图片上，一张 480px 宽的图得到 240px（正文宽 602 的 40%），75%/25% 也不成比例——根因是百分比解析的包含块是 `display:inline-block`（shrink-to-fit）的包装层，算的是**原图固有宽度**。这不是"用户不会用"，是真 bug。②**改基准 + 改语义**：百分比移到包装层（包含块=段落=正文宽），图片自身恒 `width:100%`、高度按原比例，两个方向都不会被拉伸；语义随之明确为「占编辑区正文宽度的百分之多少」。③**没缩放过 = 自适应**：只给 `max-width:100%` + `max-height:62vh`，不写宽度——`width:auto` 时浏览器在两条 max 约束里取更严的那个，等比、绝不变形，长截图不再一插入就吃满一屏。④**长图要「宁可高，不可糊」**：62vh 对 400×2400 的整页截图只剩 74px 宽（实测），于是加一条下限——缩完若不足 `NOTE_IMAGE_MIN_READABLE_WIDTH`(300px) 就放弃限高、按可用宽度显示（实测该图转为 400×2400 原尺寸，比例 0.17 未变）。⑤**拖拽按高度**：位移垂直占优时 `newW = startW × (startH + dy) / startH`（等比 ⇒ 高度变化比例 = 宽度变化比例），水平占优时仍按宽度算；方向键上下左右都认；抬手才写一次属性（一次拖拽仍是一条撤销）。⑥**让高度可见**：hover/选中/拖拽时左上角 badge 显示实际渲染高度（`高 260px` / 自适应档显示「自适应高度」），过去只显示百分比，看不出到底占多高。⑦**文案**：`imageResetSize` 由「原始」改「自适应」（现在清掉宽度不等于原尺寸，而是受限高的自适应），新增 `imageHeightValue` / `imageAutoSize`（zh / en 各两键）。⑧**测试**：单测 12 条（改写 1 条为「百分比落在包装层」+ 新增 1 条「自适应只限高不写宽度」），e2e 新增 1 条钉**基准**（图片宽 ÷ 编辑区宽必须落在 0.45–0.55；旧实现在 0.40，能红能绿）——jsdom 没有布局，这个 bug 只能靠真浏览器抓 | 越界改动: 仅 `src/views/NoteEditor.tsx`、`src/locales/{zh,en}.ts`、`tests/views/noteEditorRich.test.tsx`、`e2e/10-notebook.spec.ts`；未改存储格式（仍是 `<img width="…%">`），未改 gc 扫描、未改 commandBus、未加依赖 | 遗留: ①`62vh` 与「可读下限 300px」都是写死的常数，设置面板里不可调；②超长截图默认仍会很高（这是"可读"的代价），只能靠拖拽/预设缩小或点灯箱；③比例判据用的是 `window.innerHeight`（窗口高度），任务弹窗内可视高度更小，仍按 62vh 限高，偏保守；④图片仍只能按百分比缩放（15–100%），没有像素级输入 | 全量验证: `tsc` 0 / `npm test` **1018 passed (56 files)** / `npm run e2e` **41 passed + 1 skipped** / `npm run build` **10/10**（产物 **1196672 字节**，上限 1677721）
+
+- [2026-10-22] T50 | agent: workbuddy:sess-1022c | commit: "T50: notebook export, adjustable note font size and inline mermaid rendering" | 验收: 15/15 全部勾选（截图核对两轮，首轮抓到 mermaid 全图变黑的真 bug，见备注 ①） | 备注: ①**最难的一处：SVG 的 id 作用域不只是 id**。mermaid 把节点配色写在 `<style>` 的 `#<svgid> .node rect{fill:…}` 选择器上，而同一段代码在缓存命中时会被复用、插到文档两处。最初只重写 `id="…"` / `url(#…)` / `href="#…"`，结果 CSS 选择器全部失配 → 节点退回 `<rect>` 的浏览器默认样式（纯黑填充），整张流程图变成一团黑块与黑三角（截图才看出来）。修法是四处一起改，且 CSS 那条用「`#id` 后不能紧跟标识符字符」的负向断言，否则短 id 会吃掉长 id 的前缀（`#a` 命中 `#a-arrow`）；单测用「颜色值 `#eef0ff` 不许被当 id 改写」钉住。②**体积是唯一躲不开的取舍**：mermaid 12.2.0 进包后产物 1,196,672 → **6,347,769 字节**，`verify-bundle` 上限因此 1.6MB → 8MB，并在脚本里写清理由；库内四个新主机（`www.eclipse.org` 是 ELK 的 XML 命名空间标识符、chevrotain / langium / wikipedia 是解析器报错文案里的文档链接）逐条在产物里复核上下文后进白名单。③**图必须是装饰不能是节点**：存 ` ```mermaid ` 围栏 → Obsidian / Typora / 导出都能原样读走；`Decoration.widget` 挂在代码块之后，代码照旧可编辑（换自定义 atom 节点会把"改一行看效果"变远）。引擎用动态 import，没写过 mermaid 的库首屏不初始化。④**导出必须取编辑器而不是 vault**：编辑器有 400ms debounce，打完字立刻点导出，vault 里还是上一版——`NotebookView` 存编辑器句柄，导出优先 `editor.getMarkdown()`。这是"导出的和屏幕上不一样"的根因。⑤**图片宽度在导出文件里会失效**：`<img width="62%">` 的百分比被浏览器当非法值丢弃（width 属性只认像素），导出前改写成 `style="width:62%"`，否则所有手动缩放过的大图变回原尺寸。⑥**mermaid 源码被 HTML 转义**：`A --> B` 序列化成 `A --&gt; B`，直接喂引擎必解析失败，导出侧先还原实体（单测用箭头图钉住）。⑦**字号是两个旋钮之一**：`--oe-ui-scale`（T40）管高分屏整体放大，`--oe-note-font-size` 管正文想看多大，两者相乘互不覆盖；离散档位而非连续滑块——行高 / 图片限高 / 虚拟化都依赖确定像素。schema 用 `catch + clamp` 而非 min/max：一个坏字号不该让整个库打不开。⑧**标题重复是导出特有的问题**：编辑器里「标题输入框 + 正文 H1」并排有意义，导出后页头已经写着标题，再来一行同名特大号字就是重复（首轮截图很显眼）→ `stripLeadingHeading()` 只剥开篇那一处且必须完全相同（正文中间的同名 H1 是章节分隔，动它就是改内容）。⑨**PDF 走浏览器打印而不是引库**：`window.open` 会被弹窗拦截且用户看到"还没打开完就弹打印"的空页，改用隐藏 iframe 同步写入再 `print()`，`afterprint` + 定时器摘掉；打印样式含 A4 边距与「图表不跨页断开」。⑩**导出菜单的 backdrop 必须 `onMouseDown`**：与 T49 的抽屉语义一致（`onClick` 会在拖选正文后误关菜单） | 越界改动: ①`schema.ts` / `types.ts` 给 Settings 增 `noteFontSize`（旧库缺键补 13，schemaVersion 不升、不注册迁移），25 个测试文件的 26 处夹具随之补 `noteFontSize: 13`；②`App.tsx` 的 `Workspace` 增 `locale` prop 并下传 `NotebookView`（导出文件的 `<html lang>` 与页脚文案）；③`TaskDrawer.tsx` 增字号接线（同一个编辑器共用同一个设置值，不给它留"另一个字号"）；④`package.json` / `package-lock.json` 新增 `mermaid@12.2.0`（+115 个传递依赖），`scripts/verify-bundle.mjs` 调整体积上限与白名单；⑤新增 `docs/t50-notebook-mermaid.png`、`docs/t50-notebook-export.png`（真 Chromium 截图，2x）；⑥`e2e/10-notebook.spec.ts` 追加 4 条（mermaid 渲染 / 语法错误 / 字号落盘重开 / 导出下载），临时截图脚本用完即删、未入库 | 遗留: ①mermaid 图**不能点击放大到灯箱**（当前按正文宽度显示、超宽横向滚动），大图只能靠浏览器缩放；②图内字号固定 13px，不跟随正文字号设置；③渲染在主线程（首次 ~200ms、命中缓存后几乎为 0），没有 Worker，超大图（数百节点）会有一次可感知的停顿；④导出只有 HTML 与「打印/另存为 PDF」，没有 `.docx`（需引转换库且表格/任务列表/mermaid 会走形）与单篇 `.md`（迁移格式，不是成品）；⑤PDF 依赖用户在打印对话框里选"另存为 PDF"，没有直接产出 PDF 二进制的管线；⑥整本导出的目录只有按树缩进的一层列表，没有多级编号与锚点回链；⑦图内字体不随 `--oe-ui-scale` 之外的导出上下文变化（导出文件固定 15px 正文基准） | 全量验证: `tsc` 0 / `npm test` **1060 passed (59 files)**（基线 1018 + 本任务 42：mermaid 15 + 导出 17 + 字号控件 4 + settings 4 + 知识库视图 2）/ `npm run e2e` **45 passed + 1 skipped**（+4：mermaid 渲染、语法错误保留代码、字号落盘并重开仍在、导出下载自包含 HTML）/ `npm run build` **10/10**（产物 **6347769 字节**，上限 8388608，余量约 1.95MB）

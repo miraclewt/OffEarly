@@ -17,6 +17,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactElement, ReactNode } from 'react'
+import type { Editor } from '@tiptap/core'
+import dayjs from 'dayjs'
 
 import {
   applyCreateDoc,
@@ -28,6 +30,7 @@ import {
   applySaveDocContent,
 } from '../controllers/notebookActions'
 import type { NotebookActionDeps } from '../controllers/notebookActions'
+import { patchNoteFontSize } from '../controllers/settingsActions'
 import type { CommandBus } from '../domain/commandBus'
 import {
   buildDocTree,
@@ -42,6 +45,13 @@ import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
 import { NoteEditor } from './NoteEditor'
 import type { NoteAssetsPort, NoteLinkTarget } from './NoteEditor'
+import {
+  buildExportHtml,
+  createAssetResolver,
+  exportNotebookHtml,
+  printHtmlDocument,
+} from './notebookExport'
+import type { ExportDocInput } from './notebookExport'
 import { fs, px, sp } from '../styles/scale'
 
 type Translate = (key: MsgKey, params?: TranslateParams) => string
@@ -75,7 +85,12 @@ export interface NotebookViewProps {
   onOpenTask?: (taskId: string) => void
   /** 文档里的 `[[里程碑标题]]` 被点击。 */
   onOpenMilestone?: (milestoneId: string) => void
+  /** 当前界面语言（导出文件的 `<html lang>` 与页脚文案）。 */
+  locale?: 'zh' | 'en'
 }
+
+/** 导出菜单的三条落点。 */
+type ExportKind = 'doc' | 'notebook' | 'print'
 
 type Editing =
   | { kind: 'notebook'; id: string }
@@ -139,6 +154,15 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
   const [hover, setHover] = useState<string | null>(null)
   const [armed, setArmed] = useState<string | null>(null)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
+  /** T50 · 导出菜单与进度（导出是异步的：读图 → 转 base64 → 渲染图 → 下载）。 */
+  const [exportMenu, setExportMenu] = useState(false)
+  const [exporting, setExporting] = useState<ExportKind | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  /**
+   * 当前编辑器的实例：导出要取「用户刚打完、还在 400ms debounce 里」的内容。
+   * 只读 vault.noteDocs 会导出上一版——这正是过去所有"导出的和屏幕上不一样"的根因。
+   */
+  const editorRef = useRef<Editor | null>(null)
 
   const notebooks = useMemo(
     () => [...vault.notebooks].sort((a, b) => (a.order < b.order ? -1 : a.order > b.order ? 1 : 0)),
@@ -196,6 +220,71 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
     const timer = window.setTimeout(() => setArmed(null), ARM_MS)
     return () => window.clearTimeout(timer)
   }, [armed])
+
+  // 导出结果提示自动消失（与图片插入失败的提示同一节奏）
+  useEffect(() => {
+    if (notice === null) return
+    const timer = window.setTimeout(() => setNotice(null), ARM_MS)
+    return () => window.clearTimeout(timer)
+  }, [notice])
+
+  /**
+   * 导出用的 Markdown：优先取编辑器**当前**内容（含尚未 debounce 落盘的最后几个字），
+   * 拿不到编辑器（还没挂载 / 已销毁）时退回库里的值。
+   */
+  function liveMarkdown(doc: NoteDoc): string {
+    const instance = editorRef.current
+    if (instance === null || doc.id !== activeDoc?.id) return doc.content
+    try {
+      return instance.getMarkdown()
+    } catch {
+      return doc.content
+    }
+  }
+
+  /** 单篇 = 只有当前文档；整本 = 文档树的前序遍历（与左侧树看到的顺序一致）。 */
+  function collectExportDocs(kind: ExportKind): ExportDocInput[] {
+    if (activeDoc === undefined) return []
+    if (kind !== 'notebook') {
+      return [{ title: activeDoc.title, content: liveMarkdown(activeDoc), depth: 0 }]
+    }
+    return flattenDocTree(tree, new Set()).map((node) => ({
+      title: node.doc.title,
+      content: liveMarkdown(node.doc),
+      depth: node.depth,
+    }))
+  }
+
+  async function runExport(kind: ExportKind): Promise<void> {
+    if (activeDoc === undefined || exporting !== null) return
+    setExportMenu(false)
+    setExporting(kind)
+    const docs = collectExportDocs(kind)
+    try {
+      const request = {
+        docs,
+        meta: {
+          appName: 'OffEarly',
+          exportedAt: dayjs().format('YYYY-MM-DD HH:mm'),
+          kind: kind === 'notebook' ? ('notebook' as const) : ('doc' as const),
+          notebookName: activeNotebook?.name,
+          locale: props.locale ?? 'zh',
+        },
+        resolveAsset: createAssetResolver(props.assets),
+      }
+      if (kind === 'print') {
+        const { html } = await buildExportHtml(request)
+        if (!printHtmlDocument(html)) setNotice(t('notebook.exportFailed'))
+      } else {
+        const result = await exportNotebookHtml(request)
+        setNotice(t('notebook.exportDone', { name: result.filename }))
+      }
+    } catch {
+      setNotice(t('notebook.exportFailed'))
+    } finally {
+      setExporting(null)
+    }
+  }
 
   const isArmed = (key: string): boolean => armed === key
 
@@ -555,6 +644,61 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
               <span data-testid="notebook-doc-meta" style={COUNT}>
                 {t('notebook.updatedAt', { date: activeDoc.updatedAt.slice(0, 10) })}
               </span>
+              {/* T50：导出入库。菜单挂在按钮下方，backdrop 负责「点外面就关」。 */}
+              <span style={{ position: 'relative', display: 'flex', flex: '0 0 auto' }}>
+                <button
+                  type="button"
+                  data-testid="notebook-export"
+                  aria-haspopup="menu"
+                  aria-expanded={exportMenu}
+                  title={t('notebook.export')}
+                  disabled={exporting !== null}
+                  onClick={() => setExportMenu((open) => !open)}
+                  style={EXPORT_BUTTON}
+                >
+                  <Icon name="export" size={12} />
+                  <span>{exporting === null ? t('notebook.export') : t('notebook.exporting')}</span>
+                </button>
+                {exportMenu ? (
+                  <>
+                    <div
+                      data-testid="notebook-export-backdrop"
+                      onMouseDown={() => setExportMenu(false)}
+                      style={MENU_BACKDROP}
+                    />
+                    <div role="menu" data-testid="notebook-export-menu" style={EXPORT_MENU}>
+                      <div style={EXPORT_MENU_HINT}>{t('notebook.exportHint')}</div>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        data-testid="notebook-export-doc"
+                        onClick={() => void runExport('doc')}
+                        style={EXPORT_MENU_ITEM}
+                      >
+                        {t('notebook.exportDoc')}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        data-testid="notebook-export-notebook"
+                        onClick={() => void runExport('notebook')}
+                        style={EXPORT_MENU_ITEM}
+                      >
+                        {t('notebook.exportNotebook')}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        data-testid="notebook-export-print"
+                        onClick={() => void runExport('print')}
+                        style={EXPORT_MENU_ITEM}
+                      >
+                        {t('notebook.exportPrint')}
+                      </button>
+                    </div>
+                  </>
+                ) : null}
+              </span>
             </div>
 
             <input
@@ -592,12 +736,25 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
                 placeholder={t('notebook.docPlaceholder')}
                 minHeight={220}
                 grow
+                // T50：字号与任务笔记共用同一个设置值；调完立刻写回 settings（可撤销）
+                fontSize={vault.settings.noteFontSize}
+                onFontSizeChange={(size) => patchNoteFontSize(bus, vault, size)}
+                // 导出要取"屏幕上这一刻"的内容，而不是上一次落盘的内容
+                onReady={(instance) => {
+                  if (instance !== null) editorRef.current = instance
+                }}
                 style={{ flex: 1, minHeight: 0 }}
               />
             </div>
           </div>
         )}
       </main>
+
+      {notice === null ? null : (
+        <div data-testid="notebook-export-notice" role="status" style={TOAST}>
+          {notice}
+        </div>
+      )}
     </div>
   )
 
@@ -733,6 +890,7 @@ const ROOT: CSSProperties = {
   display: 'flex',
   height: '100%',
   minHeight: 0,
+  position: 'relative',
   fontFamily: 'var(--oe-font)',
   color: TEXT,
 }
@@ -955,6 +1113,82 @@ const PRIMARY_BUTTON: CSSProperties = {
   borderRadius: 'var(--oe-radius-control)',
   cursor: 'pointer',
   fontFamily: 'inherit',
+}
+
+// ── T50 · 导出（按钮 / 菜单 / 结果提示） ─────────────────────────────────
+
+const EXPORT_BUTTON: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: sp(4),
+  padding: px('2px 8px'),
+  fontSize: fs(11),
+  lineHeight: 1.7,
+  color: SECONDARY,
+  background: 'transparent',
+  border: `1px solid ${SEPARATOR}`,
+  borderRadius: 'var(--oe-radius-control)',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  flex: '0 0 auto',
+}
+
+/** 点菜单外面就关：透明铺满，压在所有内容之上、菜单之下。 */
+const MENU_BACKDROP: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 20,
+  background: 'transparent',
+}
+
+const EXPORT_MENU: CSSProperties = {
+  position: 'absolute',
+  top: `calc(100% + ${sp(4)})`,
+  right: 0,
+  zIndex: 21,
+  width: sp(238),
+  display: 'flex',
+  flexDirection: 'column',
+  gap: sp(1),
+  padding: sp(5),
+  background: SURFACE,
+  border: `1px solid ${SEPARATOR}`,
+  borderRadius: 'var(--oe-radius-overlay)',
+  boxShadow: 'var(--oe-shadow-pop)',
+}
+
+const EXPORT_MENU_HINT: CSSProperties = {
+  padding: px('2px 6px 4px'),
+  fontSize: fs(10),
+  lineHeight: 1.6,
+  color: FAINT,
+}
+
+const EXPORT_MENU_ITEM: CSSProperties = {
+  padding: px('5px 8px'),
+  fontSize: fs(11),
+  textAlign: 'left',
+  color: TEXT,
+  background: 'transparent',
+  border: 'none',
+  borderRadius: 'var(--oe-radius-control)',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+}
+
+const TOAST: CSSProperties = {
+  position: 'absolute',
+  right: sp(18),
+  bottom: sp(18),
+  zIndex: 22,
+  maxWidth: sp(360),
+  padding: px('6px 12px'),
+  fontSize: fs(11),
+  color: 'var(--oe-on-accent)',
+  background: INDIGO,
+  borderRadius: 'var(--oe-radius-control)',
+  boxShadow: 'var(--oe-shadow-pop)',
+  pointerEvents: 'none',
 }
 
 export default NotebookView

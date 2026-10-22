@@ -7,7 +7,7 @@
  *
  * 校验项：
  *   1. 产物存在，且 dist/ 下只有这一个 HTML（单文件）
- *   2. 体积 < 1.6MB
+ *   2. 体积 < 8MB（T31 时为 1.6MB；T50 起 mermaid 引擎进包，见 MAX_BYTES 注释）
  *   3. 无 `<script src>`
  *   4. 无外链 `<link href>`（只接受 data: URI，即内联 favicon）
  *   5. 无 `type="module"`（file:// 下必须是经典脚本）
@@ -29,8 +29,16 @@ const DIST = join(ROOT, 'dist')
 const ARTIFACT = join(DIST, 'OffEarly.html')
 const FAVICON_SOURCE = join(ROOT, 'brand', 'logo-mark-mono.svg')
 
-/** 1.6MB。阈值写成字节数，避免「1.6MB 到底是 10^6 还是 2^20」的扯皮。 */
-const MAX_BYTES = Math.floor(1.6 * 1024 * 1024)
+/**
+ * 8MB。
+ *
+ * 历史：T31 设的是 1.6MB（当时产物 ~220KB）。T50 起 mermaid 引擎进包——离线渲染
+ * flowchart / 时序图 / 类图 / 状态图 / ER / 甘特 / 饼图 / 思维导图的全部语法与布局算法，
+ * 产物从 1,196,672 字节涨到约 6.35MB。这不是"没做代码分割"：单文件 + `file://`
+ * 双击即用的前提下没有第二个选择（走 CDN 会在无网时静默不出图）。
+ * 阈值仍写成字节数，并且仍然是一条硬约束——它的意义是拦住无意识膨胀，不是越松越好。
+ */
+const MAX_BYTES = 8 * 1024 * 1024
 
 /**
  * 允许出现在产物里的 http(s) 主机。这些全部是**打包进 JS 的字符串常量**，
@@ -45,6 +53,15 @@ const URL_ALLOWLIST = new Map([
   // 运行时不会发起请求）。白名单仍然只认「库内字符串常量」，真外链照旧会被这条检查拦下。
   ['prosemirror.net', 'ProseMirror 报错文案里的文档链接（仅字符串）'],
   ['github.com', 'marked 报错文案里的 issue 提交链接（仅字符串）'],
+  // T50 变更提议追加：mermaid 引擎（含 chevrotain 解析器 / langium / elk 布局）进包后新增的四条。
+  // 逐条在产物里复核过上下文：两条是 ELK 的 XML **命名空间标识符**（`http://www.eclipse.org/elk/ElkGraph`、
+  // `http://www.eclipse.org/emf/2002/Ecore`，同样的用法见 SVG 的 xmlns），另外三条是语法报错文案里的
+  // 文档链接（"See: https://chevrotain.io/docs/…" / "Visit https://langium.org/docs/…" /
+  // "see: https://en.wikipedia.org/wiki/LL_parser"）。运行时无一发起请求。
+  ['www.eclipse.org', 'ELK 图的 XML 命名空间标识符（字符串常量）'],
+  ['chevrotain.io', 'chevrotain 词法/语法报错文案里的文档链接（仅字符串）'],
+  ['langium.org', 'langium 报错文案里的配置文档链接（仅字符串）'],
+  ['en.wikipedia.org', 'LL 解析报错文案里的维基链接（仅字符串）'],
 ])
 
 const results = []
@@ -85,7 +102,7 @@ function main() {
   record('单文件（dist 下仅一个 HTML）', htmlFiles.length === 1, htmlFiles.join(', ') || '（无 HTML）')
 
   const bytes = statSync(ARTIFACT).size
-  record(`体积 < 1.6MB（${MAX_BYTES} 字节）`, bytes < MAX_BYTES, `${bytes} 字节（余量 ${MAX_BYTES - bytes}）`)
+  record(`体积 < ${Math.round(MAX_BYTES / 1024 / 1024)}MB（${MAX_BYTES} 字节）`, bytes < MAX_BYTES, `${bytes} 字节（余量 ${MAX_BYTES - bytes}）`)
 
   const html = readFileSync(ARTIFACT, 'utf8')
 

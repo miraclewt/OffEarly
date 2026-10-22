@@ -29,6 +29,7 @@
     "@tiptap/react": "3.32.0",
     "@tiptap/starter-kit": "3.32.0",
     "dayjs": "1.11.23",
+    "mermaid": "^12.2.0",
     "nanoid": "6.0.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

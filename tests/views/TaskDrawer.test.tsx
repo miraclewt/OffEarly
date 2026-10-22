@@ -87,6 +87,8 @@ function makeVault(overrides: Partial<Vault> = {}): Vault {
       theme: 'light',
       locale: 'zh',
       lastFilter: null,
+
+      noteFontSize: 13,
     },
     topics: [
       topic('t-prod', '产品', null, 'a'),

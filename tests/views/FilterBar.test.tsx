@@ -95,6 +95,8 @@ function makeVault(): Vault {
       theme: 'light',
       locale: 'zh',
       lastFilter: null,
+
+      noteFontSize: 13,
     },
     topics: [topic('tp', '产品', null, 'a'), topic('tf', '前端', 'tp', 'a'), topic('to', '运维', null, 'b')],
     tasks: [

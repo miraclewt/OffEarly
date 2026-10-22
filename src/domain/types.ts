@@ -149,6 +149,11 @@ export interface Filter {
   downstreamDepth?: number
 }
 
+/** 笔记正文字号的档位边界（设计稿 px，最终由界面尺度换算成 CSS px）。 */
+export const NOTE_FONT_SIZE_MIN = 12
+export const NOTE_FONT_SIZE_MAX = 20
+export const NOTE_FONT_SIZE_DEFAULT = 13
+
 // spec 4.2 注释里点名的六项：看板列定义、工作日历、甘特图默认刻度、主题、locale、lastFilter
 export interface Settings {
   boardColumns: Status[]
@@ -157,6 +162,11 @@ export interface Settings {
   theme: 'light'
   locale: LocaleSetting
   lastFilter: Filter | null
+  /**
+   * T50 · 笔记正文基准字号（px，设计稿口径）。任务笔记与知识库文档共用同一个值——
+   * 它们是同一个编辑器，各存一份只会让「同一段文字在两处不一样大」变成常态。
+   */
+  noteFontSize: number
 }
 
 export interface Vault {

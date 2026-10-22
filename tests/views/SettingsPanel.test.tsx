@@ -34,6 +34,7 @@ function vault(overrides: Partial<Vault> = {}): Vault {
       theme: 'light',
       locale: 'auto',
       lastFilter: null,
+      noteFontSize: 13,
     },
     topics: [],
     tasks: [],

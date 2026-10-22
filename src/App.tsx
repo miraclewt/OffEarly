@@ -378,8 +378,10 @@ function Workspace(props: {
   onOpenTask?: (taskId: string) => void
   /** T49：知识库文档里的图片插入 / 显示（与任务笔记同一个附件端口）。 */
   noteAssets?: NoteAssetsPortHandle
+  /** T50：当前界面语言（知识库导出文件用）。 */
+  locale: 'zh' | 'en'
 }) {
-  const { store, view, t, bus, onOpenMilestone, onOpenTask, noteAssets } = props
+  const { store, view, t, bus, onOpenMilestone, onOpenTask, noteAssets, locale } = props
   const vault = useStore(store, (state) => state.vault)
   // spec §6.2：看板与甘特共用同一份筛选结果，切视图不丢条件
   const filter = useMemo<Filter>(() => vault.settings.lastFilter ?? createEmptyFilter(), [vault.settings.lastFilter])
@@ -432,6 +434,7 @@ function Workspace(props: {
             bus={bus}
             t={t}
             assets={noteAssets}
+            locale={locale}
             onOpenTask={onOpenTask}
             onOpenMilestone={onOpenMilestone}
           />
@@ -780,6 +783,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
             setDrawerOpen(true)
           }}
           noteAssets={phase.noteAssets}
+          locale={i18n.getLocale() === 'en' ? 'en' : 'zh'}
         />
       )
       break

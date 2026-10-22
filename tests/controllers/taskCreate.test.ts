@@ -54,6 +54,7 @@ function vault(overrides: Partial<Vault> = {}): Vault {
       theme: 'light',
       locale: 'zh',
       lastFilter: null,
+      noteFontSize: 13,
     },
     topics: [topic('t1', '支付', 'a'), topic('t2', '风控', 'b')],
     tasks: [],

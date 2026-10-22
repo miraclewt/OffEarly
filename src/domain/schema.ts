@@ -1,6 +1,11 @@
 import { z } from 'zod'
 
-import { CURRENT_SCHEMA_VERSION } from './types'
+import {
+  CURRENT_SCHEMA_VERSION,
+  NOTE_FONT_SIZE_DEFAULT,
+  NOTE_FONT_SIZE_MAX,
+  NOTE_FONT_SIZE_MIN,
+} from './types'
 import type {
   Asset,
   Dependency,
@@ -166,6 +171,17 @@ export const SettingsSchema = z.object({
   theme: z.literal('light').default('light'),
   locale: z.enum(['zh', 'en', 'auto']).default('auto'),
   lastFilter: FilterSchema.nullable().default(null),
+  // T50：笔记正文字号。旧库缺键 → 13（= 此前的写死值），schemaVersion 不升。
+  // 这里刻意用 **catch + clamp** 而不是 min/max 校验：字号是「一个数字」，手改 vault.json
+  // 或旧版本写坏一个值，不应该让整个库解析失败、打不开。越界即夹到最近档位，非数字才算缺失。
+  noteFontSize: z
+    .number()
+    .int()
+    .catch(NOTE_FONT_SIZE_DEFAULT)
+    .default(NOTE_FONT_SIZE_DEFAULT)
+    .transform((value) =>
+      Math.min(NOTE_FONT_SIZE_MAX, Math.max(NOTE_FONT_SIZE_MIN, Math.round(value))),
+    ),
 })
 
 export const VaultSchema = z.object({
@@ -181,6 +197,7 @@ export const VaultSchema = z.object({
     theme: 'light',
     locale: 'auto',
     lastFilter: null,
+    noteFontSize: NOTE_FONT_SIZE_DEFAULT,
   }),
   topics: z.array(TopicSchema),
   tasks: z.array(TaskSchema),

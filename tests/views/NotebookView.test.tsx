@@ -63,6 +63,7 @@ function vaultWith(parts: Partial<Vault> = {}): Vault {
       theme: 'light',
       locale: 'zh',
       lastFilter: null,
+      noteFontSize: 13,
     },
     topics: [],
     tasks: [],
@@ -242,5 +243,44 @@ describe('T49-8 · 全文搜索', () => {
     setup({ notebooks: [notebook('nb1', '手册')], noteDocs: [doc('d1', 'nb1', null, 'U', '文档')] })
     fireEvent.change(screen.getByTestId('notebook-search'), { target: { value: 'zzz' } })
     expect(await screen.findByTestId('notebook-search-empty')).toBeTruthy()
+  })
+})
+
+// T50 · 导出入口与字号接线
+describe('T50 · 导出与正文字号', () => {
+  function withDoc() {
+    const nb = notebook('nb-1', '产品笔记')
+    const root = doc('d-1', 'nb-1', null, 'U', '会议记录', '## 结论\n\n- 先做导出')
+    return setup({ notebooks: [nb], noteDocs: [root] })
+  }
+
+  it('编辑区顶部有导出入口，点开是三种落点', () => {
+    withDoc()
+    const button = screen.getByTestId('notebook-export')
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByTestId('notebook-export-menu')).toBeNull()
+
+    fireEvent.click(button)
+    expect(screen.getByTestId('notebook-export-menu')).toBeTruthy()
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByTestId('notebook-export-doc')).toBeTruthy()
+    expect(screen.getByTestId('notebook-export-notebook')).toBeTruthy()
+    // PDF 走浏览器打印，落点必须是「打印 / 另存为 PDF」而不是第四个导出格式
+    expect(screen.getByTestId('notebook-export-print')).toBeTruthy()
+
+    fireEvent.mouseDown(screen.getByTestId('notebook-export-backdrop'))
+    expect(screen.queryByTestId('notebook-export-menu')).toBeNull()
+  })
+
+  it('A+ / A- 直接把字号写进 settings（可撤销的一条命令）', () => {
+    const { store, bus } = withDoc()
+    expect(screen.getByTestId('note-font-size').textContent).toBe('13')
+
+    fireEvent.click(screen.getByTestId('note-font-larger'))
+    expect(store.getVault().settings.noteFontSize).toBe(14)
+    expect(bus.undoDepth()).toBe(1)
+
+    bus.undo()
+    expect(store.getVault().settings.noteFontSize).toBe(13)
   })
 })

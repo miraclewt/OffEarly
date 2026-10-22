@@ -5,6 +5,8 @@
  *  1. 在笔记本里写下的 Markdown，真的进了 `vault.json` 的 `noteDocs`（不是内存里假装保存）；
  *  2. 图片宽度选择 50% 后，正文里留下的是 `<img … width="50%">`，重开还在。
  */
+import { readFileSync } from 'node:fs'
+
 import { expect, test } from '@playwright/test'
 
 import { connectWorkspace, openAppWith, waitSaved } from './fixtures/app'
@@ -158,4 +160,97 @@ test('图片尺寸：百分比相对编辑区宽度；自适应档只限高不�
   })
   expect(ratio).toBeGreaterThan(0.45)
   expect(ratio).toBeLessThan(0.55)
+})
+
+// ── T50 · mermaid 渲染 / 字号 / 导出 ─────────────────────────────────────────
+
+const MERMAID_DOC = ['```mermaid', 'flowchart TD', '  A[开始] --> B{检查}', '  B -->|有| C[结束]', '```', ''].join('\n')
+
+test('mermaid 代码块在编辑器里渲染成图（真实 Chromium，不是 mock）', async ({ page }) => {
+  await openAppWith(page, withNotebooks([{ title: '流程图', content: MERMAID_DOC }]))
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-notebook').click()
+
+  // 首次要动态加载引擎并在浏览器里跑布局，给足时间（之后同内容命中的是缓存）
+  const preview = page.getByTestId('note-mermaid-preview')
+  await expect(preview).toHaveAttribute('data-mermaid-state', 'ok', { timeout: 30_000 })
+  await expect(preview.locator('svg')).toHaveCount(1)
+  // 图里真的画了元素：节点文字与连线路径都在
+  await expect(preview).toContainText('开始')
+  expect(await preview.locator('svg path').count()).toBeGreaterThan(0)
+
+  // 代码本身没有被图吞掉：仍是一段可编辑的围栏代码块
+  await expect(page.getByTestId('note-editor-content')).toContainText('flowchart TD')
+})
+
+test('语法写错时给一行提示，代码原样保留', async ({ page }) => {
+  await openAppWith(
+    page,
+    withNotebooks([{ title: '坏图', content: ['```mermaid', 'flowchart TD', '  A -->', '```', ''].join('\n') }]),
+  )
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-notebook').click()
+
+  const preview = page.getByTestId('note-mermaid-preview')
+  await expect(preview).toHaveAttribute('data-mermaid-state', 'error', { timeout: 30_000 })
+  await expect(page.getByTestId('note-editor-content')).toContainText('A -->')
+})
+
+test('A+ 调大字号：落盘到 settings.noteFontSize，重开仍是 14', async ({ page }) => {
+  await openAppWith(page, withNotebooks([{ title: '字号', content: '读起来舒服一点。' }]))
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-notebook').click()
+
+  await expect(page.getByTestId('note-font-size')).toHaveText('13')
+  await page.getByTestId('note-font-larger').click()
+  await expect(page.getByTestId('note-font-size')).toHaveText('14')
+
+  // 字号是 settings 变更 → 命令 → autosave，落盘晚于界面
+  await expect
+    .poll(
+      async () => {
+        const raw = JSON.parse(fromBase64((await readFakeFs(page)).files['vault.json'] as string)) as {
+          settings?: { noteFontSize?: number }
+        }
+        return raw.settings?.noteFontSize
+      },
+      { timeout: 15_000 },
+    )
+    .toBe(14)
+
+  const snapshot = await readFakeFs(page)
+  await seedFakeFs(page, snapshot)
+  await page.reload()
+  await expect(page.getByText('连接数据文件夹')).toBeVisible()
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-notebook').click()
+  await expect(page.getByTestId('note-font-size')).toHaveText('14')
+})
+
+test('导出本文档为 HTML：浏览器下载一份自包含文件，图已渲染成内联 SVG', async ({ page }) => {
+  await openAppWith(
+    page,
+    withNotebooks([{ title: '导出样例', content: `# 导出样例\n\n正文一段。\n\n${MERMAID_DOC}` }]),
+  )
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-notebook').click()
+
+  await page.getByTestId('notebook-export').click()
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByTestId('notebook-export-doc').click()
+  const download = await downloadPromise
+
+  expect(download.suggestedFilename()).toBe('导出样例.html')
+  const filePath = await download.path()
+  expect(filePath).not.toBeNull()
+  const html = readFileSync(filePath as string, 'utf8')
+
+  expect(html.startsWith('<!doctype html>')).toBe(true)
+  expect(html).toContain('<title>导出样例</title>')
+  expect(html).toContain('正文一段')
+  // 图表在导出文件里是真 SVG（矢量、可打印），不是一段代码
+  expect(html).toContain('<figure class="diagram">')
+  // 自包含：没有外链样式表 / 脚本
+  expect(html).not.toMatch(/<link\b/i)
+  expect(html).not.toMatch(/<script\b[^>]*src=/i)
 })

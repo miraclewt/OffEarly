@@ -60,6 +60,8 @@ import type { AssetRejectReason } from '../persistence/assetStore'
 import { Icon } from './IconSprite'
 import type { IconName } from './IconSprite'
 import { Lightbox } from './Lightbox'
+import { mermaidBlockRefs, renderMermaidSvg, scopeSvgIds } from './mermaid'
+import { NOTE_FONT_SIZE_DEFAULT, NOTE_FONT_SIZE_MAX, NOTE_FONT_SIZE_MIN } from '../domain/types'
 import { fs, sp, px } from '../styles/scale'
 
 const BORDER = 'var(--oe-border)'
@@ -245,6 +247,98 @@ const NotePlaceholder = Extension.create<{ text: string }>({
                 'data-placeholder': text,
               }),
             ])
+          },
+        },
+      }),
+    ]
+  },
+})
+
+
+/**
+ * MermaidPreview：把 ```` ```mermaid ```` 代码块渲染成图，**画在代码块下方**。
+ *
+ * 为什么是装饰（Decoration.widget）而不是新建一个 atom 节点：
+ *  · 存储口径不允许——图必须是普通围栏代码块，才能被 Obsidian / Typora / 导出原样读走；
+ *  · 交互口径也不允许——代码块要照旧可编辑（光标能进去改一行再看效果），
+ *    换成一个"双击进入源码"的自定义节点会把最常用的操作变远。
+ * 所以：代码在编辑器里是代码，图是它下面的一块只读预览，两者永远同步（同一次事务）。
+ *
+ * 渲染失败不是异常：语法写错的围栏在写作过程中很常见，这里显示一行错误原因，
+ * 代码块本身原样保留——绝不吞掉用户写的字。
+ */
+interface MermaidPreviewLabels {
+  rendering: string
+  error: string
+}
+
+const FALLBACK_MERMAID_LABELS: MermaidPreviewLabels = {
+  rendering: 'Rendering diagram…',
+  error: 'Diagram error',
+}
+
+/** 稳定但短的指纹：只用于 DOM 标记与 id 作用域，不参与渲染结果。 */
+function shortHash(value: string): string {
+  let hash = 5381
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) + hash + value.charCodeAt(index)) | 0
+  }
+  return (hash >>> 0).toString(36)
+}
+
+function createMermaidPreviewDom(code: string, labels: MermaidPreviewLabels): HTMLElement {
+  const hash = shortHash(code)
+  const host = document.createElement('div')
+  host.className = 'oe-mermaid-preview'
+  host.setAttribute('data-testid', 'note-mermaid-preview')
+  host.setAttribute('data-mermaid-hash', hash)
+  host.setAttribute('data-mermaid-state', 'pending')
+  host.contentEditable = 'false'
+
+  const body = document.createElement('div')
+  body.className = 'oe-mermaid-preview-body'
+  body.textContent = labels.rendering
+  host.appendChild(body)
+
+  void renderMermaidSvg(code).then((result) => {
+    // widget 已被事务重建 / 文档已卸载：丢弃这次结果，不碰一个不在文档里的节点
+    if (!host.isConnected) return
+    if (result.ok) {
+      body.innerHTML = scopeSvgIds(result.svg, hash)
+      host.setAttribute('data-mermaid-state', 'ok')
+      return
+    }
+    body.textContent = `${labels.error}: ${result.error}`
+    host.setAttribute('data-mermaid-state', 'error')
+  })
+  return host
+}
+
+const MermaidPreview = Extension.create<{ labels: MermaidPreviewLabels }>({
+  name: 'mermaidPreview',
+  addOptions() {
+    return { labels: FALLBACK_MERMAID_LABELS }
+  },
+  addProseMirrorPlugins() {
+    const labels = this.options.labels
+    return [
+      new Plugin({
+        key: new PluginKey('mermaidPreview'),
+        props: {
+          decorations: (state) => {
+            const refs = mermaidBlockRefs(state.doc)
+            if (refs.length === 0) return null
+            return DecorationSet.create(
+              state.doc,
+              refs.map((ref) =>
+                Decoration.widget(ref.after, () => createMermaidPreviewDom(ref.code, labels), {
+                  side: 1,
+                  // 图的预览不该影响光标：点它不移动选区、方向键也不停在它上面
+                  ignoreSelection: true,
+                  key: `mermaid-${ref.after}-${shortHash(ref.code)}`,
+                }),
+              ),
+            )
           },
         },
       }),
@@ -726,7 +820,12 @@ const FALLBACK_IMAGE_LABELS: NoteImageLabels = {
  * 笔记编辑器的扩展集（导出供单测复用，保证测试与产品走同一套 schema）。
  * `labels` 只影响图片节点视图上的可访问名，不影响 markdown 往返。
  */
-export function createNoteExtensions(port?: NoteImagePort, labels?: NoteImageLabels, placeholder = '') {
+export function createNoteExtensions(
+  port?: NoteImagePort,
+  labels?: NoteImageLabels,
+  placeholder = '',
+  mermaidLabels?: MermaidPreviewLabels,
+) {
   return [
     StarterKit.configure({
       // 换成自补的 SafeCodeBlock（见其注释）
@@ -745,6 +844,8 @@ export function createNoteExtensions(port?: NoteImagePort, labels?: NoteImageLab
     WikiLink,
     TaskListShortcut,
     NotePlaceholder.configure({ text: placeholder }),
+    // T50：mermaid 预览（装饰件，不影响 markdown 往返）
+    MermaidPreview.configure({ labels: mermaidLabels ?? FALLBACK_MERMAID_LABELS }),
   ]
 }
 
@@ -817,6 +918,14 @@ export interface NoteEditorProps {
   grow?: boolean
   /** 底部右侧的字数统计；默认显示。 */
   showStats?: boolean
+  /**
+   * T50 · 正文基准字号（设计稿 px，12–20）。省略 = 13（此前的写死值）。
+   * 最终渲染成 `calc(Npx * var(--oe-ui-scale))` —— 界面尺度与正文字号是两个独立旋钮：
+   * 高分屏自动放大整体界面，用户再按阅读习惯单独调正文。
+   */
+  fontSize?: number
+  /** 点 A- / A+ 时外送目标字号；不传则不显示字号控件（纯展示场景）。 */
+  onFontSizeChange?: (next: number) => void
   t?: (key: MsgKey, params?: TranslateParams) => string
   style?: CSSProperties
 }
@@ -928,8 +1037,19 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   }
   const imageLabels = imageLabelsRef.current
   const placeholderRef = useRef(props.placeholder ?? t('noteEditor.placeholder'))
+  /** mermaid 预览的两条文案同样只取一次（扩展集只建一次）。 */
+  const mermaidLabelsRef = useRef<MermaidPreviewLabels | null>(null)
+  if (mermaidLabelsRef.current === null) {
+    mermaidLabelsRef.current = {
+      rendering: t('noteEditor.mermaidRendering'),
+      error: t('noteEditor.mermaidError'),
+    }
+  }
   const minHeight = props.minHeight ?? 200
   const grow = props.grow ?? false
+  const fontSize = props.fontSize ?? NOTE_FONT_SIZE_DEFAULT
+  const canShrink = fontSize > NOTE_FONT_SIZE_MIN
+  const canGrow = fontSize < NOTE_FONT_SIZE_MAX
 
   /** 插入一张图：落盘（宿主）→ 拿到 src → 在光标处插图片节点（markdown 由编辑器生成）。 */
   const insertFiles = useCallback(async (files: readonly File[]) => {
@@ -999,7 +1119,12 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   updateRef.current = handleUpdate
 
   const editor = useEditor({
-    extensions: createNoteExtensions(imagePort, imageLabels, placeholderRef.current),
+    extensions: createNoteExtensions(
+      imagePort,
+      imageLabels,
+      placeholderRef.current,
+      mermaidLabelsRef.current ?? FALLBACK_MERMAID_LABELS,
+    ),
     content: props.value,
     contentType: 'markdown',
     // TipTap v3 默认「事务后不重渲染」；工具栏的 aria-pressed / 高亮要跟着选区与标记即时刷新，
@@ -1225,6 +1350,10 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
 
   const tools = TOOLS
   const activeIndex = candidates.length === 0 ? -1 : Math.min(linkIndex, candidates.length - 1)
+  /** CSS 自定义属性不在 CSSProperties 里，单独断言一次（值本身就是一层 calc）。 */
+  const noteFontVar = {
+    '--oe-note-font-size': `calc(${fontSize}px * var(--oe-ui-scale, 1))`,
+  } as CSSProperties
 
   return (
     <div
@@ -1249,6 +1378,8 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
         borderRadius: RADIUS_CARD,
         fontFamily: BODY_FONT,
         color: TEXT,
+        // T50：正文字号只在这里注入一次，.oe-prose 与源码框都读它
+        ...noteFontVar,
         ...props.style,
       }}
     >
@@ -1347,17 +1478,50 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
       )}
 
       <div data-testid="note-statusbar" style={STATUSBAR}>
-        <button
-          type="button"
-          data-testid="note-mode-toggle"
-          aria-pressed={mode === 'source'}
-          title={mode === 'rich' ? t('noteEditor.markdownModeHint') : t('noteEditor.richModeHint')}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={switchMode}
-          style={{ ...MODE_BUTTON, ...(mode === 'source' ? MODE_BUTTON_ACTIVE : null) }}
-        >
-          {mode === 'rich' ? t('noteEditor.markdownMode') : t('noteEditor.richMode')}
-        </button>
+        <span style={STATUS_LEFT}>
+          <button
+            type="button"
+            data-testid="note-mode-toggle"
+            aria-pressed={mode === 'source'}
+            title={mode === 'rich' ? t('noteEditor.markdownModeHint') : t('noteEditor.richModeHint')}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={switchMode}
+            style={{ ...MODE_BUTTON, ...(mode === 'source' ? MODE_BUTTON_ACTIVE : null) }}
+          >
+            {mode === 'rich' ? t('noteEditor.markdownMode') : t('noteEditor.richMode')}
+          </button>
+          {/* T50：字号调节。放在编辑器自己的底栏，任务详情与知识库共用同一个控件、
+              同一个设置值——用户不必记「这条笔记的字号要在哪个面板里改」。 */}
+          <span role="group" aria-label={t('noteEditor.fontSize')} style={FONT_CONTROLS}>
+            <button
+              type="button"
+              data-testid="note-font-smaller"
+              aria-label={t('noteEditor.fontSmaller')}
+              title={t('noteEditor.fontSmaller')}
+              disabled={props.onFontSizeChange === undefined || !canShrink}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => props.onFontSizeChange?.(fontSize - 1)}
+              style={{ ...FONT_BUTTON, ...(canShrink ? null : FONT_BUTTON_OFF) }}
+            >
+              A-
+            </button>
+            <span data-testid="note-font-size" title={t('noteEditor.fontSize')} style={FONT_VALUE}>
+              {fontSize}
+            </span>
+            <button
+              type="button"
+              data-testid="note-font-larger"
+              aria-label={t('noteEditor.fontLarger')}
+              title={t('noteEditor.fontLarger')}
+              disabled={props.onFontSizeChange === undefined || !canGrow}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => props.onFontSizeChange?.(fontSize + 1)}
+              style={{ ...FONT_BUTTON, ...(canGrow ? null : FONT_BUTTON_OFF) }}
+            >
+              A+
+            </button>
+          </span>
+        </span>
         {props.showStats === false ? null : (
           <span data-testid="note-char-count" style={STATS}>
             {t('noteEditor.charCount', { n: charCount })}
@@ -1457,7 +1621,8 @@ const SOURCE_AREA: CSSProperties = {
   color: TEXT,
   background: SURFACE,
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-  fontSize: fs(12),
+  // 源码模式与富文本同一字号：切过去不该"字突然变大/变小"
+  fontSize: 'var(--oe-note-font-size, calc(12px * var(--oe-ui-scale, 1)))',
   lineHeight: 1.75,
   tabSize: 2,
 }
@@ -1488,6 +1653,48 @@ const MODE_BUTTON_ACTIVE: CSSProperties = {
   color: 'var(--oe-on-accent)',
   background: INDIGO,
   border: `1px solid ${INDIGO}`,
+}
+
+const STATUS_LEFT: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: sp(8),
+  minWidth: 0,
+}
+
+const FONT_CONTROLS: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: sp(1),
+}
+
+const FONT_BUTTON: CSSProperties = {
+  padding: px('1px 4px'),
+  fontSize: fs(10),
+  lineHeight: 1.7,
+  fontFamily: 'inherit',
+  color: MUTED,
+  background: 'transparent',
+  border: `1px solid ${BORDER}`,
+  borderRadius: RADIUS_CONTROL,
+  cursor: 'pointer',
+  minWidth: sp(20),
+}
+
+/** 到边界就置灰：12px 再往下、20px 再往上都不是"更小的字"，是排版事故。 */
+const FONT_BUTTON_OFF: CSSProperties = {
+  color: 'var(--oe-text-faint)',
+  cursor: 'default',
+  opacity: 0.6,
+}
+
+const FONT_VALUE: CSSProperties = {
+  minWidth: sp(16),
+  textAlign: 'center',
+  fontSize: fs(10),
+  lineHeight: 1.7,
+  color: MUTED,
+  fontVariantNumeric: 'tabular-nums',
 }
 
 const STATS: CSSProperties = {

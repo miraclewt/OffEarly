@@ -433,6 +433,8 @@ function makeVault(): Vault {
       theme: 'light',
       locale: 'zh',
       lastFilter: null,
+
+      noteFontSize: 13,
     },
     topics: [topic('t1', '前端')],
     tasks: [task('x', '原笔记'), task('y', '')],

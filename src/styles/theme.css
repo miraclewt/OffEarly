@@ -287,7 +287,9 @@ input[type='checkbox'] {
    这里以 .oe-prose 为唯一入口，字号/间距一律跟界面尺度走（T40 口径）。 */
 .oe-prose {
   color: var(--oe-text);
-  font-size: calc(13px * var(--oe-ui-scale, 1));
+  /* T50：正文字号可由用户调节（12–20px）。没有显式设置时退回 T40 的界面尺度基准 13px——
+     两个旋钮各管一件事：--oe-ui-scale 管"高分屏上整体放大"，这里管"正文我想看多大"。 */
+  font-size: var(--oe-note-font-size, calc(13px * var(--oe-ui-scale, 1)));
   line-height: 1.75;
   overflow-wrap: break-word;
 }
@@ -487,4 +489,44 @@ input[type='checkbox'] {
   [data-note-image-wrap] [data-note-image-handle] {
     transition: none;
   }
+}
+
+/* ── T50 · Mermaid 预览（代码块下方的只读图） ─────────────────────────────
+   装饰节点本身不进文档、也不参与 markdown 往返；它只是"这段代码画出来是什么样"的反光镜。
+   宽度跟随正文，横向溢出交给浏览器滚动——图比正文宽是常态，压扁字体反而看不清。 */
+.oe-mermaid-preview {
+  margin: calc(6px * var(--oe-ui-scale, 1)) 0 calc(2px * var(--oe-ui-scale, 1));
+  padding: calc(8px * var(--oe-ui-scale, 1)) calc(10px * var(--oe-ui-scale, 1));
+  border: 1px solid var(--oe-card-border);
+  border-radius: var(--oe-radius-card);
+  background: var(--oe-surface);
+  overflow-x: auto;
+  user-select: none;
+}
+
+.oe-mermaid-preview-body {
+  color: var(--oe-text-muted);
+  font-size: calc(11px * var(--oe-ui-scale, 1));
+  line-height: 1.7;
+}
+
+/* mermaid 的 SVG 自带 width/height 与 max-width；这里只兜两层底：
+   1) 容器更窄时等比收（height:auto 是"不收变形"的关键）；
+   2) 图比容器宽时保持原宽、由外层滚（useMaxWidth 已让 mermaid 只写 max-width）。 */
+.oe-mermaid-preview-body > svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.oe-mermaid-preview[data-mermaid-state='error'] {
+  border-color: var(--oe-overdue);
+  background: var(--oe-fill-subtle);
+}
+
+.oe-mermaid-preview[data-mermaid-state='error'] .oe-mermaid-preview-body {
+  color: var(--oe-overdue);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-word;
 }

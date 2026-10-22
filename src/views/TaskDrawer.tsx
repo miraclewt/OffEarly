@@ -39,6 +39,7 @@ import { useStore } from 'zustand'
 
 import { patchTaskCommand } from '../domain/commandBus'
 import type { CommandBus, TaskPatch } from '../domain/commandBus'
+import { patchNoteFontSize } from '../controllers/settingsActions'
 import { duration } from '../domain/scheduleEngine'
 import type { VaultStore } from '../domain/store'
 import { createTopicTree } from '../domain/topicTree'
@@ -701,6 +702,9 @@ export function TaskDrawer(props: TaskDrawerProps) {
             onNavigate={props.onNavigateNoteLink}
             assets={props.assets}
             t={t}
+            // T50：与知识库共用同一个字号设置（同一个编辑器，不该有两套字号）
+            fontSize={vault.settings.noteFontSize}
+            onFontSizeChange={(size) => patchNoteFontSize(bus, store.getVault(), size)}
           />
         </section>
       </div>

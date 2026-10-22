@@ -89,6 +89,8 @@ function makeVault(tasks: Task[], links: Dependency[] = [], milestones: Mileston
       theme: 'light',
       locale: 'zh',
       lastFilter: null,
+
+      noteFontSize: 13,
     },
     topics: [makeTopic('a', 'a0')],
     tasks,

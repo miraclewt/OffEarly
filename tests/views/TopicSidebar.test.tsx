@@ -61,6 +61,8 @@ function makeVault(): Vault {
       theme: 'light',
       locale: 'zh',
       lastFilter: null,
+
+      noteFontSize: 13,
     },
     topics: [
       topic('p', '产品', null, 'a'),

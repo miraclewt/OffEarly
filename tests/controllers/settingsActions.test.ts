@@ -7,11 +7,14 @@ import {
   addCalendarDate,
   canToggleWorkday,
   isCalendarDate,
+  normalizeNoteFontSize,
   patchCalendar,
   patchGanttScale,
   patchLocale,
+  patchNoteFontSize,
   removeCalendarDate,
   sameCalendar,
+  stepNoteFontSize,
   toggleWorkday,
 } from '../../src/controllers/settingsActions'
 import { createCommandBus } from '../../src/domain/commandBus'
@@ -38,6 +41,7 @@ function vault(overrides: Partial<Vault> = {}): Vault {
       theme: 'light',
       locale: 'auto',
       lastFilter: null,
+      noteFontSize: 13,
     },
     topics: [],
     tasks: [],
@@ -167,5 +171,51 @@ describe('settingsActions · 写入口（空操作不发命令）', () => {
     expect(settings.theme).toBe('light')
     expect(settings.calendar).toEqual(calendar())
     expect(settings.lastFilter).toBeNull()
+  })
+})
+
+// T50 · 正文字号：唯一写入口的归一与撤销栈卫生
+describe('noteFontSize', () => {
+  it('归一：越界夹到 12–20，非数字退回默认值', () => {
+    expect(normalizeNoteFontSize(13)).toBe(13)
+    expect(normalizeNoteFontSize(11)).toBe(12)
+    expect(normalizeNoteFontSize(41)).toBe(20)
+    expect(normalizeNoteFontSize(14.6)).toBe(15)
+    expect(normalizeNoteFontSize(Number.NaN)).toBe(13)
+    expect(normalizeNoteFontSize(Number.POSITIVE_INFINITY)).toBe(13)
+  })
+
+  it('步进在两端停住，不会越过 12 / 20', () => {
+    expect(stepNoteFontSize(13, 1)).toBe(14)
+    expect(stepNoteFontSize(13, -1)).toBe(12)
+    expect(stepNoteFontSize(12, -1)).toBe(12)
+    expect(stepNoteFontSize(20, 1)).toBe(20)
+  })
+
+  it('写进 settings 且可撤销；同值不产生空命令', () => {
+    const store = createVaultStore(vault())
+    const bus = createCommandBus(store)
+    expect(patchNoteFontSize(bus, store.getVault(), 16)).toBe(true)
+    expect(store.getVault().settings.noteFontSize).toBe(16)
+    expect(patchNoteFontSize(bus, store.getVault(), 16)).toBe(false)
+    expect(bus.undoDepth()).toBe(1)
+
+    // 越界值也会被归一后再落盘（手改 vault.json / 连点都不会写坏值）
+    expect(patchNoteFontSize(bus, store.getVault(), 99)).toBe(true)
+    expect(store.getVault().settings.noteFontSize).toBe(20)
+
+    bus.undo()
+    bus.undo()
+    expect(store.getVault().settings.noteFontSize).toBe(13)
+  })
+
+  it('不影响其它设置项', () => {
+    const store = createVaultStore(vault())
+    const bus = createCommandBus(store)
+    patchNoteFontSize(bus, store.getVault(), 18)
+    const settings = store.getVault().settings
+    expect(settings.noteFontSize).toBe(18)
+    expect(settings.ganttScale).toBe('day')
+    expect(settings.locale).toBe('auto')
   })
 })

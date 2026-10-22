@@ -71,6 +71,8 @@ function makeVault(tasks: Task[]): Vault {
       theme: 'light',
       locale: 'zh',
       lastFilter: null,
+
+      noteFontSize: 13,
     },
     topics: [makeTopic('a', 'a0', TOPIC_A_COLOR), makeTopic('b', 'b0', TOPIC_B_COLOR)],
     tasks,

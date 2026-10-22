@@ -283,6 +283,12 @@ export const en: Record<MsgKey, string> = {
   'noteEditor.imageHeightValue': 'H {n}px',
   'noteEditor.imageAutoSize': 'Auto height',
   'noteEditor.charCount': '{n} chars',
+  // T50 tail-append: text size and mermaid preview (key set must match zh.ts exactly)
+  'noteEditor.fontSize': 'Text size',
+  'noteEditor.fontSmaller': 'Smaller text',
+  'noteEditor.fontLarger': 'Larger text',
+  'noteEditor.mermaidRendering': 'Rendering diagram…',
+  'noteEditor.mermaidError': 'Diagram syntax error',
   // T25 尾部追加
   'lightbox.title': 'Image preview',
   'lightbox.close': 'Close',
@@ -392,4 +398,14 @@ export const en: Record<MsgKey, string> = {
   'notebook.docPlaceholder': 'Start writing… Markdown is supported; paste or drop images directly',
   'notebook.expand': 'Expand sub-docs',
   'notebook.collapse': 'Collapse sub-docs',
+  // T50 tail-append: export (key set must match zh.ts exactly)
+  'notebook.export': 'Export',
+  'notebook.exportDoc': 'Export this doc as HTML',
+  'notebook.exportNotebook': 'Export the whole notebook as HTML',
+  'notebook.exportPrint': 'Print / Save as PDF',
+  'notebook.exportHint': 'A single self-contained HTML file — images and diagrams are embedded, ready to share or print',
+  'notebook.exportEmpty': 'This doc is empty',
+  'notebook.exporting': 'Exporting…',
+  'notebook.exportFailed': 'Export failed, please retry',
+  'notebook.exportDone': 'Exported {name}',
 }
