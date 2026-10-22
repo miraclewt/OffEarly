@@ -309,9 +309,11 @@ export const zh = {
     markdownModeHint: '切换到 Markdown 源码编辑',
     richModeHint: '回到所见即所得',
     markdownSource: 'Markdown 源码',
-    imageResize: '拖动调整图片大小，方向键微调',
-    imageResetSize: '原始',
+    imageResize: '拖动调整高度（宽度等比跟随），方向键微调',
+    imageResetSize: '自适应',
     imageWidthValue: '图片宽度 {n}%',
+    imageHeightValue: '高 {n}px',
+    imageAutoSize: '自适应高度',
     charCount: '{n} 字',
   },
 

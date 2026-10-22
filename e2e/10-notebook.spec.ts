@@ -121,3 +121,41 @@ test('图片缩放：选 50% 后正文落成 <img width="50%">，重开尺寸还
   await expect(page.getByTestId('note-image-resize')).toHaveAttribute('aria-valuenow', '50')
   expect(docContents(await readFakeFs(page)).join('\n')).toContain('width="50%"')
 })
+
+/**
+ * 这一条钉的是**百分比基准**——jsdom 没有布局，只有真浏览器能证明：
+ * `width:50%` 必须相对编辑区正文宽度，而不是图片自身固有宽度。
+ * 早前把百分比直接写在 <img> 上（包含块是 shrink-to-fit 的包装层），
+ * 一张 480px 宽的图选 50% 只得到 240px（= 正文宽 602 的 40%），用户手感就是「比例不听话」。
+ */
+test('图片尺寸：百分比相对编辑区宽度；自适应档只限高不写宽度', async ({ page }) => {
+  await openAppWith(
+    page,
+    withNotebooks([{ title: '燃尽图', content: '![燃尽图](assets/asset-burndown.png)' }]),
+  )
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-notebook').click()
+
+  const image = page.getByTestId('note-image')
+  await expect(image).toBeVisible()
+
+  // 自适应档：不写宽度，只给高度上限（长截图不该一插入就吃满一屏）
+  const auto = await image.evaluate((el) => {
+    const node = el as HTMLImageElement
+    return { width: node.style.width, maxHeight: node.style.maxHeight }
+  })
+  expect(auto.width).toBe('')
+  expect(auto.maxHeight).not.toBe('')
+
+  await image.hover()
+  await page.getByTestId('note-image-width-50').click()
+
+  const ratio = await image.evaluate((el) => {
+    const node = el as HTMLImageElement
+    // 分母用编辑区本身：NodeViewWrapper 是内联 span（clientWidth 恒为 0），段落上一次性取不到
+    const host = document.querySelector('[data-testid="note-editor-content"]') as HTMLElement | null
+    return node.getBoundingClientRect().width / (host?.clientWidth ?? 1)
+  })
+  expect(ratio).toBeGreaterThan(0.45)
+  expect(ratio).toBeLessThan(0.55)
+})

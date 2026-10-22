@@ -277,9 +277,11 @@ export const en: Record<MsgKey, string> = {
   'noteEditor.markdownModeHint': 'Switch to Markdown source',
   'noteEditor.richModeHint': 'Back to what-you-see-is-what-you-get',
   'noteEditor.markdownSource': 'Markdown source',
-  'noteEditor.imageResize': 'Drag to resize the image; arrow keys fine-tune',
-  'noteEditor.imageResetSize': 'Original',
+  'noteEditor.imageResize': 'Drag to adjust the height (width follows); arrow keys fine-tune',
+  'noteEditor.imageResetSize': 'Auto',
   'noteEditor.imageWidthValue': 'Image width {n}%',
+  'noteEditor.imageHeightValue': 'H {n}px',
+  'noteEditor.imageAutoSize': 'Auto height',
   'noteEditor.charCount': '{n} chars',
   // T25 尾部追加
   'lightbox.title': 'Image preview',

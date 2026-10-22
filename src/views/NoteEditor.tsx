@@ -9,9 +9,11 @@
 //     会把嵌套围栏 / 前导空格的围栏代码块写坏或吞掉；这里覆写两个 handler 修掉。
 //  2) 自补任务列表快捷语法 `[] ` —— StarterKit / TaskItem 3.32 未内置该输入规则（实测无 addInputRules）。
 //  3) 图片渲染走 React 节点视图（blob URL 是异步来的），markdown 读写由扩展负责。
-//  4) 图片缩放（T49）：宽度以百分比存进 `<img width="62%">` 这种 HTML 写法——标准 Markdown 图片
-//     语法没有尺寸位，塞进 title 会污染悬浮提示；HTML img 是 Typora / Obsidian 都认的既有约定，
-//     读回来仍是 `image` 节点（`parseHTML` 自带 width 映射），往返不丢。
+//  4) 图片缩放（T49，2026-10-22 改按高度）：**没缩放过**的图不设宽度，只给「智能限高」
+//     （`max-width:100%` + `max-height:62vh`）——截图这类长图不该一插入就吃掉整屏。
+//     手动缩放的落点仍是 `<img width="62%">`：标准 Markdown 没有尺寸位，塞进 title 会污染悬浮提示；
+//     HTML img 是 Typora / Obsidian 都认的既有约定，读回来仍是 `image` 节点（`parseHTML` 自带 width 映射）。
+//     百分比的含义是「占编辑区内容宽度的百分之多少」——等比缩放，高度自动跟随，所以它同时就是高度。
 //
 // 写路径：编辑 debounce 后 onCommit（宿主用 patchTaskCommand / patchNoteDocCommand 落库 →
 // 进 CommandBus 撤销栈）；组件自己不碰 store、不碰文件系统。撤销粒度 = 一个 debounce 窗口一条命令。
@@ -82,14 +84,31 @@ const IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml'
 /** 插入失败的提示停留时长。 */
 const HINT_MS = 3000
 
-// ── T49 · 图片缩放（百分比宽度） ─────────────────────────────────────────
+// ── T49 · 图片缩放（百分比宽度 = 等比缩放，高度自动跟随） ──────────────────
 // 为什么用百分比而不是像素：同一个笔记在任务弹窗（760 宽）与知识库（更宽）里显示，
 // 像素宽度在其中一处必然过窄/过宽；百分比跟着正文宽度走，且窗口缩放后仍然合理。
-// 存法见文件头第 4 条；min 15% 是「还看得清是什么图」的下限，再小不如删掉。
+// 为什么百分比是相对**编辑区**而不是原图：早期版本把 `width:50%` 直接给 `<img>`，而它的包含块
+// 是 shrink-to-fit 的 inline-block 包装层 → 50% 算出来是「原图宽度的一半」（实测 480px 的图
+// 选 50% 得到 240px，比编辑区一半的 316px 窄一大截），用户手感就是「比例不听话」。
+// 现在百分比落在**包装层**上（其包含块是段落 = 编辑区宽度），图片自身 `width:100%`。
+// min 15% 是「还看得清是什么图」的下限，再小不如删掉。
 
 export const NOTE_IMAGE_WIDTH_MIN = 15
 export const NOTE_IMAGE_WIDTH_MAX = 100
 export const NOTE_IMAGE_WIDTH_PRESETS = [25, 50, 75, 100] as const
+/**
+ * 没被手动缩放的图片的高度上限。
+ * 这个值不进文档、不进设置——它只是「长截图不该一插入就占满一屏」的兜底：
+ * 超了就按比例缩到这么高，宽度跟着收，绝不变形（`width:auto` + 双 max 约束由浏览器等比取舍）。
+ */
+const AUTO_MAX_HEIGHT_RATIO = 0.62
+export const NOTE_IMAGE_AUTO_MAX_HEIGHT = `${Math.round(AUTO_MAX_HEIGHT_RATIO * 100)}vh`
+/**
+ * 智能限高的「宁可高，不可糊」下限（css px）。
+ * 一张 400×2400 的整页截图压到 62vh 后只剩 74px 宽，等于看不见内容——
+ * 那种情况不如不压：按可用宽度显示，高就高，点开灯箱还能放大看细节。
+ */
+export const NOTE_IMAGE_MIN_READABLE_WIDTH = 300
 
 /** 把 markdown / HTML 里的宽度写法归一成 15–100 的整数百分比；无法识别返回 null（= 原始尺寸）。 */
 export function parseImageWidth(raw: unknown): number | null {
@@ -292,11 +311,15 @@ export interface NoteImagePort {
   subscribe?: (listener: () => void) => () => void
 }
 
-/** 节点视图要用的两条文案（由视图注 t()，扩展本身不 import i18n）。 */
+/** 节点视图要用的文案（由视图注 t()，扩展本身不 import i18n）。 */
 export interface NoteImageLabels {
   resize: string
   resetSize: string
   widthValue: string
+  /** 「高 240px」——缩放的主线索是高度，光给百分比看不出实际占多高。 */
+  heightValue: string
+  /** 未手动缩放时的档位名（= 智能限高 + 撑满可用宽度）。 */
+  autoSize: string
 }
 
 interface NoteImageStorage {
@@ -316,9 +339,11 @@ export function widthPercentFromPixels(pixels: number, contentWidth: number): nu
  * 节点视图是 React 组件，能等通知重画。markdown 往返由扩展的 renderMarkdown 负责。
  *
  * T49 缩放交互（三种入口，全部落到同一个属性 `width`）：
- *  · 右下角把手拖拽：拖动时只改本地预览，抬手才写一次属性（一次拖拽 = 一条撤销命令）；
- *  · 选中图片后的 25/50/75/100% 预设条：「原始尺寸」清掉宽度；
- *  · 把手聚焦后左右方向键 ±5%（role=slider，键盘用户不是二等公民）。
+ *  · 右下角把手拖拽：**以垂直方向为主**（往下拖变高、往上拖变矮，宽度等比跟随），
+ *    水平拖动仍可用（横向位移更大时按宽度算）；拖动时只改本地预览，抬手才写一次属性
+ *    （一次拖拽 = 一条撤销命令）；
+ *  · 选中/悬停后的 25/50/75/100% 预设条：「自适应」清掉宽度，回到智能限高；
+ *  · 把手聚焦后方向键 ±5%（左右、上下都认；role=slider，键盘用户不是二等公民）。
  */
 function NoteImageView(props: NodeViewProps) {
   const { node, extension, editor, selected, updateAttributes } = props
@@ -333,6 +358,10 @@ function NoteImageView(props: NodeViewProps) {
   const [preview, setPreview] = useState<number | null>(null)
   /** 悬停：让缩放预设不依赖「先选中」——点击图片是开灯箱（T25 既有行为），不能拿它当选中。 */
   const [hovering, setHovering] = useState(false)
+  /** 渲染后的实际像素高度：缩放的主线索，百分比看不出「占多高」。 */
+  const [shownHeight, setShownHeight] = useState<number | null>(null)
+  /** 原图像素尺寸：决定「限高之后还看不看得清」（见 NOTE_IMAGE_MIN_READABLE_WIDTH）。 */
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
   const imageRef = useRef<HTMLImageElement | null>(null)
 
   useEffect(() => {
@@ -344,6 +373,29 @@ function NoteImageView(props: NodeViewProps) {
 
   const label = alt !== '' ? alt : src
   const shown = preview ?? width
+
+  // 量实际高度。jsdom 没有布局（一切为 0），那时保持 null，badge 退回显示百分比。
+  useEffect(() => {
+    const node = imageRef.current
+    if (node === null) return
+    const rect = node.getBoundingClientRect()
+    setShownHeight(rect.height > 0 ? Math.round(rect.height) : null)
+  }, [shown, url, natural])
+
+  /**
+   * 自适应档要不要真的限高。
+   * 按 62vh 缩完还剩多宽？剩不到 `NOTE_IMAGE_MIN_READABLE_WIDTH` 就不限了——
+   * 一张整页截图缩成 74px 宽的细条，用户只会觉得图坏了，不如让它高、点开灯箱看。
+   * 原图尺寸还没读到（首帧）时先按限高渲染，读到后再决定（图片本来就是异步来的）。
+   */
+  const autoMaxHeight: string | undefined = (() => {
+    if (natural === null || natural.h <= 0) return NOTE_IMAGE_AUTO_MAX_HEIGHT
+    const viewport = typeof window === 'undefined' ? 0 : window.innerHeight
+    const capPx = viewport * AUTO_MAX_HEIGHT_RATIO
+    if (!(capPx > 0)) return NOTE_IMAGE_AUTO_MAX_HEIGHT
+    const widthAfterCap = (capPx * natural.w) / natural.h
+    return widthAfterCap >= NOTE_IMAGE_MIN_READABLE_WIDTH ? NOTE_IMAGE_AUTO_MAX_HEIGHT : undefined
+  })()
 
   const commitWidth = useCallback(
     (next: number | null): void => {
@@ -357,11 +409,15 @@ function NoteImageView(props: NodeViewProps) {
       if (url === null) return
       event.preventDefault()
       event.stopPropagation()
+      // 百分比的基准是段落（= 编辑区内容宽度），不是图片自身
       const contentWidth = editor.view.dom.clientWidth
       const startX = event.clientX
+      const startY = event.clientY
       const box = imageRef.current?.getBoundingClientRect()
-      const startPixels = box !== undefined && box.width > 0 ? box.width : contentWidth * ((width ?? 100) / 100)
-      const startPercent = width ?? 100
+      const startWidth = box !== undefined && box.width > 0 ? box.width : 0
+      const startHeight = box !== undefined && box.height > 0 ? box.height : 0
+      const startPercent =
+        width ?? (contentWidth > 0 && startWidth > 0 ? widthPercentFromPixels(startWidth, contentWidth) : NOTE_IMAGE_WIDTH_MAX)
       const target = event.currentTarget
       try {
         target.setPointerCapture(event.pointerId)
@@ -370,16 +426,39 @@ function NoteImageView(props: NodeViewProps) {
       }
       setPreview(startPercent)
 
+      /**
+       * 位移 → 目标宽度（px）。
+       * 垂直占优时按**高度**算：等比缩放意味着「高度变化比例 = 宽度变化比例」，
+       * 所以 newW = startW × (startH + dy) / startH。这正是用户「拖高度」的手感，
+       * 而落点仍是宽度百分比（唯一能跨容器自适应的相对量）。
+       */
+      const widthPixelsFor = (clientX: number, clientY: number): number => {
+        const dx = clientX - startX
+        const dy = clientY - startY
+        if (startWidth <= 0) return 0
+        if (Math.abs(dy) >= Math.abs(dx) && startHeight > 0) {
+          return startWidth * ((startHeight + dy) / startHeight)
+        }
+        return startWidth + dx
+      }
+
       const onMove = (move: PointerEvent): void => {
-        const pixels = startPixels + (move.clientX - startX)
+        const pixels = widthPixelsFor(move.clientX, move.clientY)
         // 内容宽度为 0（未布局）时用起始百分比兜底，避免把 NaN 显示给用户
-        setPreview(contentWidth > 0 ? widthPercentFromPixels(pixels, contentWidth) : startPercent)
+        setPreview(
+          contentWidth > 0 && pixels > 0
+            ? widthPercentFromPixels(pixels, contentWidth)
+            : startPercent,
+        )
       }
       const onUp = (up: PointerEvent): void => {
         window.removeEventListener('pointermove', onMove)
         window.removeEventListener('pointerup', onUp)
-        const pixels = startPixels + (up.clientX - startX)
-        const next = contentWidth > 0 ? widthPercentFromPixels(pixels, contentWidth) : startPercent
+        const pixels = widthPixelsFor(up.clientX, up.clientY)
+        const next =
+          contentWidth > 0 && pixels > 0
+            ? widthPercentFromPixels(pixels, contentWidth)
+            : startPercent
         setPreview(null)
         commitWidth(next)
       }
@@ -401,13 +480,38 @@ function NoteImageView(props: NodeViewProps) {
     )
   }
 
+  /**
+   * 包装层拿宽度（其包含块是段落，所以百分比 = 编辑区宽度的一部分）；
+   * 图片自身恒定 `width:100%` 填满包装层，高度按原始比例——两个方向都不会被拉伸。
+   * 自适应档不加宽度：让 `max-width:100%` 与 `max-height` 共同决定，浏览器取更严格的那个，等比。
+   */
+  const wrapStyle: CSSProperties = {
+    ...IMAGE_WRAP,
+    ...(selected ? IMAGE_WRAP_SELECTED : null),
+    ...(shown === null ? null : { width: `${shown}%` }),
+  }
+  const tagStyle: CSSProperties = {
+    ...IMAGE_TAG,
+    ...(shown === null
+      ? autoMaxHeight === undefined
+        ? null
+        : { maxHeight: autoMaxHeight }
+      : { width: '100%' }),
+  }
+  const badgeText =
+    shownHeight === null
+      ? shown === null
+        ? labels.autoSize
+        : labels.widthValue.replace('{n}', String(shown))
+      : labels.heightValue.replace('{n}', String(shownHeight))
+
   return (
     <NodeViewWrapper as="span">
       <span
         data-note-image-wrap={src}
         onMouseEnter={() => setHovering(true)}
         onMouseLeave={() => setHovering(false)}
-        style={{ ...IMAGE_WRAP, ...(selected ? IMAGE_WRAP_SELECTED : null) }}
+        style={wrapStyle}
       >
         <img
           ref={imageRef}
@@ -416,7 +520,13 @@ function NoteImageView(props: NodeViewProps) {
           src={url}
           alt={alt}
           onClick={() => port?.open?.(src, alt)}
-          style={{ ...IMAGE_TAG, width: shown === null ? undefined : `${shown}%` }}
+          onLoad={(event) => {
+            const el = event.currentTarget
+            if (el.naturalWidth > 0 && el.naturalHeight > 0) {
+              setNatural({ w: el.naturalWidth, h: el.naturalHeight })
+            }
+          }}
+          style={tagStyle}
         />
         <span
           data-note-image-handle=""
@@ -427,26 +537,33 @@ function NoteImageView(props: NodeViewProps) {
           aria-valuemin={NOTE_IMAGE_WIDTH_MIN}
           aria-valuemax={NOTE_IMAGE_WIDTH_MAX}
           aria-valuenow={shown ?? NOTE_IMAGE_WIDTH_MAX}
-          aria-valuetext={labels.widthValue.replace('{n}', String(shown ?? NOTE_IMAGE_WIDTH_MAX))}
+          aria-valuetext={
+            shown === null
+              ? labels.autoSize
+              : labels.widthValue.replace('{n}', String(shown))
+          }
           title={labels.resize}
           contentEditable={false}
           onPointerDown={startResize}
           onKeyDown={(event) => {
-            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+            // 上下与左右都认：缩放是等比的，「往上拖变矮」在键盘上就是 ArrowUp
+            const shrink = event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+            const grow = event.key === 'ArrowRight' || event.key === 'ArrowDown'
+            if (!shrink && !grow) return
             event.preventDefault()
             event.stopPropagation()
             const base = shown ?? NOTE_IMAGE_WIDTH_MAX
             const next = Math.min(
               NOTE_IMAGE_WIDTH_MAX,
-              Math.max(NOTE_IMAGE_WIDTH_MIN, base + (event.key === 'ArrowRight' ? 5 : -5)),
+              Math.max(NOTE_IMAGE_WIDTH_MIN, base + (grow ? 5 : -5)),
             )
             commitWidth(next)
           }}
           style={IMAGE_HANDLE}
         />
-        {preview === null ? null : (
+        {preview === null && !(hovering || selected) ? null : (
           <span data-testid="note-image-width-badge" style={IMAGE_WIDTH_BADGE}>
-            {preview}%
+            {preview === null ? badgeText : `${preview}%`}
           </span>
         )}
         {selected || hovering ? (
@@ -599,8 +716,10 @@ function createNoteImage(port: NoteImagePort | null, labels: NoteImageLabels) {
 /** 未注入文案时的兜底（纯函数往返、独立挂载的组件测试都会走到）。 */
 const FALLBACK_IMAGE_LABELS: NoteImageLabels = {
   resize: 'Resize image',
-  resetSize: 'Original',
+  resetSize: 'Auto',
   widthValue: '{n}%',
+  heightValue: '{n}px',
+  autoSize: 'Auto',
 }
 
 /**
@@ -803,6 +922,8 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
       resize: t('noteEditor.imageResize'),
       resetSize: t('noteEditor.imageResetSize'),
       widthValue: t('noteEditor.imageWidthValue'),
+      heightValue: t('noteEditor.imageHeightValue'),
+      autoSize: t('noteEditor.imageAutoSize'),
     }
   }
   const imageLabels = imageLabelsRef.current

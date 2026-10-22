@@ -147,14 +147,32 @@ describe('T49-2 · 图片缩放（组件）', () => {
     })
   })
 
-  it('已带宽度的图片按宽度百分比渲染，并提供方向键微调', async () => {
+  it('已带宽度的图片：百分比落在包装层（基准是编辑区宽度），图片自身填满包装层', async () => {
     setup('<img src="assets/a1.png" alt="截图" width="40%">')
     const image = await screen.findByTestId('note-image')
-    expect(image.style.width).toBe('40%')
+    // 百分比若直接给 <img>，包含块是 shrink-to-fit 的包装层 → 算出来是「原图宽度的 40%」而非编辑区
+    const wrap = image.parentElement as HTMLElement
+    expect(wrap.style.width).toBe('40%')
+    expect(image.style.width).toBe('100%')
+    // 手动缩放过就不再加高度上限，否则宽度被定死、高度被压 → 变形
+    expect(image.style.maxHeight).toBe('')
 
     const handle = screen.getByTestId('note-image-resize')
     expect(handle.getAttribute('role')).toBe('slider')
     expect(handle.getAttribute('aria-valuenow')).toBe('40')
+  })
+
+  it('没缩放过的图片走自适应：只给高度上限，不写宽度', async () => {
+    setup('![截图](assets/a1.png)')
+    const image = await screen.findByTestId('note-image')
+    expect(image.style.width).toBe('')
+    expect(image.style.maxHeight).toBe('62vh')
+    const wrap = image.parentElement as HTMLElement
+    expect(wrap.style.width).toBe('')
+
+    const handle = screen.getByTestId('note-image-resize')
+    // 自适应档不假装是 100%：valuetext 明确说「自适应高度」
+    expect(handle.getAttribute('aria-valuetext')).toContain('自适应')
   })
 })
 
