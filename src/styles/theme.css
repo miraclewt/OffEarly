@@ -486,7 +486,8 @@ input[type='checkbox'] {
   background: var(--oe-surface);
   border: 1px solid var(--oe-separator);
   border-radius: var(--oe-radius-control);
-  box-shadow: var(--oe-shadow-card);
+  /* 比卡片深一档：它压着正文文字，影子太浅会和下面的段落糊成一片（截图里读起来像「文字被截断了」）。 */
+  box-shadow: var(--oe-shadow-hover);
 }
 
 .oe-table-bar button {

@@ -1511,5 +1511,6 @@ tests/**                         与 src 镜像
 ④**位置用 `translateY(-100%)` 而不是「减去估算高度」**：工具条高度由图标尺寸与界面尺度共同决定（不是写死的 28px），用估值做减法会差两三像素，正好压住表头边框 —— e2e 量到 bar 底边 252.48 > 表格顶边 158.53 就是这么来的。改成让浏览器把底边贴到 top 上，1024 与 1600 两个视口实测 gap 都是 6px。
 ⑤**绝对定位的基准是正文容器 `.oe-prose`（内容坐标）**：工具条是它的绝对定位子元素，随内容一起滚 —— 于是完全不监听 scroll，也不会在惯性滚动里掉帧。表格贴住可视区顶部时自动翻到表格下方。
 ⑥**合并 / 拆分按选区置灰**（现问 `editor.can()`，不存快照）：点了没反应比按钮不存在更让人困惑。删除表格用危险色，其余是中性色。
+⑦**影子要比卡片深一档**：第一版借的是 `--oe-shadow-card`（0.04/0.06 透明度），压在正文上跟下面的段落糊成一片，截图里读起来像「这段文字被截断了」。换成 `--oe-shadow-hover` 才读得出是浮件。成品图见 `docs/t63-table-toolbar.png` / `docs/t63-table-selection.png`（`capture/t63-table-bar.spec.ts` 出图，重跑一次素材即跟着改）。
  | 越界改动: ①`IconSprite` 新增 9 个图标（横带=行、竖带=列；带+朝外箭头=插入，带+短横=删除）；②`theme.css` 给 `th/td` 补 `position:relative`（这是 ② 那个 bug 的正解）、新增 `.oe-table-bar`；③`NoteEditor` 新增 `TABLE_TOOLS` / `findTablePosition` / 跟随测量（每帧事务量一次，值不变则 setState 返回同一引用）；④`BoardColumn` 里一条写错编号的注释（T64 → T61）；⑤**未改** schema / package.json（零新依赖）。
  | 全量验证: `tsc` 0 / `npm test` **1257 passed (70 files)**（本批 +11）/ `npm run e2e` **57 passed + 1 skipped**（新增 2 条：落盘断言 + 蒙层断言）/ `npm run build` **10/10**（产物 **6428397 字节**，余量 1.87MB）
