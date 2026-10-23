@@ -135,3 +135,44 @@ export function matchesDocQuery(doc: NoteDoc, query: string): boolean {
   if (normalized === '') return true
   return doc.title.toLowerCase().includes(normalized) || doc.content.toLowerCase().includes(normalized)
 }
+
+/**
+ * T56 · 移动 / 换序时的排序键：把 `id` 插到 `parentId` 下、紧挨 `beforeId` 之前。
+ * `beforeId = null` 表示放到该父级末尾。仅算键，合法性（跨库 / 移进自己子树）由调用方拦。
+ */
+export function orderForPlacement(
+  docs: readonly NoteDoc[],
+  id: string,
+  notebookId: string,
+  parentId: string | null,
+  beforeId: string | null,
+): string {
+  const siblings = docs
+    .filter((doc) => doc.notebookId === notebookId && doc.parentId === parentId && doc.id !== id)
+    .sort(compareDocs)
+  if (beforeId === null) return mid(siblings.at(-1)?.order, undefined)
+  const index = siblings.findIndex((doc) => doc.id === beforeId)
+  if (index < 0) return mid(siblings.at(-1)?.order, undefined)
+  return mid(siblings[index - 1]?.order, siblings[index]?.order)
+}
+
+/**
+ * 这次移动是不是原地不动：同父级 + 落点恰好就是自己现在的位置。
+ * `beforeId` 为空表示追加到末尾——末尾若是自己，同样是原地。
+ */
+export function isNoopDocMove(
+  docs: readonly NoteDoc[],
+  doc: NoteDoc,
+  parentId: string | null,
+  beforeId: string | null,
+): boolean {
+  if (doc.parentId !== parentId) return false
+  if (beforeId === doc.id) return true
+  const siblings = docs
+    .filter((item) => item.notebookId === doc.notebookId && item.parentId === parentId && item.id !== doc.id)
+    .sort(compareDocs)
+  const index = beforeId === null ? siblings.length : siblings.findIndex((item) => item.id === beforeId)
+  if (index < 0) return false
+  const merged = [...siblings, doc].sort(compareDocs)
+  return merged[index]?.id === doc.id
+}

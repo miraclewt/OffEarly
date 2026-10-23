@@ -284,6 +284,65 @@ export const TaskCard = memo(function TaskCard(props: TaskCardProps) {
           ) : null}
         </div>
       </div>
+
+      {/*
+        T61 · 第三行：负责人与最后更新时间。
+        此前卡片只有「标题 / 话题 / 类别 / 优先级 / 到期日」，谁在做、多久没动过这两条
+        最常被问的信息只能点开弹窗才知道。这一行在窄卡（<172px）由容器查询整行隐藏，
+        因为再压就只剩两个省略号。
+      */}
+      <div
+        className="oe-card-foot"
+        style={{ display: 'flex', alignItems: 'center', gap: sp(6), marginTop: sp(6), minWidth: 0 }}
+      >
+        <span
+          data-testid={`task-assignee-${task.id}`}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: sp(4),
+            flex: '1 1 auto',
+            minWidth: 0,
+            fontSize: fs(11),
+            color: MUTED,
+          }}
+        >
+          {task.assignee === undefined || task.assignee === '' ? null : (
+            <>
+              <span
+                aria-hidden="true"
+                style={{
+                  flex: '0 0 auto',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: sp(15),
+                  height: sp(15),
+                  borderRadius: '50%',
+                  background: 'var(--oe-accent-tint)',
+                  color: 'var(--oe-accent-deep)',
+                  fontSize: fs(9),
+                  fontWeight: 600,
+                }}
+              >
+                {task.assignee.slice(0, 1)}
+              </span>
+              <span
+                style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              >
+                {task.assignee}
+              </span>
+            </>
+          )}
+        </span>
+        <span
+          data-testid={`task-updated-${task.id}`}
+          title={t('card.updatedAt', { date: task.updatedAt.slice(0, 10) })}
+          style={{ flex: '0 0 auto', fontSize: fs(11), color: FAINT }}
+        >
+          {task.updatedAt.slice(5, 10)}
+        </span>
+      </div>
     </div>
   )
 })

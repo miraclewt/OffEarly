@@ -10,6 +10,7 @@ import {
   applyCreateNotebook,
   applyDeleteDoc,
   applyDeleteNotebook,
+  applyMoveDoc,
   applyRenameDoc,
   applySaveDocContent,
 } from '../../src/controllers/notebookActions'
@@ -19,8 +20,10 @@ import {
   docPath,
   docSubtreeIds,
   flattenDocTree,
+  isNoopDocMove,
   matchesDocQuery,
   nextDocOrder,
+  orderForPlacement,
 } from '../../src/domain/notebookTree'
 import { migrate } from '../../src/domain/schema'
 import { createVaultStore } from '../../src/domain/store'
@@ -250,5 +253,70 @@ describe('T49-4 · 文档树', () => {
     expect(matchesDocQuery(docs[0]!, '  doc a ')).toBe(true)
     expect(matchesDocQuery({ ...docs[0]!, content: '关于发布流程' }, '发布')).toBe(true)
     expect(matchesDocQuery(docs[0]!, 'zzz')).toBe(false)
+  })
+})
+
+// T56 · 文档移动与换序。此前文档只能建、不能搬：树建完就定死。
+// 这里验的是「落点是 beforeId 而不是交换下标」这件事——order 是连续键，
+// 交换会破坏 LexoRank 的局部性；同时验非法落点静默拒绝、原地不动零写入。
+describe('T56 · 文档移动与换序', () => {
+  const seed = {
+    notebooks: [notebook('nb', 'U')],
+    noteDocs: [
+      doc('d1', 'nb', null, 'a'),
+      doc('d2', 'nb', null, 'b'),
+      doc('d3', 'nb', null, 'c'),
+      doc('c1', 'nb', 'd1', 'a'),
+    ],
+  }
+
+  it('同级换序：把第三篇拖到第一篇之前，顺序真的变了且可撤销', () => {
+    const { store, bus } = world(seed)
+    const before = structuredClone(store.getVault())
+
+    expect(applyMoveDoc(bus, store.getVault(), 'd3', { parentId: null, beforeId: 'd1' }, deps)).toBe(true)
+
+    const order = (id: string) => store.getVault().noteDocs.find((item) => item.id === id)!.order
+    expect(order('d3') < order('d1')).toBe(true)
+    // 顶层顺序按 order 排：d3 现在排最前；d2 仍在原位
+    expect(order('d1') < order('d2')).toBe(true)
+
+    bus.undo()
+    expect(store.getVault()).toEqual(before)
+  })
+
+  it('改父级：拖到另一篇的中间区域成为它的子文档，撤销回到顶层', () => {
+    const { store, bus } = world(seed)
+
+    expect(applyMoveDoc(bus, store.getVault(), 'd2', { parentId: 'd1', beforeId: null }, deps)).toBe(true)
+
+    expect(store.getVault().noteDocs.find((item) => item.id === 'd2')?.parentId).toBe('d1')
+    expect(buildDocTree(store.getVault().noteDocs, 'nb').map((node) => node.doc.id)).toEqual(['d1', 'd3'])
+
+    bus.undo()
+
+    expect(store.getVault().noteDocs.find((item) => item.id === 'd2')?.parentId).toBeNull()
+  })
+
+  it('拒绝把文档移进自己的子树：不抛错、不入栈', () => {
+    const { store, bus } = world(seed)
+
+    expect(applyMoveDoc(bus, store.getVault(), 'd1', { parentId: 'c1', beforeId: null }, deps)).toBe(false)
+    expect(bus.undoDepth()).toBe(0)
+    expect(store.getVault().noteDocs.find((item) => item.id === 'd1')?.parentId).toBeNull()
+  })
+
+  it('原地落点零写入：已经在 d2 前面再拖一次不产生撤销项', () => {
+    const { store, bus } = world(seed)
+    const vault = store.getVault()
+    expect(isNoopDocMove(vault.noteDocs, vault.noteDocs[0]!, null, 'd2')).toBe(true)
+
+    expect(applyMoveDoc(bus, vault, 'd1', { parentId: null, beforeId: 'd2' }, deps)).toBe(false)
+    expect(bus.undoDepth()).toBe(0)
+  })
+
+  it('排序键落在两个邻居之间，不会把兄弟顺序翻掉', () => {
+    const order = orderForPlacement(seed.noteDocs, 'd3', 'nb', null, 'd2')
+    expect(order > 'a' && order < 'b').toBe(true)
   })
 })

@@ -255,7 +255,7 @@ test('导出本文档为 HTML：浏览器下载一份自包含文件，图已渲
   expect(html).not.toMatch(/<script\b[^>]*src=/i)
 })
 
-test('收起两栏面板（T51）：面板变竖轨、正文变宽，点竖轨能原样展开', async ({ page }) => {
+test('收起两栏面板（T51/T57）：面板变竖轨，窄屏正文变宽、宽屏停在阅读上限', async ({ page }) => {
   await openAppWith(page, withNotebooks([{ title: '正文', content: '# 正文\n\n收起面板之后这一行还得在。' }]))
   await connectWorkspace(page, { create: false })
   await page.getByTestId('view-notebook').click()
@@ -266,19 +266,24 @@ test('收起两栏面板（T51）：面板变竖轨、正文变宽，点竖轨�
     return box?.width ?? 0
   }
 
+  // 窄屏（900）下两栏占掉的三百多像素确实是正文的：收起后要能拿回来
+  await page.setViewportSize({ width: 900, height: 800 })
   const start = await width()
   expect(start).toBeGreaterThan(0)
+  expect(start).toBeLessThan(760)
 
   await page.getByTestId('notebook-books-collapse').click()
   await expect(page.getByTestId('notebook-books-rail')).toBeVisible()
   await expect(page.getByTestId('notebook-books-pane')).toHaveCount(0)
   const afterBooks = await width()
-  expect(afterBooks).toBeGreaterThan(start + 100)
+  expect(afterBooks).toBeGreaterThan(start)
 
   await page.getByTestId('notebook-tree-collapse').click()
   await expect(page.getByTestId('notebook-tree-rail')).toBeVisible()
   const afterBoth = await width()
-  expect(afterBoth).toBeGreaterThan(afterBooks + 150)
+  expect(afterBoth).toBeGreaterThanOrEqual(afterBooks - 2)
+  // T57 的阅读上限：不再一路铺满整个窗口
+  expect(afterBoth).toBeLessThan(860)
 
   // 收起的是面板，不是内容：正文与标题都还在
   await expect(page.getByTestId('note-editor-content')).toContainText('收起面板之后这一行还得在')
@@ -290,4 +295,8 @@ test('收起两栏面板（T51）：面板变竖轨、正文变宽，点竖轨�
   await page.getByTestId('notebook-books-rail').click()
   await expect(page.getByTestId('notebook-books-pane')).toBeVisible()
   expect(await width()).toBeCloseTo(start, 0)
+
+  // 宽屏（1600）下正文列停在上限：窗口再宽也不会把一行拉到读不完
+  await page.setViewportSize({ width: 1600, height: 900 })
+  expect(await width()).toBeLessThan(1000)
 })

@@ -183,6 +183,15 @@ tests/**                         与 src 镜像
 ### Phase 15 · QA 第三批：F10 日期格式（T54；用户「开始」→ 接报告 §5.1 最后一项）
 - [x] **T54** 接管原生日期控件：自造 `DateField`（`YYYY-MM-DD` 恒显示 + 4/2/2 掩码 + 日历浮层 + 键盘导航），替换任务弹窗 / 筛选面板 / 里程碑共 5 处；伪日期就地报错不写库 → done (2026-10-23, workbuddy:sess-1023c, commit: "T54: take over the date input so the format stops following the browser locale")
 
+### Phase 16 · 内网笔记本补强（T55–T64；用户「假定你是一位产品经理…」→ 两轮评审 → 「quanbuzhixing」）
+- [x] **T55** 任务删得掉也回得来：`TaskDrawer` 收尾动作区（归档 / 两步删除），`task.delete` 级联清依赖、新增 `task.restore` 逆元把任务与依赖按原下标插回 → done
+- [x] **T56** 文档搬得动：知识库文档树 HTML5 拖拽（三分区落点 = 之前 / 之后 / 之内）+ `Alt+↑/↓` 换序，落点表达为 `beforeId` 而不是下标 → done
+- [x] **T57** 笔记正文可读性：阅读宽度上限 760px 居中、右侧大纲 / 反向链接栏（`extractOutline` 认围栏）、`Ctrl+K` 全局搜索（任务 / 文档 / 命令） → done
+- [x] **T58** 标签管理：`listTags` / 改名（= 合并）/ 两步删除，一条 `tag.rewrite` 命令一次撤销，连 `settings.lastFilter.tags` 一起改 → done
+- [x] **T59** 导出 Markdown：知识库导出菜单新增 `.md`（绕过 HTML 管线，直接吐原文） → done
+- [x] **T60** 代码块着色 + mermaid 源码收放：零依赖扫描器 `codeHighlight.ts`（编辑器 inline decoration 与导出 span 共用）、预览标题行的「收起源码 / 展开源码」 → done
+- [x] **T61** 看板卡片第三行（负责人 + 更新日期）与容器查询二档、筛选面板「条件开关」置顶、列头完成度改成可朗读的自述、示例库补 2 本笔记本 / 4 篇文档 → done
+
 ---
 
 ## 任务明细
@@ -1464,3 +1473,16 @@ tests/**                         与 src 镜像
 ⑥**单测口径刻意改了**：原来那条依赖「原生控件把伪日期消毒成空串」的断言，改成「原文保留 + `-invalid` 提示 + 不写库 + 失焦回退」——现在能报错了，不该再假装是清空。
  | 遗留: ①不做自然语言日期（「下周五」）与「×」清除按钮（清空走浮层或全选删除）；②月标题用 `YYYY-MM` 而非月份名，省掉一份要跟语言的词表；③周起始固定周一（与 `WEEK_ORDER` 同口径）。
  | 全量验证: `tsc` 0 / `npm test` **1124 passed (61 files)**（基线 1085 + 39）/ `npm run e2e` **53 passed + 1 skipped**（+6）/ `npm run build` **10/10**（产物 **6371146 字节**，上限 8388608）
+
+- [2026-10-23] T55–T61 | agent: workbuddy:sess-1023d | commit: "T55-T61: delete/restore tasks, move docs, readability, tag management, markdown export and code highlighting" | 验收: 7/7 全部勾选（分组验收见各条备注） | 备注:
+①**这一批的判据是「功能其实都在，只是没有入口」**。评审第一轮列了二十来条候选，逐条回到代码里核对后砍掉大半：真正缺的只有七件——`deleteTaskCommand` 写好了但**零调用点**（T17 时只给依赖编辑用了 `link.*`）、`notebookActions` 没有移动 / 换序、正文没有阅读宽度、标签是自由文本且没有任何管理入口、导出只有 HTML、代码块全灰、`Ctrl+K` 只能靠筛选面板里的文本框。其余（撤销栈、筛选逻辑、DnD）都是完备的。
+②**T55 的删除必须级联、且逆元要携完整现场**。`task.delete` 原来只摘任务、把依赖晾在库里（指向一个不存在的 id，QueryEngine 会静默丢掉，用户看不出问题）。改成同时过滤 `links`，并由 `deleteTaskCommand` 记录每条 link 的**原始下标**；`task.restore` 按 index 升序插回——降序插会让相对顺序翻掉，这是 undo 后「关键路径变了」的隐蔽根因。刻意不复用 `task.create` 当逆元：那会把 id / 顺序 / 依赖全丢，是静默数据丢失。
+③**T56 的落点表达为 `beforeId` 而不是 index**。LexoRank 的价值在于「只改动一条 order」，用下标表达落点等于每次移动都要重排后面所有兄弟。三分区命中（上 28% / 中 / 下 28%）里「中」= 成为子节点，与文件夹树同一手感；拖进自己的子树、跨笔记本、原地放下三种情况在 `isNoopDocMove` 里静默返回，不产生命令（否则撤销栈里会堆一堆空操作）。
+④**T57 的阅读宽度是 760px 而不是百分比**。中文字符宽度稳定，760px 约等于 38 个汉字，是长文阅读的舒适区；用百分比会在宽屏上拉到 1400px，行太长反而读不下去。大纲解析自写而不引依赖（`extractOutline` 需要一个能跳过围栏的 `#` 扫描，20 行），且**围栏内的 `#` 不是标题**——这条用三引号 / 波浪号围栏各钉了一条用例。
+⑤**T58 的标签改名必须和筛选一起改**。标签是任务上的自由文本，没有独立标签表，所以「改名 / 合并 / 删除」本质是一次批量改写。逐条 patch 会刷出 N 条撤销项，故走 `rewriteTagCommand`（一条命令、一次撤销、逆元携全部原始 tags）。额外一条：如果上一次筛选还挂着被改名的标签，用户会立刻看到「零命中」而不知道原因——所以 `tag.rewrite` 连 `settings.lastFilter.tags` 一起改写，逆元带上 `filterTags`，一次 Ctrl+Z 两者一起回退（拆成两条命令就得按两次）。
+⑥**T60 的着色是「叠加」不是「改写」**。代码块的内容必须是纯文本节点（光标逐字移动、markdown 原样写回），所以编辑器侧只能挂 inline decoration；导出侧 `getHTML()` 拿不到装饰，必须在 HTML 上重跑一遍同一个扫描器（`highlightCodeBlocks`）。零依赖是硬约束：highlight.js 常用语言包是几百 KB，而笔记里的代码块是给人读的片段，认得出注释 / 字符串 / 数字 / 关键字就够。**扫描器的唯一铁律是不吃字**——任何未闭合的引号 / 注释一律退到行尾或文件尾，单测用「所有 token 拼回去 = 原文掩码」钉死。
+⑦**mermaid 源码收放踩了一个 20 分钟的坑**：折叠状态按**源码指纹**记录，光标进入即展开。第一版判断「当前光标在不在块里」，结果点完按钮浏览器补一个选区事务，立刻又把它展开——按钮看起来完全没反应。改成「只在光标**刚进入**时展开」（对比前后两个 state 的选区），并只认 TextSelection（`Selection.near()` 在块边界会给出一个框住整块的 NodeSelection，把那种也算「在里面」同样会立刻撤销）。块在文档末尾时挪不出光标，由指纹兜底：一改动源码指纹就变，自动恢复显示。
+⑧**T61 的两处是「读数没人解释」**：卡片第二行只有话题 + 日期，看不到谁在做、什么时候动过；列头的百分比只有一个笼统的 `title`（悬停才有、读屏读不到），而「该列平均完成度」最容易被误读成完成率。前者用容器查询二档（`@container (max-width:176px)` 先舍话题名与第三行），后者改成 `role="img"` + 一句自述。
+ | 越界改动: ①`commandBus.ts` 新增 `task.restore` / `tag.rewrite` / `tag.restore` 三个 mutation（`tag.restore` 的 `filterTags` 为可选，旧夹具不用补）；②`mermaid.ts` 的 `MermaidBlockRef` 增 `pos` 字段（节点级装饰要框住整段源码）；③新增 5 个文件：`domain/noteOutline.ts`、`domain/codeHighlight.ts`、`controllers/tagActions.ts`、`views/CommandPalette.tsx`、`tests/*` 5 个；④`example.vault/vault.json` 补 2 本笔记本 / 4 篇文档（周会纪要含 mermaid + 表格 + 图片 + 双链）；⑤`e2e/10-notebook.spec.ts` 的折叠用例按阅读宽度上限重写（900 宽量「让出宽度」、1600 宽量「停在 760px」）；⑥**未改** `schema.ts` / `package.json`（零新依赖）。
+ | 遗留: ①`Ctrl+K` 只搜标题与正文（`includes` 匹配，无分词、无拼音、无高亮）；②标签管理没有「批量重命名 / 合并多个 -> 一个」的多选；③大纲只在知识库文档里，任务笔记（弹窗内）还没有；④代码着色的语言表固定 8 族 30 个别名，新增语言要改 `codeHighlight.ts` 的别名表；⑤mermaid 收起状态不持久化（与折叠面板同口径：显示状态不进 `settings`，否则 Ctrl+Z 会先弹按钮）；⑥删除任务的两段式确认没有「撤销提示条」（靠 Ctrl+Z，顶栏按钮可见）。
+ | 全量验证: `tsc` 0 / `npm test` **1191 passed (66 files)**（基线 1124 + 67：命令与控制器 18 + 知识库移动 5 + 大纲 7 + 标签管理 12 + 代码着色 23 + 编辑器收放 8 + 导出着色 3 - 既有口径调整）/ `npm run e2e` **53 passed + 1 skipped**（与 T54 同数，改写 1 条、其余零回归）/ `npm run build` **10/10**（产物 **6403620 字节**，上限 8388608，余量 1.98MB）

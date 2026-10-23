@@ -1,7 +1,8 @@
 // T50 · 笔记本导出：Markdown → 自包含 HTML（单篇 / 整本 / 打印为 PDF）。
 //
-// 为什么是 HTML 而不是 .md / .docx：
-//  · 用户要的是"能直接看和分享的成品"—— `.md` 是迁移格式，不是成品；
+// 为什么默认是 HTML 而不是 .docx：
+//  · 用户要的是"能直接看和分享的成品"，HTML + 浏览器打印能拿到版式 100% 一致的结果；
+//  · T60 起另有「导出为 Markdown」：不作为成品，而是交接 / 迁移时拿到原文（不过本管线）；
 //  · .docx 需要引入一个转换库，而它只能把结构化 HTML 压成 Word 的段落流：
 //    表格、任务列表、mermaid 图（还得先位图化）都会走形。同一个需求，
 //    HTML + 浏览器打印（= PDF）能拿到版式 100% 一致的结果，且零新依赖。
@@ -23,6 +24,7 @@ import { createNoteExtensions } from './NoteEditor'
 import type { NoteAssetsPort } from './NoteEditor'
 import { triggerDownload } from './GanttExporter'
 import { renderMermaidSvg, scopeSvgIds } from './mermaid'
+import { highlightCode, tokenClassNames } from '../domain/codeHighlight'
 
 /** 与 GanttExporter / mermaid 同一套字体栈：导出文件不引 webfont。 */
 const FONT_STACK =
@@ -119,8 +121,35 @@ export function restoreImageWidths(html: string): string {
   })
 }
 
-/** 双链在导出文件里没有可跳的目标：退化成普通文字，别留一个点了没反应的标记。 */
-export function flattenWikiLinks(html: string): string {
+/**
+ * T63 · 代码块着色：在导出 HTML 上把 `<pre><code>` 的内容重新拼成带 span 的版本。
+ *
+ * 为什么不在编辑器里取现成的：着色是 ProseMirror 的 inline decoration，**只存在于视图**，
+ * `getHTML()` 拿到的是干净文本。而导出的文件是要发出去给人读的，
+ * 所以这里必须再走一遍同一份 `highlightCode()`——两处共用扫描器，配色共用类名。
+ */
+function highlightCodeBlocks(html: string): string {
+  return html.replace(
+    /<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g,
+    (match, attributes: string, inner: string) => {
+      const language = /\blanguage-([\w+#-]+)/.exec(attributes)?.[1] ?? null
+      const code = unescapeHtmlText(inner)
+      const tokens = highlightCode(code, language)
+      if (tokens.length === 0) return match
+      const parts: string[] = []
+      let cursor = 0
+      for (const token of tokens) {
+        if (token.from > cursor) parts.push(escapeHtml(code.slice(cursor, token.from)))
+        parts.push(`<span class="${tokenClassNames(token.cls)}">${escapeHtml(code.slice(token.from, token.to))}</span>`)
+        cursor = token.to
+      }
+      if (cursor < code.length) parts.push(escapeHtml(code.slice(cursor)))
+      return `<pre><code${attributes}>${parts.join('')}</code></pre>`
+    },
+  )
+}
+
+/** 双链在导出文件里没有可跳的目标：退化成普通文字，别留一个点了没反应的标记。 */export function flattenWikiLinks(html: string): string {
   return html.replace(
     /<span[^>]*data-wiki-target="([^"]*)"[^>]*>\[\[([\s\S]*?)\]\]<\/span>/g,
     (_match, target: string) => `<span class="wiki">${unescapeHtmlText(target)}</span>`,
@@ -208,6 +237,9 @@ export async function transformDocHtml(
   let html = markdownToExportHtml(markdown)
   html = flattenWikiLinks(html)
   html = restoreImageWidths(html)
+  // 着色放在 mermaid 之前：mermaid 围栏不是它的语言，扫描器会原样放过，
+  // 而 mermaid 替换靠的是「干净的 `<pre><code class="language-mermaid">`」这条正则。
+  html = highlightCodeBlocks(html)
   if (title !== undefined) html = stripLeadingHeading(html, title)
   html = await renderMermaidInHtml(html)
   html = await inlineAssetImages(html, resolve)
@@ -270,6 +302,11 @@ body {
 .note code { font-family: ${MONO_STACK}; font-size: 0.9em; padding: 0.1em 0.35em; background: rgba(120, 120, 128, 0.12); border-radius: 4px; }
 .note pre { margin: 0; padding: 12px 14px; background: #f7f7fa; border: 1px solid rgba(0, 0, 0, 0.06); border-radius: 10px; overflow-x: auto; }
 .note pre code { padding: 0; background: transparent; font-size: 0.86em; line-height: 1.7; }
+.note .oe-hl-kw { color: #4038c8; font-weight: 600; }
+.note .oe-hl-str { color: #1a7f4b; }
+.note .oe-hl-num { color: #a85400; }
+.note .oe-hl-prop { color: #0a6ea8; }
+.note .oe-hl-com { color: #98989d; font-style: italic; }
 .note hr { border: none; border-top: 1px solid rgba(0, 0, 0, 0.1); margin: 1.4em 0; }
 .note a { color: #5e5ce6; text-underline-offset: 2px; }
 .note .wiki { color: #5e5ce6; border-bottom: 1px dashed rgba(94, 92, 230, 0.5); }

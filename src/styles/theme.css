@@ -531,6 +531,71 @@ input[type='checkbox'] {
   word-break: break-word;
 }
 
+/* ── T63 · 代码着色 + mermaid 源码收放 ─────────────────────────────────────
+   着色只加颜色，不动字号与行高：一行代码的宽度一变，编辑器和导出就会各自折行，
+   而「编辑时对的、导出后错位」这种问题只有文件发出去才会被发现。
+   类名 oe-hl-* 由 domain/codeHighlight.ts 统一给出，导出文件的 EXPORT_CSS 里有一份同值定义。 */
+.oe-prose .oe-hl-kw {
+  color: var(--oe-accent-deep);
+  font-weight: 600;
+}
+
+.oe-prose .oe-hl-str {
+  color: #1a7f4b;
+}
+
+.oe-prose .oe-hl-num {
+  color: #a85400;
+}
+
+.oe-prose .oe-hl-prop {
+  color: #0a6ea8;
+}
+
+.oe-prose .oe-hl-com {
+  color: var(--oe-text-faint);
+  font-style: italic;
+}
+
+/* 源码收起：节点级装饰挂这个类。display:none 而不是 max-height:0——
+   半掩的代码块会留下一条可点击的空条，用户点进去触发「光标进入即展开」，
+   于是收起永远失败（这条是被这个循环坑过才有的）。 */
+.oe-prose pre.oe-mermaid-src-collapsed {
+  display: none;
+}
+
+.oe-mermaid-preview-head {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--oe-ui-scale, 1));
+  margin-bottom: calc(4px * var(--oe-ui-scale, 1));
+  font-size: calc(10px * var(--oe-ui-scale, 1));
+  color: var(--oe-text-faint);
+}
+
+.oe-mermaid-preview-title {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.oe-mermaid-preview-toggle {
+  margin-left: auto;
+  padding: 0 calc(5px * var(--oe-ui-scale, 1));
+  font-size: calc(10px * var(--oe-ui-scale, 1));
+  line-height: 1.8;
+  color: var(--oe-text-muted);
+  background: transparent;
+  border: 1px solid var(--oe-border);
+  border-radius: var(--oe-radius-control);
+  cursor: pointer;
+}
+
+.oe-mermaid-preview-toggle:hover {
+  color: var(--oe-accent);
+  border-color: var(--oe-accent);
+}
+
 /* ── T52 · 看板卡片 meta 行：窄卡片下的取舍 ───────────────────────────────
    卡片的宽度由「列宽」决定，与视口宽没有线性关系（1440 视口下一列约 244px，
    1024 视口下只剩 172px），所以这里用容器查询而不是媒体查询。
@@ -544,6 +609,18 @@ input[type='checkbox'] {
 
 @container (max-width: 188px) {
   .oe-card-kind {
+    display: none;
+  }
+}
+
+/* T61 · 再窄一档（1024 视口下卡片约 172px）：话题名与负责人/更新时间整行让位。
+   话题的位置由色点继续承担（点在上面那行的最左，不随文字消失），
+   负责人与更新时间的全文仍在卡片 title 与任务弹窗里。 */
+@container (max-width: 176px) {
+  .oe-card-topic-name {
+    display: none;
+  }
+  .oe-card-foot {
     display: none;
   }
 }

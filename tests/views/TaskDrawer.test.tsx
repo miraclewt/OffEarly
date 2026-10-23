@@ -850,3 +850,47 @@ describe('T36 · 居中弹窗呈现', () => {
     expect(panel.querySelectorAll('[data-testid$="-section"]').length).toBe(5)
   })
 })
+
+// T55 · 收尾动作：归档 / 删除。二者此前没有任务级入口（归档只能归档整个话题），
+// 所以这里断言的是「真的有路可走」，以及删除的后果（连带依赖）与可逆性。
+describe('T55 收尾动作', () => {
+  it('归档任务：写入 archived=true 并关闭弹窗', () => {
+    const { store, view, onOpenChange } = setup()
+
+    fireEvent.click(view.getByTestId('drawer-archive'))
+
+    expect(findTask(store, 'x')?.archived).toBe(true)
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('删除任务要两段确认：第一次只进确认态，store 不动', () => {
+    const { store, view, onOpenChange } = setup()
+
+    fireEvent.click(view.getByTestId('drawer-delete'))
+
+    expect(findTask(store, 'x')).toBeDefined()
+    // 挂载时受控契约会先外送一次 true，这里只关心「没有外送关闭」
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(view.getByTestId('drawer-delete').textContent).toContain('确认删除')
+  })
+
+  it('第二次点击才真删：任务与两端依赖一起消失，关闭弹窗，undo 全部还原', () => {
+    const { store, bus, view, onOpenChange } = setup(
+      {},
+      { links: [link('l1', 'x', 'y'), link('l2', 'z', 'x'), link('l3', 'y', 'w')] },
+    )
+    const before = structuredClone(store.getVault())
+
+    fireEvent.click(view.getByTestId('drawer-delete'))
+    fireEvent.click(view.getByTestId('drawer-delete'))
+
+    expect(findTask(store, 'x')).toBeUndefined()
+    expect(store.getVault().links.map((item) => item.id)).toEqual(['l3'])
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+
+    act(() => {
+      bus.undo()
+    })
+    expect(store.getVault()).toEqual(before)
+  })
+})

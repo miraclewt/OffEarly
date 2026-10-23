@@ -37,7 +37,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import { useStore } from 'zustand'
 
-import { patchTaskCommand } from '../domain/commandBus'
+import { deleteTaskCommand, patchTaskCommand } from '../domain/commandBus'
 import type { CommandBus, TaskPatch } from '../domain/commandBus'
 import { patchNoteFontSize } from '../controllers/settingsActions'
 import { duration } from '../domain/scheduleEngine'
@@ -183,6 +183,20 @@ const SECTION_TITLE: CSSProperties = {
   color: TEXT,
 }
 
+/** 收尾动作按钮：低噪常态，危险动作靠文字与确认态（而不是常驻红色）表达。 */
+const DANGER_BUTTON: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: sp(5),
+  padding: px('5px 10px'),
+  fontSize: fs(12),
+  color: SECONDARY,
+  background: 'var(--oe-fill)',
+  border: '1px solid var(--oe-border)',
+  borderRadius: 'var(--oe-radius-control)',
+  cursor: 'pointer',
+}
+
 /** 弹窗遮罩：铺满视口、居中承载面板；`--oe-scrim` 是主题里唯一的模态遮罩色。 */
 const BACKDROP: CSSProperties = {
   position: 'fixed',
@@ -286,6 +300,8 @@ export function TaskDrawer(props: TaskDrawerProps) {
   const [selfTaskId, setSelfTaskId] = useState<string | null>(null)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
   const [dateError, setDateError] = useState<MsgKey | null>(null)
+  /** T55：删除的两段确认。换任务必须复位，否则「确认」态会跨任务带着走。 */
+  const [armedDelete, setArmedDelete] = useState(false)
 
   const open = props.open ?? selfOpen
   const taskId = props.taskId !== undefined ? props.taskId : selfTaskId
@@ -293,6 +309,11 @@ export function TaskDrawer(props: TaskDrawerProps) {
 
   const calendar = vault.settings.calendar
   const tree = useMemo(() => createTopicTree(vault.topics), [vault.topics])
+
+  // 换任务时复位删除确认态：否则在 A 上点了「删除」，切到 B 时按钮还带着红色确认态。
+  useEffect(() => {
+    setArmedDelete(false)
+  }, [taskId])
 
   /** 话题下拉：树序展平带缩进；已归档话题仍列出（其任务要能落脚）。 */
   const topicOptions = useMemo(() => {
@@ -707,6 +728,54 @@ export function TaskDrawer(props: TaskDrawerProps) {
             fontSize={vault.settings.noteFontSize}
             onFontSizeChange={(size) => patchNoteFontSize(bus, store.getVault(), size)}
           />
+        </section>
+
+        {/* ⑥ T55 · 收尾动作。此前任务只有「改状态」一条出路——误建的任务永远赖在板上，
+            归档唯一路径是归档整个话题（级联），代价太大。删除走两段确认，并把
+            「会连带摘掉依赖」这句后果写在按钮下面，不藏在 tooltip 里。 */}
+        <section
+          data-testid="drawer-actions"
+          style={{ ...SECTION, paddingBottom: 0, gap: sp(6) }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: sp(8), flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              data-testid="drawer-archive"
+              onClick={() => {
+                patchTask({ archived: true })
+                requestClose()
+              }}
+              style={DANGER_BUTTON}
+            >
+              <Icon name="archive" size={13} />
+              <span>{t('drawer.archive')}</span>
+            </button>
+            <button
+              type="button"
+              data-testid="drawer-delete"
+              aria-label={armedDelete ? t('drawer.deleteConfirm') : t('drawer.delete')}
+              onClick={() => {
+                if (!armedDelete) {
+                  setArmedDelete(true)
+                  return
+                }
+                if (task === undefined) return
+                bus.apply(deleteTaskCommand(store.getVault(), task.id))
+                requestClose()
+              }}
+              style={
+                armedDelete
+                  ? { ...DANGER_BUTTON, color: 'var(--oe-on-accent)', background: DANGER, borderColor: DANGER }
+                  : DANGER_BUTTON
+              }
+            >
+              <Icon name="trash" size={13} />
+              <span>{armedDelete ? t('drawer.deleteConfirm') : t('drawer.delete')}</span>
+            </button>
+          </div>
+          <p style={{ margin: 0, fontSize: fs(11), color: FAINT, lineHeight: 1.5 }}>
+            {armedDelete ? t('drawer.deleteHint') : t('drawer.archiveHint')}
+          </p>
         </section>
       </div>
     )

@@ -26,6 +26,7 @@ import {
   applyDeleteDoc,
   applyDeleteNotebook,
   applyRenameDoc,
+  applyMoveDoc,
   applyRenameNotebook,
   applySaveDocContent,
 } from '../controllers/notebookActions'
@@ -38,6 +39,7 @@ import {
   flattenDocTree,
   matchesDocQuery,
 } from '../domain/notebookTree'
+import { extractOutline, findBacklinks } from '../domain/noteOutline'
 import type { DocNode } from '../domain/notebookTree'
 import type { NoteDoc, Vault } from '../domain/types'
 import { createI18n } from '../locales/i18n'
@@ -50,7 +52,9 @@ import {
   createAssetResolver,
   exportNotebookHtml,
   printHtmlDocument,
+  sanitizeExportFilename,
 } from './notebookExport'
+import { triggerDownload } from './GanttExporter'
 import type { ExportDocInput } from './notebookExport'
 import { fs, px, sp } from '../styles/scale'
 
@@ -87,10 +91,15 @@ export interface NotebookViewProps {
   onOpenMilestone?: (milestoneId: string) => void
   /** 当前界面语言（导出文件的 `<html lang>` 与页脚文案）。 */
   locale?: 'zh' | 'en'
+  /**
+   * T59 · 外部指定要打开的文档（全局搜索命中后跳过来用）。
+   * `nonce` 每次都变：同一篇文档连点两次也要重新定位并展开父级。
+   */
+  focusDoc?: { notebookId: string; docId: string; nonce: number } | null
 }
 
-/** 导出菜单的三条落点。 */
-type ExportKind = 'doc' | 'notebook' | 'print'
+/** 导出菜单的落点（T60 追加 markdown：交接与迁移要能拿到原文）。 */
+type ExportKind = 'doc' | 'notebook' | 'print' | 'markdown'
 
 type Editing =
   | { kind: 'notebook'; id: string }
@@ -160,10 +169,15 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<Editing | null>(null)
   const [hover, setHover] = useState<string | null>(null)
+  /** T56 · 拖拽改父 / 换序：源行与落点提示（notebook 内一次性状态，不写库）。 */
+  const [dragDocId, setDragDocId] = useState<string | null>(null)
+  const [dropHint, setDropHint] = useState<{ id: string; zone: 'before' | 'inside' | 'after' } | null>(null)
   const [armed, setArmed] = useState<string | null>(null)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
   /** T50 · 导出菜单与进度（导出是异步的：读图 → 转 base64 → 渲染图 → 下载）。 */
   const [exportMenu, setExportMenu] = useState(false)
+  /** T58 · 右侧阅读辅助栏（大纲 + 反向链接）。纯视图态，不落盘。 */
+  const [outlineOpen, setOutlineOpen] = useState(false)
   const [exporting, setExporting] = useState<ExportKind | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   /**
@@ -194,6 +208,25 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
   /** 选中的文档：悬空时回退当前笔记本第一篇。 */
   const activeDoc =
     vault.noteDocs.find((doc) => doc.id === docId && doc.notebookId === activeNotebookId) ?? notebookDocs[0]
+
+  // T58：大纲与反向链接都从 Markdown 派生（正文的唯一事实源），不进 vault。
+  const outline = useMemo(
+    () => (activeDoc === undefined ? [] : extractOutline(activeDoc.content)),
+    [activeDoc],
+  )
+  const backlinks = useMemo(
+    () =>
+      activeDoc === undefined ? [] : findBacklinks(vault.noteDocs, activeDoc.title, activeDoc.id),
+    [activeDoc, vault.noteDocs],
+  )
+
+  /** 点大纲跳到编辑器里第 index 个标题；找不到就静默不动（正文可能刚被改短）。 */
+  function jumpToHeading(index: number): void {
+    const root = document.querySelector('[data-testid="note-editor-content"]')
+    if (root === null) return
+    const headings = root.querySelectorAll('h1, h2, h3, h4, h5, h6')
+    headings[index]?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
 
   const counts = useMemo(() => {
     const map = new Map<string, number>()
@@ -266,6 +299,14 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
   async function runExport(kind: ExportKind): Promise<void> {
     if (activeDoc === undefined || exporting !== null) return
     setExportMenu(false)
+    // T60：Markdown 就是正文本身——不过 HTML 管线、不等图片解析，直接落一个 .md
+    if (kind === 'markdown') {
+      const content = liveMarkdown(activeDoc)
+      const filename = `${sanitizeExportFilename(activeDoc.title, 'note')}.md`
+      triggerDownload(new Blob([content], { type: 'text/markdown;charset=utf-8' }), filename)
+      setNotice(t('notebook.exportDone', { name: filename }))
+      return
+    }
     setExporting(kind)
     const docs = collectExportDocs(kind)
     try {
@@ -330,6 +371,17 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
       }
     })
   }, [vault.noteDocs])
+
+  // T59 · 全局搜索命中文档后跳过来：视图是被重新挂载的，所以这里既处理挂载首帧，
+  // 也处理「已经在本视图里再搜一次」——靠 nonce 而不是 id 触发。
+  const focusNonce = props.focusDoc?.nonce
+  useEffect(() => {
+    const target = props.focusDoc
+    if (target === undefined || target === null) return
+    focusDoc(target.notebookId, target.docId)
+    // focusDoc 由 vault.noteDocs 派生；nonce 是「这一次」的唯一标识
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusNonce])
 
   function createNotebook(name: string): void {
     const id = applyCreateNotebook(bus, vault, name, t('notebook.untitled'), deps)
@@ -662,7 +714,21 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
             </div>
           </div>
         ) : (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: px('10px 16px 14px') }}>
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              padding: px('10px 16px 14px'),
+              // T57 · 阅读宽度上限：宽屏下正文不再一路铺到 1900px。
+              // 整列（面包屑 / 标题 / 正文 / 工具栏）一起收，这样标题左缘与正文左缘仍然对齐；
+              // 用 margin auto 居中，而不是靠左留一条空右边。
+              maxWidth: sp(NOTE_READING_WIDTH),
+              width: '100%',
+              margin: '0 auto',
+            }}
+          >
             <div data-testid="notebook-breadcrumb" style={BREADCRUMB}>
               <span style={{ ...ELLIPSIS, color: MUTED }}>{activeNotebook?.name ?? ''}</span>
               {docPath(vault.noteDocs, activeDoc.id).slice(0, -1).map((doc) => (
@@ -683,6 +749,22 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
                 {t('notebook.updatedAt', { date: activeDoc.updatedAt.slice(0, 10) })}
               </span>
               {/* T50：导出入库。菜单挂在按钮下方，backdrop 负责「点外面就关」。 */}
+              {/* T58：大纲 + 反向链接是一个可选右栏，默认收起——阅读时它不该占宽 */}
+              <button
+                type="button"
+                data-testid="notebook-outline-toggle"
+                aria-pressed={outlineOpen}
+                aria-label={t('notebook.outline')}
+                title={t('notebook.outline')}
+                onClick={() => setOutlineOpen((open) => !open)}
+                style={
+                  outlineOpen
+                    ? { ...EXPORT_BUTTON, color: INDIGO, background: 'var(--oe-accent-tint)' }
+                    : EXPORT_BUTTON
+                }
+              >
+                <Icon name="outline" size={12} />
+              </button>
               <span style={{ position: 'relative', display: 'flex', flex: '0 0 auto' }}>
                 <button
                   type="button"
@@ -723,6 +805,15 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
                         style={EXPORT_MENU_ITEM}
                       >
                         {t('notebook.exportNotebook')}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        data-testid="notebook-export-markdown"
+                        onClick={() => void runExport('markdown')}
+                        style={EXPORT_MENU_ITEM}
+                      >
+                        {t('notebook.exportMarkdown')}
                       </button>
                       <button
                         type="button"
@@ -788,6 +879,61 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
         )}
       </main>
 
+      {outlineOpen && activeDoc !== undefined ? (
+        <aside data-testid="notebook-outline-panel" style={RAIL_PANEL}>
+          <div>
+            <div style={RAIL_TITLE}>{t('notebook.outline')}</div>
+            {outline.length === 0 ? (
+              <p style={RAIL_EMPTY}>{t('notebook.outlineEmpty')}</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: sp(1), marginTop: sp(4) }}>
+                {outline.map((item) => (
+                  <button
+                    key={item.index}
+                    type="button"
+                    data-testid={`notebook-outline-item-${item.index}`}
+                    title={item.text}
+                    onClick={() => jumpToHeading(item.index)}
+                    style={{
+                      ...RAIL_ITEM,
+                      paddingLeft: sp(6 + (item.level - 1) * 10),
+                      fontWeight: item.level <= 2 ? 550 : 400,
+                      color: item.level <= 2 ? TEXT : SECONDARY,
+                    }}
+                  >
+                    {item.text}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{ borderTop: '1px solid var(--oe-separator)', paddingTop: sp(8) }}>
+            <div style={RAIL_TITLE}>{t('notebook.backlinks')}</div>
+            {backlinks.length === 0 ? (
+              <p style={RAIL_EMPTY}>{t('notebook.backlinksEmpty')}</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: sp(1), marginTop: sp(4) }}>
+                {backlinks.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    data-testid={`notebook-backlink-${item.id}`}
+                    title={item.title}
+                    onClick={() => {
+                      const target = vault.noteDocs.find((doc) => doc.id === item.id)
+                      if (target !== undefined) focusDoc(target.notebookId, target.id)
+                    }}
+                    style={RAIL_ITEM}
+                  >
+                    {item.title}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
+      ) : null}
+
       {notice === null ? null : (
         <div data-testid="notebook-export-notice" role="status" style={TOAST}>
           {notice}
@@ -805,6 +951,28 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
     const rowKey = `doc:${doc.id}`
     const hasChildren = node.children.length > 0
     const armedNow = isArmed(rowKey)
+    // T56：同级序列（含自己）。折叠子树不在 visibleRows 里，这不影响「同级」的判定——
+    // 同级兄弟无论展开与否都是 depth === node.depth 的那几行。
+    const siblingIds = ((): string[] => {
+      const start = visibleRows.findIndex((row) => row.doc.id === doc.id)
+      if (start < 0) return []
+      const out: string[] = []
+      for (let i = start - 1; i >= 0; i -= 1) {
+        const row = visibleRows[i]!
+        if (row.depth < node.depth) break
+        if (row.depth === node.depth) out.unshift(row.doc.id)
+      }
+      out.push(doc.id)
+      for (let i = start + 1; i < visibleRows.length; i += 1) {
+        const row = visibleRows[i]!
+        if (row.depth < node.depth) break
+        if (row.depth === node.depth) out.push(row.doc.id)
+      }
+      return out
+    })()
+    const selfAt = siblingIds.indexOf(doc.id)
+    const nextSiblingId = selfAt >= 0 ? (siblingIds[selfAt + 1] ?? null) : null
+    const hint = dropHint?.id === doc.id ? dropHint.zone : null
     if (state.isEditing) {
       return (
         <div key={doc.id} style={{ paddingLeft: sp(node.depth * 12) }}>
@@ -826,8 +994,10 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
         aria-selected={state.active}
         aria-expanded={hasChildren ? !state.collapsed : undefined}
         tabIndex={0}
+        draggable
         data-testid={`doc-row-${doc.id}`}
         data-doc-id={doc.id}
+        data-drop-hint={hint ?? undefined}
         onMouseEnter={() => setHover(rowKey)}
         onMouseLeave={() => setHover((current) => (current === rowKey ? null : current))}
         onClick={() => {
@@ -835,6 +1005,44 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
           setTitleDraft(null)
         }}
         onDoubleClick={() => setEditing({ kind: 'doc', id: doc.id })}
+        onDragStart={(event) => {
+          event.dataTransfer.setData('text/plain', doc.id)
+          event.dataTransfer.effectAllowed = 'move'
+          setDragDocId(doc.id)
+        }}
+        onDragEnd={() => {
+          setDragDocId(null)
+          setDropHint(null)
+        }}
+        onDragOver={(event) => {
+          if (dragDocId === null || dragDocId === doc.id) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+          // 上/下 28% 是「插到它前面/后面」，中间是「成为它的子文档」——和文件管理器的三段落点同口径
+          const rect = event.currentTarget.getBoundingClientRect()
+          const ratio = rect.height === 0 ? 0.5 : (event.clientY - rect.top) / rect.height
+          const zone = ratio < 0.28 ? 'before' : ratio > 0.72 ? 'after' : 'inside'
+          setDropHint((current) =>
+            current?.id === doc.id && current.zone === zone ? current : { id: doc.id, zone },
+          )
+        }}
+        onDragLeave={() => setDropHint((current) => (current?.id === doc.id ? null : current))}
+        onDrop={(event) => {
+          event.preventDefault()
+          const source = dragDocId ?? event.dataTransfer.getData('text/plain')
+          const zone = hint ?? 'inside'
+          setDragDocId(null)
+          setDropHint(null)
+          if (source === '' || source === doc.id) return
+          if (zone === 'inside') {
+            applyMoveDoc(bus, vault, source, { parentId: doc.id, beforeId: null })
+            return
+          }
+          applyMoveDoc(bus, vault, source, {
+            parentId: doc.parentId,
+            beforeId: zone === 'before' ? doc.id : nextSiblingId,
+          })
+        }}
         onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => {
           if (event.key === 'Enter') {
             event.preventDefault()
@@ -842,13 +1050,33 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
           } else if (event.key === 'F2') {
             event.preventDefault()
             setEditing({ kind: 'doc', id: doc.id })
+          } else if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+            // 键盘换序：Alt+↑/↓ 与鼠标拖拽是同一个落点模型（beforeId 而不是「交换」），
+            // 因为 order 是连续键，交换会破坏 LexoRank 的局部性。
+            event.preventDefault()
+            if (selfAt < 0) return
+            if (event.key === 'ArrowUp' && selfAt > 0) {
+              applyMoveDoc(bus, vault, doc.id, {
+                parentId: doc.parentId,
+                beforeId: siblingIds[selfAt - 2] ?? null,
+              })
+            } else if (event.key === 'ArrowDown' && selfAt < siblingIds.length - 1) {
+              applyMoveDoc(bus, vault, doc.id, {
+                parentId: doc.parentId,
+                beforeId: siblingIds[selfAt + 2] ?? null,
+              })
+            }
           }
         }}
         style={{
           ...DOC_ROW,
           paddingLeft: sp(4 + node.depth * 12),
-          ...(hover === rowKey && !state.active ? { background: ROW_HOVER } : null),
-          ...(state.active ? DOC_ROW_ACTIVE : null),
+          ...(dragDocId === doc.id ? { opacity: 0.45 } : null),
+          ...(hint === 'before' ? { boxShadow: 'inset 0 2px 0 0 var(--oe-accent)' } : null),
+          ...(hint === 'after' ? { boxShadow: 'inset 0 -2px 0 0 var(--oe-accent)' } : null),
+          ...(hint === 'inside' ? { background: 'var(--oe-accent-tint)' } : null),
+          ...(hover === rowKey && !state.active && hint === null ? { background: ROW_HOVER } : null),
+          ...(state.active && hint === null ? DOC_ROW_ACTIVE : null),
         }}
       >
         <button
@@ -1154,8 +1382,56 @@ const ICON_BUTTON: CSSProperties = {
   flex: '0 0 auto',
 }
 
-const ELLIPSIS: CSSProperties = {
+/**
+ * T57 · 正文阅读宽度上限（逻辑像素，随 uiScale 缩放）。
+ * 760 是「13px 字号下约 55 个汉字 + 表格/代码不吃紧」的折中：比 700 宽一点，
+ * 长表格不至于横向挤；再宽就回到「一行读不完」的老问题。
+ */
+const NOTE_READING_WIDTH = 760
+
+/** T58 · 右侧阅读辅助栏：默认不占宽，展开后固定 196px，两个分区共用一套行样式。 */
+const RAIL_PANEL: CSSProperties = {
+  width: sp(196),
+  flex: '0 0 auto',
+  borderLeft: '1px solid var(--oe-separator)',
+  padding: px('10px 10px 14px'),
+  overflowY: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: sp(10),
+  background: SURFACE,
+}
+
+const RAIL_TITLE: CSSProperties = {
+  fontSize: fs(11),
+  fontWeight: 650,
+  color: MUTED,
+}
+
+const RAIL_ITEM: CSSProperties = {
+  display: 'block',
+  width: '100%',
+  textAlign: 'left',
+  border: 'none',
+  background: 'transparent',
+  padding: px('3px 6px'),
+  borderRadius: 'var(--oe-radius-control)',
+  fontSize: fs(12),
+  color: SECONDARY,
+  cursor: 'pointer',
   overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+}
+
+const RAIL_EMPTY: CSSProperties = {
+  margin: px('4px 0 0'),
+  fontSize: fs(11),
+  color: FAINT,
+  lineHeight: 1.6,
+}
+
+const ELLIPSIS: CSSProperties = {  overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
   minWidth: 0,

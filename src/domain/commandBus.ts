@@ -49,9 +49,21 @@ export type NoteDocPatch = Partial<Omit<NoteDoc, 'id' | 'createdAt'>>
 export interface MutationPayloads {
   'task.create': { task: Task; index: number | null }
   'task.delete': { id: string }
+  /**
+   * T55：删除任务会连带摘掉两端指向它的依赖，所以逆元不能只是 task.create——
+   * 那样 undo 之后任务回来了、依赖却永久没了。restore 携完整任务体、原下标，
+   * 以及被摘掉的那些依赖（同样带原下标），一次逆元把三者都放回原位。
+   */
+  'task.restore': { task: Task; index: number; links: { link: Dependency; index: number }[] }
   'task.patch': { id: string; patch: TaskPatch }
   'task.move': { id: string; status: Status; order: string }
   'settings.patch': { patch: SettingsPatch }
+  // T62 · 标签是自由文本，改一次名要动所有用到它的任务。逐条 patch 会刷出 N 条撤销项，
+  // 所以单开一条批量命令：逆元携「受影响任务的原始 tags」，undo 一次全回来。
+  'tag.rewrite': { from: string; to: string | null }
+  // filterTags：改写前 settings.lastFilter.tags 的原值（仅在筛选里挂着这个标签时出现）。
+  // 省略 = 筛选没被这次改名碰到，undo 不要动它。
+  'tag.restore': { tasks: { id: string; tags: string[] }[]; filterTags?: string[] }
   // T17 追加：依赖链命令（TaskDrawer 的依赖编辑写入口）。
   // link.create 的 index 与 task.create 同义：deleteLinkCommand 的逆元靠它把链接还原回原下标。
   'link.create': { link: Dependency; index: number | null }
@@ -144,6 +156,21 @@ function patchedTask(task: Task, patch: TaskPatch): Task {
 function mapTask(vault: Vault, id: string, recipe: (task: Task) => Task): Vault {
   findTask(vault, id)
   return { ...vault, tasks: vault.tasks.map((task) => (task.id === id ? recipe(task) : task)) }
+}
+
+/**
+ * 标签列表的一次改写：`from` 换成 `to`（null = 删除），结果去重。
+ * 任务上的 tags 与筛选里的 tags 共用这一段——两处口径必须一致，否则改名后
+ * 「任务上有新标签」而「筛选还挂着旧标签」。
+ */
+function rewriteTagList(tags: readonly string[], from: string, to: string | null): string[] {
+  const next: string[] = []
+  for (const tag of tags) {
+    const value = tag === from ? to : tag
+    if (value === null) continue
+    if (!next.includes(value)) next.push(value)
+  }
+  return next
 }
 
 /** 逆 patch：把 patch 覆盖到的每个字段还原成任务当前的值。 */
@@ -266,11 +293,56 @@ export function reduce(vault: Vault, mutation: Mutation): Vault {
     case 'task.delete': {
       const { id } = mutation.payload
       findTask(vault, id)
-      return { ...vault, tasks: vault.tasks.filter((task) => task.id !== id) }
+      // T55：任务没了，两端还指着它的依赖必须一起摘掉——否则图上留下指向空节点的箭头，
+      // 关键路径与阻塞标记都会算到不存在的任务上。逆元 task.restore 负责把它们放回去。
+      return {
+        ...vault,
+        tasks: vault.tasks.filter((task) => task.id !== id),
+        links: vault.links.filter((link) => link.from !== id && link.to !== id),
+      }
+    }
+    case 'task.restore': {
+      const { task, index, links } = mutation.payload
+      const tasks = [...vault.tasks]
+      tasks.splice(index, 0, task)
+      const restored = [...vault.links]
+      // 升序插回：每次插入都会把后面的元素右移，按原下标从小到大依次插才能精确复原来位置。
+      for (const entry of [...links].sort((a, b) => a.index - b.index)) {
+        restored.splice(entry.index, 0, entry.link)
+      }
+      return { ...vault, tasks, links: restored }
     }
     case 'task.patch': {
       const { id, patch } = mutation.payload
       return mapTask(vault, id, (task) => patchedTask(task, patch))
+    }
+    case 'tag.rewrite': {
+      const { from, to } = mutation.payload
+      const tasks = vault.tasks.map((task) => {
+        if (!task.tags.includes(from)) return task
+        // 原位替换：标签顺序是用户自己排的，不要因为改名把它挪到末尾
+        return { ...task, tags: rewriteTagList(task.tags, from, to) }
+      })
+      // 上一次筛选里若还挂着被改名/删掉的标签，会立刻变成「零命中」——同一命令里改掉，
+      // 这样一次撤销能把任务和筛选一起还原（拆成两条命令就得按两次 Ctrl+Z）。
+      const filter = vault.settings.lastFilter
+      if (filter === null || !filter.tags.includes(from)) return { ...vault, tasks }
+      return {
+        ...vault,
+        tasks,
+        settings: { ...vault.settings, lastFilter: { ...filter, tags: rewriteTagList(filter.tags, from, to) } },
+      }
+    }
+    case 'tag.restore': {
+      const { tasks: entries, filterTags } = mutation.payload
+      const restore = new Map(entries.map((entry) => [entry.id, entry.tags]))
+      const tasks = vault.tasks.map((task) => {
+        const tags = restore.get(task.id)
+        return tags === undefined ? task : { ...task, tags }
+      })
+      const filter = vault.settings.lastFilter
+      if (filterTags === undefined || filter === null) return { ...vault, tasks }
+      return { ...vault, tasks, settings: { ...vault.settings, lastFilter: { ...filter, tags: filterTags } } }
     }
     case 'task.move': {
       const { id, status, order } = mutation.payload
@@ -399,14 +471,20 @@ export function createTaskCommand(task: Task): Command {
   }
 }
 
-/** 删除任务；逆元带完整任务体与原下标，undo 后连数组位置一起还原。 */
+/**
+ * 删除任务；逆元带完整任务体、原下标，以及两端指向它的依赖（各带原下标）。
+ * undo 后任务回到数组原位置、被摘掉的依赖也回到各自原位置——不是简单地追加到尾部。
+ */
 export function deleteTaskCommand(vault: Vault, id: string): Command {
   const task = findTask(vault, id)
   const index = vault.tasks.findIndex((candidate) => candidate.id === id)
+  const links = vault.links
+    .map((link, position) => ({ link, index: position }))
+    .filter((entry) => entry.link.from === id || entry.link.to === id)
   return {
     type: 'task.delete',
     payload: { id },
-    inverse: { type: 'task.create', payload: { task, index } },
+    inverse: { type: 'task.restore', payload: { task, index, links } },
   }
 }
 
@@ -440,6 +518,28 @@ export function moveTaskCommand(
         id,
         patch: { status: task.status, order: task.order, progress: task.progress },
       },
+    },
+  }
+}
+
+/**
+ * T62 · 标签批量改写：`to = null` 即删除，`to` 指向已存在的标签即合并。
+ * 没有任何任务用到这个标签时抛错——空命令不该进撤销栈。
+ * 上一次筛选若挂着这个标签，逆元一并带走它改写前的 tags（一次撤销整体回退）。
+ */
+export function rewriteTagCommand(vault: Vault, from: string, to: string | null): Command {
+  const affected = vault.tasks
+    .filter((task) => task.tags.includes(from))
+    .map((task) => ({ id: task.id, tags: [...task.tags] }))
+  if (affected.length === 0) throw new Error(`commandBus: 没有任务使用标签（${from}）`)
+  const filter = vault.settings.lastFilter
+  const filterTags = filter !== null && filter.tags.includes(from) ? [...filter.tags] : undefined
+  return {
+    type: 'tag.rewrite',
+    payload: { from, to },
+    inverse: {
+      type: 'tag.restore',
+      payload: filterTags === undefined ? { tasks: affected } : { tasks: affected, filterTags },
     },
   }
 }

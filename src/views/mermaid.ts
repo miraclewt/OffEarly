@@ -83,6 +83,8 @@ export function normalizeMermaidCode(code: string): string {
 
 /** 文档里所有 mermaid 代码块的位置与源码（编辑器据此挂预览）。 */
 export interface MermaidBlockRef {
+  /** 代码块节点的起始位置（节点级装饰要用它框住整段源码）。 */
+  pos: number
   /** 代码块节点结束处（预览插在这里，紧跟代码块之后）。 */
   after: number
   code: string
@@ -95,7 +97,7 @@ export function mermaidBlockRefs(doc: PMNode): MermaidBlockRef[] {
     if (!isMermaidLanguage(node.attrs.language)) return true
     const code = normalizeMermaidCode(node.textContent)
     if (code === '') return true
-    refs.push({ after: pos + node.nodeSize, code })
+    refs.push({ pos, after: pos + node.nodeSize, code })
     return true
   })
   return refs

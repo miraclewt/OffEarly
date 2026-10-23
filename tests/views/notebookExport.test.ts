@@ -28,6 +28,7 @@ import {
   restoreImageWidths,
   sanitizeExportFilename,
   stripLeadingHeading,
+  transformDocHtml,
   unescapeHtmlText,
 } from '../../src/views/notebookExport'
 import { resetMermaidCache } from '../../src/views/mermaid'
@@ -120,6 +121,28 @@ describe('markdownToExportHtml', () => {
 
   it('空内容返回空串', () => {
     expect(markdownToExportHtml('   ')).toBe('')
+  })
+})
+
+describe('transformDocHtml · 代码着色', () => {
+  it('导出的代码块带上的确是同一套 oe-hl-* 类名', async () => {
+    const html = await transformDocHtml('```js\nconst n = 1 // 说明\n```\n')
+    expect(html).toContain('class="oe-hl oe-hl-kw"')
+    expect(html).toContain('class="oe-hl oe-hl-num"')
+    expect(html).toContain('class="oe-hl oe-hl-com"')
+    // 内容本身一个字都不能少（着色是插 span，不是替换文字）
+    expect(html.replace(/<[^>]+>/g, '')).toContain('const n = 1 // 说明')
+  })
+
+  it('不认识的语言原样输出，不插 span', async () => {
+    const html = await transformDocHtml('```mermaid\nflowchart TD\n  A --> B\n```\n')
+    expect(html).not.toContain('oe-hl-')
+  })
+
+  it('代码里的尖括号被转义，不会被当成标签', async () => {
+    const html = await transformDocHtml('```html\n<div class="a">x</div>\n```\n')
+    expect(html).toContain('&lt;')
+    expect(html).toContain('oe-hl-kw')
   })
 })
 

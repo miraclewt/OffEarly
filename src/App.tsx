@@ -37,6 +37,7 @@ import type {
   VaultRepository,
 } from './persistence/vaultRepository'
 import { VaultValidationError } from './domain/schema'
+import { CommandPalette } from './views/CommandPalette'
 import { ConflictDialog } from './views/ConflictDialog'
 import type { ConflictLabels } from './views/ConflictDialog'
 import { BoardView } from './views/BoardView'
@@ -373,6 +374,28 @@ function StartupScreen(props: {
  * 这两个按钮直接订阅 bus 的栈深通知（apply / undo / redo / clear 都会 emit），
  * 所以禁用态与快捷键永远一致，不存在"按钮亮着但按了没反应"。
  */
+/**
+ * T59 · 搜索浮层的挂载点。
+ *
+ * 为什么不直接在 App 里订阅：App 本身不订阅 vault（只有 Workspace 订阅），
+ * 而 hooks 不能写在 `session === null` 的条件里。拆一个只订阅 vault 的小组件，
+ * 既保住了 hooks 规则，也让浮层永远拿到最新一份任务与文档。
+ */
+function PaletteMount(props: {
+  store: VaultStore
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  t: (key: MsgKey, params?: TranslateParams) => string
+  onOpenTask: (id: string) => void
+  onOpenDoc: (notebookId: string, docId: string) => void
+  onSelectView: (view: 'board' | 'gantt' | 'mindmap' | 'notebook') => void
+  onOpenSettings: () => void
+  onOpenBackup: () => void
+}) {
+  const vault = useStore(props.store, (state) => state.vault)
+  return <CommandPalette {...props} vault={vault} />
+}
+
 function UndoRedo(props: { bus: CommandBus; t: (key: MsgKey, params?: TranslateParams) => string }) {
   const { bus, t } = props
   const undoDepth = useSyncExternalStore(bus.subscribe, bus.undoDepth, bus.undoDepth)
@@ -437,8 +460,10 @@ function Workspace(props: {
   noteAssets?: NoteAssetsPortHandle
   /** T50：当前界面语言（知识库导出文件用）。 */
   locale: 'zh' | 'en'
+  /** T59：全局搜索命中的文档，交给知识库自己去定位。 */
+  focusDoc?: { notebookId: string; docId: string; nonce: number } | null
 }) {
-  const { store, view, t, bus, onOpenMilestone, onOpenTask, noteAssets, locale } = props
+  const { store, view, t, bus, onOpenMilestone, onOpenTask, noteAssets, locale, focusDoc } = props
   const vault = useStore(store, (state) => state.vault)
   // spec §6.2：看板与甘特共用同一份筛选结果，切视图不丢条件
   const filter = useMemo<Filter>(() => vault.settings.lastFilter ?? createEmptyFilter(), [vault.settings.lastFilter])
@@ -503,6 +528,7 @@ function Workspace(props: {
             locale={locale}
             onOpenTask={onOpenTask}
             onOpenMilestone={onOpenMilestone}
+            focusDoc={focusDoc}
           />
         ) : view === 'gantt' ? (
           <GanttView
@@ -554,6 +580,9 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
   const [backupOpen, setBackupOpen] = useState(false)
   // T35 设置面板：受控开合（侧栏「设置」入口拉起，此前是 shell.panelPending 占位）。
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /** T59 · 全局搜索浮层；焦点目标用于「搜到文档后直接在那个笔记本里打开它」。 */
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [focusDoc, setFocusDoc] = useState<{ notebookId: string; docId: string; nonce: number } | null>(null)
 
   /** 会话事件出口：组件只显示，决定权留在这一层。 */
   const hooks = useMemo<SessionHooks>(
@@ -673,6 +702,21 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
       noteAssets.dispose()
     }
   }, [noteAssets])
+
+  // T59 · Ctrl/Cmd + K 打开全局搜索。只在已连接库时生效——
+  // 启动页 / 安全模式下没有可搜的内容，抢这个键只会让人困惑。
+  useEffect(() => {
+    if (phase.kind !== 'ready') return
+    function onKeyDown(event: KeyboardEvent): void {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return
+      event.preventDefault()
+      setPaletteOpen((open) => !open)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [phase.kind])
 
   // Ctrl+S / Cmd+S 立即落盘（spec 8.2）
   useEffect(() => {
@@ -930,6 +974,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           }}
           noteAssets={phase.noteAssets}
           locale={i18n.getLocale() === 'en' ? 'en' : 'zh'}
+          focusDoc={focusDoc}
         />
       )
       break
@@ -1190,6 +1235,26 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
               setMilestoneOpen(true)
             }
           }}
+        />
+      )}
+      {session === null ? null : (
+        <PaletteMount
+          store={session.store}
+          open={paletteOpen}
+          onOpenChange={setPaletteOpen}
+          t={t}
+          onOpenTask={(id) => {
+            setDrawerTaskId(id)
+            setDrawerOpen(true)
+          }}
+          onOpenDoc={(notebookId, docId) => {
+            setView('notebook')
+            // nonce 让「同一篇文档连搜两次」也能重新定位（视图可能已经挂着）
+            setFocusDoc({ notebookId, docId, nonce: Date.now() })
+          }}
+          onSelectView={setView}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenBackup={() => setBackupOpen(true)}
         />
       )}
       {session === null ? null : (

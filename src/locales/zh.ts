@@ -39,6 +39,9 @@ export const zh = {
   },
   board: {
     emptyColumn: '暂无任务',
+    // T64 追加：列头平均完成度的自述（只增不改）
+    columnRatio: '该列平均完成度 {n}%',
+    columnRatioEmpty: '该列暂无任务，完成度按空显示',
   },
   save: {
     saved: '已保存',
@@ -157,6 +160,7 @@ export const zh = {
     blockedHint: '有未完成的前置任务',
     blockedBy: '被 {n} 阻塞',
     noDependency: '无前置依赖',
+    updatedAt: '更新于 {date}',
     hasNote: '有笔记',
     progressRatio: '该列平均完成度',
     kind: {
@@ -207,6 +211,11 @@ export const zh = {
     sectionDates: '日期与进度',
     sectionDeps: '依赖关系',
     sectionNotes: '笔记',
+    archive: '归档任务',
+    archiveHint: '归档后不再出现在看板与甘特，筛选里勾「包含已归档」可找回。',
+    delete: '删除任务',
+    deleteConfirm: '确认删除',
+    deleteHint: '会连同它的依赖关系一起删除，撤销可恢复。',
     fieldStatus: '状态',
     fieldKind: '类别',
     fieldPriority: '优先级',
@@ -258,6 +267,15 @@ export const zh = {
     tagModeAny: '任一',
     tagModeAll: '全部',
     tagInputPlaceholder: '输入标签后回车',
+    // T62 追加：标签管理（只增不改，既有键一律不动）
+    tagManage: '管理',
+    tagManageDone: '完成',
+    tagEmpty: '还没有任何标签',
+    tagApply: '按此标签筛选',
+    tagRename: '改名',
+    tagRenamePlaceholder: '新名字，回车确认',
+    tagDelete: '删除',
+    tagDeleteConfirm: '确认删除',
     assignees: '负责人',
     assigneeInputPlaceholder: '输入负责人后回车',
     dateRange: '日期范围',
@@ -322,6 +340,8 @@ export const zh = {
     fontLarger: '放大字号',
     mermaidRendering: '正在绘制图表…',
     mermaidError: '图表语法有误',
+    mermaidCollapse: '收起源码',
+    mermaidExpand: '展开源码',
   },
 
   // T25 尾部追加：图片灯箱与附件提示（只增不改，既有键一律不动）
@@ -424,8 +444,32 @@ export const zh = {
   },
 
   // T49 尾部追加：知识库（笔记本 / 文档树 / 编辑区；只增不改，既有键一律不动）
+  palette: {
+    title: '搜索与跳转',
+    placeholder: '搜索任务、文档，或输入命令…',
+    hint: 'Ctrl K',
+    tasks: '任务',
+    docs: '文档',
+    commands: '命令',
+    taskMeta: '任务',
+    docMeta: '文档',
+    commandMeta: '命令',
+    empty: '没有匹配结果。试试更短的关键词。',
+    cmdBoard: '打开看板',
+    cmdGantt: '打开甘特图',
+    cmdMindmap: '打开思维导图',
+    cmdNotebook: '打开笔记本',
+    cmdSettings: '打开设置',
+    cmdBackup: '打开备份',
+  },
   notebook: {
     title: '笔记本',
+    outline: '大纲',
+    exportMarkdown: '导出为 Markdown（.md）',
+    outlineEmpty: '这篇还没有标题。用 # 起一行，大纲就会出现在这里。',
+    backlinks: '反向链接',
+    backlinksEmpty: '没有其它文档链接到这篇。',
+    moveHint: '拖拽可改父级与顺序，Alt + ↑↓ 换序',
     create: '新建笔记本',
     exists: '已有笔记本',
     untitled: '未命名笔记本',

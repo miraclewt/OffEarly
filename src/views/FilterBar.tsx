@@ -45,6 +45,7 @@ import type { CommandBus } from '../domain/commandBus'
 import type { VaultStore } from '../domain/store'
 import type { Filter } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
+import { applyDeleteTag, applyRenameTag, listTags } from '../controllers/tagActions'
 import { Icon } from './IconSprite'
 import { DateField } from './DateField'
 import { fs, sp, px } from '../styles/scale'
@@ -176,6 +177,11 @@ export function FilterBar(props: FilterBarProps) {
   const [textDraft, setTextDraft] = useState('')
   const [tagDraft, setTagDraft] = useState('')
   const [assigneeDraft, setAssigneeDraft] = useState('')
+  // T62 · 标签管理：面板内展开的标签清单 + 改名草稿 + 待确认删除的标签
+  const [tagManagerOpen, setTagManagerOpen] = useState(false)
+  const [renamingTag, setRenamingTag] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+  const [armedTag, setArmedTag] = useState<string | null>(null)
 
   const open = props.open ?? selfOpen
   // 库里为 null / 手改过的脏值时都先归一（跳数夹到 0–3、枚举外的值丢弃、重复项去重），
@@ -230,6 +236,9 @@ export function FilterBar(props: FilterBarProps) {
 
   const topicsById = useMemo(() => new Map(vault.topics.map((topic) => [topic.id, topic])), [vault.topics])
 
+  /** T62 · 全库标签清单（含使用次数）：标签管理的行源，与输入框候选共用同一份派生数据。 */
+  const allTags = useMemo(() => listTags(vault), [vault])
+
   if (!open) return null
 
   const activeCount = countActiveFilters(filter)
@@ -248,6 +257,45 @@ export function FilterBar(props: FilterBarProps) {
     if (value === '') return
     apply((current) => toggleAssignee(current, value))
     setAssigneeDraft('')
+  }
+
+  /**
+   * 标签改名：目标名已存在时后端就是「合并」，这里不二次询问（行内已写明）。
+   * 返回是否落库——空名字 / 同名都是 no-op，编辑态直接退出，不把用户困在输入框里。
+   */
+  function commitRename(from: string): boolean {
+    const ok = applyRenameTag(bus, store.getVault(), from, renameDraft)
+    setRenamingTag(null)
+    setRenameDraft('')
+    return ok
+  }
+
+  function commitDelete(tag: string): void {
+    applyDeleteTag(bus, store.getVault(), tag)
+    setArmedTag(null)
+    if (renamingTag === tag) setRenamingTag(null)
+  }
+
+  /** 行内小按钮：改名 / 删除共用一套形状，删除确认态换危险色。 */
+  function rowAction(testId: string, label: string, danger: boolean, onClick: () => void) {
+    return (
+      <button
+        type="button"
+        data-testid={testId}
+        onClick={onClick}
+        style={{
+          padding: px('0 4px'),
+          fontSize: fs(11),
+          color: danger ? 'var(--oe-overdue)' : MUTED,
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {label}
+      </button>
+    )
   }
 
   return (
@@ -341,6 +389,45 @@ export function FilterBar(props: FilterBarProps) {
             />
           </div>
 
+          {/* T61：「逾期 / 被阻塞 / 有笔记 / 含归档」四个开关置顶。
+              它们原本排在面板最底部，在 900 高的窗口里正好落在视口之外——
+              而「只看逾期」恰恰是打开筛选面板最常见的动机。 */}
+          <Section label={t('filterBar.flags')}>
+            <div style={ROW}>
+              <Chip
+                testId="filter-chip-overdue"
+                label={t('filterBar.overdue')}
+                active={filter.overdueOnly === true}
+                onClick={() => {
+                  apply((current) => toggleFlag(current, 'overdueOnly'))
+                }}
+              />
+              <Chip
+                testId="filter-chip-blocked"
+                label={t('filterBar.blocked')}
+                active={filter.blockedOnly === true}
+                onClick={() => {
+                  apply((current) => toggleFlag(current, 'blockedOnly'))
+                }}
+              />
+              <Chip
+                testId="filter-chip-with-notes"
+                label={t('filterBar.withNotes')}
+                active={filter.withNotesOnly === true}
+                onClick={() => {
+                  apply((current) => toggleFlag(current, 'withNotesOnly'))
+                }}
+              />
+              <Chip
+                testId="filter-chip-include-archived"
+                label={t('filterBar.includeArchived')}
+                active={filter.includeArchived === true}
+                onClick={() => {
+                  apply((current) => toggleFlag(current, 'includeArchived'))
+                }}
+              />
+            </div>
+          </Section>
           <Section label={t('filterBar.status')}>
             <div style={ROW}>
               {STATUS_VALUES.map((status) => (
@@ -439,6 +526,31 @@ export function FilterBar(props: FilterBarProps) {
                     {mode === 'any' ? t('filterBar.tagModeAny') : t('filterBar.tagModeAll')}
                   </button>
                 ))}
+                {/* T62：标签管理的入口。放在这个 Section 里而不是另开浮层——
+                    标签的「筛选」与「改名/删除」是同一件事的两个动作，分开做会让
+                    用户在两处之间来回看同一个清单。 */}
+                <button
+                  type="button"
+                  data-testid="filter-tag-manage"
+                  aria-pressed={tagManagerOpen}
+                  title={t('filterBar.tagManage')}
+                  onClick={() => {
+                    setTagManagerOpen(!tagManagerOpen)
+                    setRenamingTag(null)
+                    setArmedTag(null)
+                  }}
+                  style={{
+                    padding: px('0 6px'),
+                    fontSize: fs(11),
+                    color: tagManagerOpen ? ACCENT : MUTED,
+                    background: tagManagerOpen ? 'var(--oe-fill)' : 'transparent',
+                    border: `1px solid ${tagManagerOpen ? ACCENT : BORDER}`,
+                    borderRadius: 'var(--oe-radius-control)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {tagManagerOpen ? t('filterBar.tagManageDone') : t('filterBar.tagManage')}
+                </button>
               </span>
             }
           >
@@ -483,6 +595,104 @@ export function FilterBar(props: FilterBarProps) {
                     }}
                   />
                 ))}
+              </div>
+            ) : null}
+            {tagManagerOpen ? (
+              <div
+                data-testid="filter-tag-manager"
+                style={{
+                  marginTop: sp(6),
+                  paddingTop: sp(6),
+                  borderTop: `1px solid ${BORDER}`,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: sp(2),
+                }}
+              >
+                {allTags.length === 0 ? (
+                  <div data-testid="filter-tag-empty" style={{ fontSize: fs(11), color: MUTED }}>
+                    {t('filterBar.tagEmpty')}
+                  </div>
+                ) : (
+                  allTags.map((row) => (
+                    <div
+                      key={row.tag}
+                      data-testid="filter-tag-row"
+                      data-tag={row.tag}
+                      style={{ display: 'flex', alignItems: 'center', gap: sp(4), minHeight: sp(22) }}
+                    >
+                      {renamingTag === row.tag ? (
+                        <input
+                          data-testid="filter-tag-rename-input"
+                          aria-label={t('filterBar.tagRename')}
+                          placeholder={t('filterBar.tagRenamePlaceholder')}
+                          autoFocus
+                          value={renameDraft}
+                          onChange={(event) => {
+                            setRenameDraft(event.target.value)
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') commitRename(row.tag)
+                            if (event.key === 'Escape') {
+                              setRenamingTag(null)
+                              setRenameDraft('')
+                            }
+                          }}
+                          onBlur={() => {
+                            commitRename(row.tag)
+                          }}
+                          style={{ ...INPUT, flex: 1, minWidth: 0, padding: px('2px 5px') }}
+                        />
+                      ) : (
+                        <>
+                          {/* 点标签名 = 按它筛选：与上方候选 chip 同一动作，顺手 */}
+                          <button
+                            type="button"
+                            data-testid="filter-tag-apply"
+                            title={t('filterBar.tagApply')}
+                            onClick={() => {
+                              addTag(row.tag)
+                            }}
+                            style={{
+                              minWidth: 0,
+                              padding: 0,
+                              fontSize: fs(12),
+                              color: filter.tags.includes(row.tag) ? ACCENT : TEXT,
+                              background: 'transparent',
+                              border: 'none',
+                              cursor: 'pointer',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {row.tag}
+                          </button>
+                          <span style={{ fontSize: fs(11), color: MUTED }}>{row.count}</span>
+                          <span style={{ flex: 1 }} />
+                          {rowAction('filter-tag-rename', t('filterBar.tagRename'), false, () => {
+                            setRenamingTag(row.tag)
+                            setRenameDraft(row.tag)
+                            setArmedTag(null)
+                          })}
+                          {rowAction(
+                            'filter-tag-delete',
+                            armedTag === row.tag ? t('filterBar.tagDeleteConfirm') : t('filterBar.tagDelete'),
+                            armedTag === row.tag,
+                            () => {
+                              // 两段式：删除会从 N 个任务上抹掉标签，误点代价大（可撤销但不明显）
+                              if (armedTag === row.tag) commitDelete(row.tag)
+                              else {
+                                setArmedTag(row.tag)
+                                setRenamingTag(null)
+                              }
+                            },
+                          )}
+                        </>
+                      )}
+                    </div>
+                  ))
+                )}
               </div>
             ) : null}
           </Section>
@@ -586,42 +796,6 @@ export function FilterBar(props: FilterBarProps) {
             </div>
           </Section>
 
-          <Section label={t('filterBar.flags')}>
-            <div style={ROW}>
-              <Chip
-                testId="filter-chip-overdue"
-                label={t('filterBar.overdue')}
-                active={filter.overdueOnly === true}
-                onClick={() => {
-                  apply((current) => toggleFlag(current, 'overdueOnly'))
-                }}
-              />
-              <Chip
-                testId="filter-chip-blocked"
-                label={t('filterBar.blocked')}
-                active={filter.blockedOnly === true}
-                onClick={() => {
-                  apply((current) => toggleFlag(current, 'blockedOnly'))
-                }}
-              />
-              <Chip
-                testId="filter-chip-with-notes"
-                label={t('filterBar.withNotes')}
-                active={filter.withNotesOnly === true}
-                onClick={() => {
-                  apply((current) => toggleFlag(current, 'withNotesOnly'))
-                }}
-              />
-              <Chip
-                testId="filter-chip-include-archived"
-                label={t('filterBar.includeArchived')}
-                active={filter.includeArchived === true}
-                onClick={() => {
-                  apply((current) => toggleFlag(current, 'includeArchived'))
-                }}
-              />
-            </div>
-          </Section>
 
           <Section label={t('filterBar.hops')}>
             <div style={{ display: 'flex', alignItems: 'center', gap: sp(6) }}>

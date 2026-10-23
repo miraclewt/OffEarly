@@ -5,10 +5,29 @@
   "revision": 7,
   "updatedAt": "2026-10-15T09:40:00+08:00",
   "settings": {
-    "boardColumns": ["todo", "doing", "review", "done"],
+    "boardColumns": [
+      "todo",
+      "doing",
+      "review",
+      "done"
+    ],
     "calendar": {
-      "workdays": [1, 2, 3, 4, 5],
-      "holidays": ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07"],
+      "workdays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "holidays": [
+        "2026-10-01",
+        "2026-10-02",
+        "2026-10-03",
+        "2026-10-04",
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07"
+      ],
       "extraWorkdays": []
     },
     "ganttScale": "day",
@@ -17,11 +36,46 @@
     "lastFilter": null
   },
   "topics": [
-    { "id": "topic-pay", "name": "支付重构", "color": "#4F46E5", "parentId": null, "order": "V", "archived": false },
-    { "id": "topic-risk", "name": "风控模型", "color": "#059669", "parentId": null, "order": "W", "archived": false },
-    { "id": "topic-data", "name": "数据平台", "color": "#EA580C", "parentId": null, "order": "X", "archived": false },
-    { "id": "topic-data-etl", "name": "数据同步", "color": "#0891B2", "parentId": "topic-data", "order": "V", "archived": false },
-    { "id": "topic-report", "name": "季度汇报", "color": "#7C3AED", "parentId": null, "order": "Y", "archived": false }
+    {
+      "id": "topic-pay",
+      "name": "支付重构",
+      "color": "#4F46E5",
+      "parentId": null,
+      "order": "V",
+      "archived": false
+    },
+    {
+      "id": "topic-risk",
+      "name": "风控模型",
+      "color": "#059669",
+      "parentId": null,
+      "order": "W",
+      "archived": false
+    },
+    {
+      "id": "topic-data",
+      "name": "数据平台",
+      "color": "#EA580C",
+      "parentId": null,
+      "order": "X",
+      "archived": false
+    },
+    {
+      "id": "topic-data-etl",
+      "name": "数据同步",
+      "color": "#0891B2",
+      "parentId": "topic-data",
+      "order": "V",
+      "archived": false
+    },
+    {
+      "id": "topic-report",
+      "name": "季度汇报",
+      "color": "#7C3AED",
+      "parentId": null,
+      "order": "Y",
+      "archived": false
+    }
   ],
   "tasks": [
     {
@@ -36,9 +90,15 @@
       "due": "2026-10-20",
       "estimateHours": 32,
       "progress": 45,
-      "tags": ["核心链路", "支付"],
+      "tags": [
+        "核心链路",
+        "支付"
+      ],
       "note": "## 拆分\n\n- 收银台下单链路收敛到单一入口\n- 支付单状态机改成显式流转表\n- 失败态补齐可重试标记\n\n![迭代燃尽图](assets/asset-burndown.png)\n\n相关：[[支付对账文件解析]]\n",
-      "baseline": { "start": "2026-10-01", "due": "2026-10-16" },
+      "baseline": {
+        "start": "2026-10-01",
+        "due": "2026-10-16"
+      },
       "order": "V",
       "createdAt": "2026-09-28T10:12:00+08:00",
       "updatedAt": "2026-10-15T09:10:00+08:00",
@@ -55,7 +115,10 @@
       "due": "2026-10-30",
       "estimateHours": 20,
       "progress": 0,
-      "tags": ["支付", "对账"],
+      "tags": [
+        "支付",
+        "对账"
+      ],
       "note": "依赖下单流程重构后的支付单模型；等状态机定稿再动。\n",
       "order": "W",
       "createdAt": "2026-09-28T10:20:00+08:00",
@@ -74,7 +137,10 @@
       "due": "2026-10-12",
       "estimateHours": 12,
       "progress": 90,
-      "tags": ["支付", "回归"],
+      "tags": [
+        "支付",
+        "回归"
+      ],
       "note": "三个失败用例已修复，等测试同学复跑；已逾期，今天必须收口。\n",
       "order": "X",
       "createdAt": "2026-10-03T09:00:00+08:00",
@@ -93,7 +159,9 @@
       "due": "2026-10-05",
       "estimateHours": 16,
       "progress": 100,
-      "tags": ["性能"],
+      "tags": [
+        "性能"
+      ],
       "note": "单机 3200 TPS，P99 182ms，达到目标。\n",
       "order": "Y",
       "createdAt": "2026-09-18T14:00:00+08:00",
@@ -112,7 +180,10 @@
       "due": "2026-11-05",
       "estimateHours": 40,
       "progress": 30,
-      "tags": ["风控", "设计"],
+      "tags": [
+        "风控",
+        "设计"
+      ],
       "note": "特征口径先对齐指标平台，再谈实现。\n",
       "order": "Z",
       "createdAt": "2026-10-07T09:30:00+08:00",
@@ -130,7 +201,10 @@
       "due": "2026-10-14",
       "estimateHours": 8,
       "progress": 80,
-      "tags": ["风控", "评审"],
+      "tags": [
+        "风控",
+        "评审"
+      ],
       "note": "评审意见已回，剩两条待产品确认；已逾期。\n",
       "order": "a",
       "createdAt": "2026-10-01T11:00:00+08:00",
@@ -148,7 +222,10 @@
       "due": "2026-11-20",
       "estimateHours": 24,
       "progress": 0,
-      "tags": ["风控", "评估"],
+      "tags": [
+        "风控",
+        "评估"
+      ],
       "note": "等特征库 v2 冻结后跑同一批样本做对照。\n",
       "order": "b",
       "createdAt": "2026-10-07T09:35:00+08:00",
@@ -166,7 +243,10 @@
       "due": "2026-10-10",
       "estimateHours": 6,
       "progress": 100,
-      "tags": ["风控", "数据"],
+      "tags": [
+        "风控",
+        "数据"
+      ],
       "note": "空值率从 3.1% 降到 0.2%。\n",
       "order": "c",
       "createdAt": "2026-09-24T16:00:00+08:00",
@@ -185,7 +265,9 @@
       "due": "2026-10-31",
       "estimateHours": 36,
       "progress": 60,
-      "tags": ["数据平台"],
+      "tags": [
+        "数据平台"
+      ],
       "note": "调度器换成 DAG 声明式，错峰窗口待定。\n",
       "order": "d",
       "createdAt": "2026-10-08T09:00:00+08:00",
@@ -203,7 +285,10 @@
       "due": "2026-11-30",
       "estimateHours": 48,
       "progress": 0,
-      "tags": ["数据平台", "建模"],
+      "tags": [
+        "数据平台",
+        "建模"
+      ],
       "note": "分层口径要先和同步编排对齐，暂不动工。\n",
       "order": "e",
       "createdAt": "2026-10-08T09:10:00+08:00",
@@ -221,7 +306,10 @@
       "due": "2026-10-13",
       "estimateHours": 10,
       "progress": 75,
-      "tags": ["数据平台", "评审"],
+      "tags": [
+        "数据平台",
+        "评审"
+      ],
       "note": "GMV 口径争议未结，已逾期 2 天。\n",
       "order": "f",
       "createdAt": "2026-09-26T10:00:00+08:00",
@@ -240,7 +328,10 @@
       "due": "2026-10-08",
       "estimateHours": 24,
       "progress": 100,
-      "tags": ["数据平台", "上线"],
+      "tags": [
+        "数据平台",
+        "上线"
+      ],
       "note": "灰度一周无回滚，正式全量。\n",
       "order": "g",
       "createdAt": "2026-09-12T09:00:00+08:00",
@@ -258,7 +349,9 @@
       "due": "2026-11-15",
       "estimateHours": 8,
       "progress": 0,
-      "tags": ["数据同步"],
+      "tags": [
+        "数据同步"
+      ],
       "note": "大表同步避开整点，减少对线上库的冲击。\n",
       "order": "h",
       "createdAt": "2026-10-09T14:20:00+08:00",
@@ -273,7 +366,9 @@
       "kind": "doc",
       "priority": "P0",
       "progress": 0,
-      "tags": ["汇报"],
+      "tags": [
+        "汇报"
+      ],
       "note": "还没排期：等本季度指标口径评审结论出来再定框架。\n",
       "order": "i",
       "createdAt": "2026-10-12T10:00:00+08:00",
@@ -288,7 +383,9 @@
       "kind": "doc",
       "priority": "P2",
       "progress": 0,
-      "tags": ["汇报"],
+      "tags": [
+        "汇报"
+      ],
       "note": "还没排期：跟着汇报会一起落。\n",
       "order": "j",
       "createdAt": "2026-10-12T10:05:00+08:00",
@@ -325,13 +422,58 @@
     }
   ],
   "links": [
-    { "id": "link-01", "from": "task-pay-04", "to": "task-pay-01", "type": "FS", "lagDays": 0, "note": "压测结论进重构前的容量基线" },
-    { "id": "link-02", "from": "task-pay-01", "to": "task-pay-02", "type": "FS", "lagDays": 0, "note": "对账解析依赖新的支付单模型" },
-    { "id": "link-03", "from": "task-pay-03", "to": "task-pay-02", "type": "FS", "lagDays": 0 },
-    { "id": "link-04", "from": "task-risk-08", "to": "task-risk-05", "type": "SS", "lagDays": -2, "note": "清洗脚本先跑起来，特征库设计同步开工" },
-    { "id": "link-05", "from": "task-risk-05", "to": "task-risk-07", "type": "FS", "lagDays": 0 },
-    { "id": "link-06", "from": "task-data-12", "to": "task-data-09", "type": "FS", "lagDays": 2 },
-    { "id": "link-07", "from": "task-data-09", "to": "task-data-10", "type": "FS", "lagDays": 0 }
+    {
+      "id": "link-01",
+      "from": "task-pay-04",
+      "to": "task-pay-01",
+      "type": "FS",
+      "lagDays": 0,
+      "note": "压测结论进重构前的容量基线"
+    },
+    {
+      "id": "link-02",
+      "from": "task-pay-01",
+      "to": "task-pay-02",
+      "type": "FS",
+      "lagDays": 0,
+      "note": "对账解析依赖新的支付单模型"
+    },
+    {
+      "id": "link-03",
+      "from": "task-pay-03",
+      "to": "task-pay-02",
+      "type": "FS",
+      "lagDays": 0
+    },
+    {
+      "id": "link-04",
+      "from": "task-risk-08",
+      "to": "task-risk-05",
+      "type": "SS",
+      "lagDays": -2,
+      "note": "清洗脚本先跑起来，特征库设计同步开工"
+    },
+    {
+      "id": "link-05",
+      "from": "task-risk-05",
+      "to": "task-risk-07",
+      "type": "FS",
+      "lagDays": 0
+    },
+    {
+      "id": "link-06",
+      "from": "task-data-12",
+      "to": "task-data-09",
+      "type": "FS",
+      "lagDays": 2
+    },
+    {
+      "id": "link-07",
+      "from": "task-data-09",
+      "to": "task-data-10",
+      "type": "FS",
+      "lagDays": 0
+    }
   ],
   "assets": [
     {
@@ -341,5 +483,63 @@
       "createdAt": "2026-10-15T09:08:00+08:00"
     }
   ],
-  "mindmaps": []
+  "mindmaps": [],
+  "notebooks": [
+    {
+      "id": "nb-project",
+      "name": "项目沉淀",
+      "order": "U",
+      "createdAt": "2026-10-15T09:00:00+08:00",
+      "updatedAt": "2026-10-22T18:20:00+08:00"
+    },
+    {
+      "id": "nb-scratch",
+      "name": "随手记",
+      "order": "V",
+      "createdAt": "2026-10-15T09:00:00+08:00",
+      "updatedAt": "2026-10-22T18:20:00+08:00"
+    }
+  ],
+  "noteDocs": [
+    {
+      "id": "doc-meeting",
+      "notebookId": "nb-project",
+      "parentId": null,
+      "title": "支付重构周会纪要（2026-10-22）",
+      "content": "## 结论\n\n支付下载链路收敛到单一入口，对账文件解析顺延一天。财务确认口径后再动结算侧。\n\n## 待办\n\n- [x] 收银台下单链路收敛到单一入口\n- [ ] 失败态补齐可重试标记\n- [ ] 对账口径与财务确认\n\n## 依赖与影响\n\n| 上游 | 影响 | 负责人 |\n| --- | --- | --- |\n| 支付下载 | 文件格式变更，解析要同步改 | 待指派 |\n| 数仓分层 | 口径不一致会算错退款率 | 待指派 |\n\n## 链路\n\n```mermaid\ngraph LR\n  A[收银台] --> B[支付单]\n  B --> C[对账文件]\n  C --> D[结算]\n```\n\n![迭代燃尽图](assets/asset-burndown.png)\n\n相关任务：[[支付对账文件解析]]、[[支付下载流程重构]]。\n",
+      "order": "U",
+      "createdAt": "2026-10-15T09:00:00+08:00",
+      "updatedAt": "2026-10-22T18:20:00+08:00"
+    },
+    {
+      "id": "doc-alignment",
+      "notebookId": "nb-project",
+      "parentId": "doc-meeting",
+      "title": "接口对齐记录",
+      "content": "## 接口对齐记录\n\n与下游确认了三件事：字段顺序不动、失败码只在尾部追加、对账文件的空行由上游过滤。\n\n```ts\ntype ParseResult = { ok: true; rows: Row[] } | { ok: false; reason: string }\n```\n\n后续：等财务给出结算口径，再决定是否补一版回滚脚本。\n",
+      "order": "U",
+      "createdAt": "2026-10-15T09:00:00+08:00",
+      "updatedAt": "2026-10-22T18:20:00+08:00"
+    },
+    {
+      "id": "doc-fields",
+      "notebookId": "nb-project",
+      "parentId": "doc-meeting",
+      "title": "字段对照",
+      "content": "## 字段对照\n\n| 上游字段 | 含义 | 备注 |\n| --- | --- | --- |\n| tradeNo | 交易号 | 全局唯一 |\n| bizType | 业务类型 | 枚举值由上游维护 |\n",
+      "order": "V",
+      "createdAt": "2026-10-15T09:00:00+08:00",
+      "updatedAt": "2026-10-22T18:20:00+08:00"
+    },
+    {
+      "id": "doc-checklist",
+      "notebookId": "nb-scratch",
+      "parentId": null,
+      "title": "上线检查清单",
+      "content": "## 上线检查清单\n\n- [ ] 灰度名单确认\n- [ ] 回滚脚本演练过一次\n- [ ] 监控告警阈值已改\n- [ ] 值班人确认\n",
+      "order": "U",
+      "createdAt": "2026-10-15T09:00:00+08:00",
+      "updatedAt": "2026-10-22T18:20:00+08:00"
+    }
+  ]
 }

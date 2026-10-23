@@ -21,7 +21,7 @@ import {
 } from '../domain/commandBus'
 import type { CommandBus } from '../domain/commandBus'
 import { mid } from '../domain/lexorank'
-import { nextDocOrder } from '../domain/notebookTree'
+import { docSubtreeIds, isNoopDocMove, nextDocOrder, orderForPlacement } from '../domain/notebookTree'
 import type { NoteDoc, Notebook, Vault } from '../domain/types'
 
 /** 注入 id 生成与时钟，便于测试确定化。 */
@@ -154,5 +154,35 @@ export function applySaveDocContent(
 export function applyDeleteDoc(bus: CommandBus, vault: Vault, id: string): boolean {
   if (!vault.noteDocs.some((doc) => doc.id === id)) return false
   bus.apply(deleteNoteDocCommand(vault, id))
+  return true
+}
+
+/**
+ * T56 · 移动 / 换序：把 `id` 放到 `parentId` 下、紧挨 `beforeId` 之前（null = 末尾）。
+ *
+ * 三个前置判断都在入栈之前做完，非法落点静默返回 false 而不是抛错——拖拽是高频动作，
+ * 抛错会变成控制台噪音；而 patchNoteDocCommand 的构造期校验是最后一道闸。
+ */
+export function applyMoveDoc(
+  bus: CommandBus,
+  vault: Vault,
+  id: string,
+  target: { parentId: string | null; beforeId: string | null },
+  deps: NotebookActionDeps = {},
+): boolean {
+  const doc = vault.noteDocs.find((candidate) => candidate.id === id)
+  if (doc === undefined) return false
+  if (target.parentId !== null) {
+    const parent = vault.noteDocs.find((candidate) => candidate.id === target.parentId)
+    if (parent === undefined || parent.notebookId !== doc.notebookId) return false
+    // 不允许把一篇文档拖进自己的子树：命令层也会拦，但那会抛错
+    if (docSubtreeIds(vault.noteDocs, id).includes(parent.id)) return false
+  }
+  if (isNoopDocMove(vault.noteDocs, doc, target.parentId, target.beforeId)) return false
+  const order = orderForPlacement(vault.noteDocs, id, doc.notebookId, target.parentId, target.beforeId)
+  if (order === doc.order && target.parentId === doc.parentId) return false
+  bus.apply(
+    patchNoteDocCommand(vault, id, { parentId: target.parentId, order, updatedAt: stamp(deps) }),
+  )
   return true
 }

@@ -149,6 +149,18 @@ const ICON_GEOMETRY = {
     'M10.5 11 V17',
     'M13.5 11 V17',
   ],
+  /** T55 · 归档：带盖的收纳盒（与 trash 同族线宽，小尺寸下靠盖沿与竖线区分）。 */
+  archive: [
+    'M3.5 6.5 H20.5 V9.5 H3.5 Z',
+    'M5 9.5 V19 A1 1 0 0 0 6 20 H18 A1 1 0 0 0 19 19 V9.5',
+    'M9.8 13 H14.2',
+  ],
+  /** T58 · 大纲：三条递进缩进的横线（最左一档短、逐行右移）。 */
+  outline: [
+    'M4 6.5 H19',
+    'M7 12 H19',
+    'M10 17.5 H19',
+  ],
 } as const satisfies Record<string, readonly string[]>
 
 export type IconName = keyof typeof ICON_GEOMETRY

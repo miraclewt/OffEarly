@@ -40,7 +40,7 @@ import { TaskItem } from '@tiptap/extension-task-item'
 import { TaskList } from '@tiptap/extension-task-list'
 import { Markdown } from '@tiptap/markdown'
 import StarterKit from '@tiptap/starter-kit'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Plugin, PluginKey, Selection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
@@ -60,7 +60,8 @@ import type { AssetRejectReason } from '../persistence/assetStore'
 import { Icon } from './IconSprite'
 import type { IconName } from './IconSprite'
 import { Lightbox } from './Lightbox'
-import { mermaidBlockRefs, renderMermaidSvg, scopeSvgIds } from './mermaid'
+import { isMermaidLanguage, mermaidBlockRefs, normalizeMermaidCode, renderMermaidSvg, scopeSvgIds } from './mermaid'
+import { highlightCode, tokenClassNames } from '../domain/codeHighlight'
 import { NOTE_FONT_SIZE_DEFAULT, NOTE_FONT_SIZE_MAX, NOTE_FONT_SIZE_MIN } from '../domain/types'
 import { fs, sp, px } from '../styles/scale'
 
@@ -270,11 +271,16 @@ const NotePlaceholder = Extension.create<{ text: string }>({
 interface MermaidPreviewLabels {
   rendering: string
   error: string
+  /** T63：把源码围栏收起来 / 再展开（同一个按钮的两种文案）。 */
+  collapse: string
+  expand: string
 }
 
 const FALLBACK_MERMAID_LABELS: MermaidPreviewLabels = {
   rendering: 'Rendering diagram…',
   error: 'Diagram error',
+  collapse: 'Hide source',
+  expand: 'Show source',
 }
 
 /** 稳定但短的指纹：只用于 DOM 标记与 id 作用域，不参与渲染结果。 */
@@ -286,7 +292,12 @@ function shortHash(value: string): string {
   return (hash >>> 0).toString(36)
 }
 
-function createMermaidPreviewDom(code: string, labels: MermaidPreviewLabels): HTMLElement {
+function createMermaidPreviewDom(
+  code: string,
+  labels: MermaidPreviewLabels,
+  collapsed: boolean,
+  onToggle: () => void,
+): HTMLElement {
   const hash = shortHash(code)
   const host = document.createElement('div')
   host.className = 'oe-mermaid-preview'
@@ -294,6 +305,30 @@ function createMermaidPreviewDom(code: string, labels: MermaidPreviewLabels): HT
   host.setAttribute('data-mermaid-hash', hash)
   host.setAttribute('data-mermaid-state', 'pending')
   host.contentEditable = 'false'
+
+  // 标题行只有「mermaid」与一个收放按钮：源码收起来以后，这是唯一还告诉用户
+  // 「上面那段代码去哪了」的线索，所以它必须留在图上，而不是跟着代码块一起消失。
+  const head = document.createElement('div')
+  head.className = 'oe-mermaid-preview-head'
+  const title = document.createElement('span')
+  title.className = 'oe-mermaid-preview-title'
+  title.textContent = 'mermaid'
+  const toggle = document.createElement('button')
+  toggle.type = 'button'
+  toggle.className = 'oe-mermaid-preview-toggle'
+  toggle.setAttribute('data-testid', 'note-mermaid-toggle')
+  toggle.setAttribute('data-collapsed', collapsed ? 'true' : 'false')
+  toggle.textContent = collapsed ? labels.expand : labels.collapse
+  // 不拦 mousedown 的话，点按钮会先把选区挪到 widget 旁边（图会跳一下）
+  toggle.addEventListener('mousedown', (event) => {
+    event.preventDefault()
+  })
+  toggle.addEventListener('click', (event) => {
+    event.preventDefault()
+    onToggle()
+  })
+  head.append(title, toggle)
+  host.appendChild(head)
 
   const body = document.createElement('div')
   body.className = 'oe-mermaid-preview-body'
@@ -314,6 +349,27 @@ function createMermaidPreviewDom(code: string, labels: MermaidPreviewLabels): HT
   return host
 }
 
+/** 「把这段源码收起来」的集合：键是源码指纹，不是位置（位置每次编辑都会变）。 */
+const MERMAID_PREVIEW_KEY = new PluginKey<Set<string>>('mermaidPreview')
+interface MermaidCollapseMeta {
+  toggle: string
+}
+const NO_COLLAPSED: Set<string> = new Set()
+
+/**
+ * 光标是否**停在代码文本里**（= 收起状态该解除）。
+ *
+ * 只认 TextSelection：`Selection.near()` 落在块边界时会给出一个把整块框住的 NodeSelection
+ * （点击「收起源码」后选区通常就变成这个样子），把那种也算「在里面」的话，
+ * 收起会在下一个事务里被立刻撤销，按钮看起来完全没反应。
+ */
+function caretInsideBlock(selection: { from: number; to: number; empty: boolean }, pos: number, size: number): boolean {
+  if (!selection.empty) return false
+  const start = pos + 1
+  const end = pos + size - 1
+  return selection.from >= start && selection.from <= end
+}
+
 const MermaidPreview = Extension.create<{ labels: MermaidPreviewLabels }>({
   name: 'mermaidPreview',
   addOptions() {
@@ -321,24 +377,133 @@ const MermaidPreview = Extension.create<{ labels: MermaidPreviewLabels }>({
   },
   addProseMirrorPlugins() {
     const labels = this.options.labels
+    const key = MERMAID_PREVIEW_KEY
     return [
-      new Plugin({
-        key: new PluginKey('mermaidPreview'),
+      new Plugin<Set<string>>({
+        key,
+        state: {
+          init: () => NO_COLLAPSED,
+          apply: (tr, value, oldState, newState) => {
+            const meta = tr.getMeta(key) as MermaidCollapseMeta | undefined
+            let next = value
+            if (meta !== undefined) {
+              next = new Set(value)
+              if (next.has(meta.toggle)) next.delete(meta.toggle)
+              else next.add(meta.toggle)
+              // 这一步是「用户自己点的」→ 不再按光标位置纠偏：点按钮时光标通常就停在
+              // 那段代码里，若在同一事务里又把它展开，按钮会看起来完全没反应。
+              // 收起时手柄已把选区挪到块外（见 widget 的 onToggle），不会留下隐形光标。
+              return next
+            }
+            if (next.size === 0) return next
+            // 收起只是**显示**状态：光标一进去就必须还原，否则用户能看见光标却看不见字，
+            // 一敲键盘就在一段隐形文本里改内容——这是最不能接受的一种"顺手删代码"。
+            // 而且只在**光标刚进入**时展开：如果只看「当前光标在不在块里」，那么
+            // 「光标本来就在这段代码上、用户去点收起」这个最常见的操作会被下一个事务立刻撤销
+            // （点完按钮浏览器还会补一个选区事务），按钮看起来完全没反应。
+            const entered: string[] = []
+            newState.doc.descendants((node, pos) => {
+              if (node.type.name !== 'codeBlock') return true
+              if (!isMermaidLanguage(node.attrs.language)) return true
+              const hash = shortHash(normalizeMermaidCode(node.textContent))
+              if (!next.has(hash)) return true
+              const wasInside = caretInsideBlock(oldState.selection, pos, node.nodeSize)
+              const isInside = caretInsideBlock(newState.selection, pos, node.nodeSize)
+              // 只看「光标刚进入」：块在文档末尾时挪不出去，光标会留在块内，
+              // 那种情况由**内容指纹**兜底——收起状态是按源码文本记录的，
+              // 一旦在里面改动，指纹就变了，这段代码自动恢复显示（不需要额外判断）。
+              if (isInside && !wasInside) entered.push(hash)
+              return true
+            })
+            if (entered.length === 0) return next
+            const pruned = new Set(next)
+            for (const hash of entered) pruned.delete(hash)
+            return pruned
+          },
+        },
         props: {
           decorations: (state) => {
             const refs = mermaidBlockRefs(state.doc)
             if (refs.length === 0) return null
-            return DecorationSet.create(
-              state.doc,
-              refs.map((ref) =>
-                Decoration.widget(ref.after, () => createMermaidPreviewDom(ref.code, labels), {
-                  side: 1,
-                  // 图的预览不该影响光标：点它不移动选区、方向键也不停在它上面
-                  ignoreSelection: true,
-                  key: `mermaid-${ref.after}-${shortHash(ref.code)}`,
-                }),
-              ),
-            )
+            const collapsed = key.getState(state) ?? NO_COLLAPSED
+            const decorations: Decoration[] = []
+            for (const ref of refs) {
+              const hash = shortHash(ref.code)
+              const isCollapsed = collapsed.has(hash)
+              if (isCollapsed) {
+                // 节点级装饰：`display:none` 由 CSS 给（见 theme.css），
+                // 这里只负责「这段源码现在不显示」这一个事实。
+                decorations.push(
+                  Decoration.node(ref.pos, ref.after, {
+                    class: 'oe-mermaid-src-collapsed',
+                    'data-mermaid-collapsed': 'true',
+                  }),
+                )
+              }
+              decorations.push(
+                Decoration.widget(
+                  ref.after,
+                  (view) =>
+                    createMermaidPreviewDom(ref.code, labels, isCollapsed, () => {
+                      const tr = view.state.tr.setMeta(key, { toggle: hash } satisfies MermaidCollapseMeta)
+                      // 收起时把光标挪到块外：否则它停在一段已经不显示的文本上，
+                      // 一敲键盘就是在改看不见的内容。块后面没有内容时不硬挪——
+                      // 硬挪只能落到块左侧或整块选中，两种都比"光标停在原地"更糟；
+                      // 那种情况由「一敲键盘就展开」兜底（见 apply 里的 docChanged 判断）。
+                      if (!isCollapsed && ref.after < view.state.doc.content.size) {
+                        tr.setSelection(Selection.near(view.state.doc.resolve(ref.after), 1))
+                      }
+                      view.dispatch(tr)
+                    }),
+                  {
+                    // 图的预览不该影响光标：点它不移动选区、方向键也不停在它上面
+                    ignoreSelection: true,
+                    // 收起态要换按钮文案 → key 里带上状态，事务重建时才真的换一副 DOM
+                    key: `mermaid-${ref.after}-${hash}-${isCollapsed ? 'c' : 'o'}`,
+                  },
+                ),
+              )
+            }
+            return DecorationSet.create(state.doc, decorations)
+          },
+        },
+      }),
+    ]
+  },
+})
+
+/**
+ * T63 · 代码块着色：把 `highlightCode()` 切出来的区间挂成 inline decoration。
+ *
+ * 为什么不改 renderHTML：代码块的内容必须是**纯文本节点**，光标才能逐字移动、
+ * markdown 才能原样写回。着色只能是「叠在文字上的样式」，一旦改成真 span，
+ * 每次按键都要重建 DOM，选区与输入法都会跟着坏。
+ *
+ * 逐键重算的成本由 highlightCode 内部的一层缓存兜住（同一段代码不重复扫描）。
+ */
+const SyntaxHighlight = Extension.create({
+  name: 'syntaxHighlight',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('syntaxHighlight'),
+        props: {
+          decorations: (state) => {
+            const decorations: Decoration[] = []
+            state.doc.descendants((node, pos) => {
+              if (node.type.name !== 'codeBlock') return true
+              const language = typeof node.attrs.language === 'string' ? node.attrs.language : null
+              const tokens = highlightCode(node.textContent, language)
+              if (tokens.length === 0) return true
+              const base = pos + 1
+              for (const token of tokens) {
+                decorations.push(
+                  Decoration.inline(base + token.from, base + token.to, { class: tokenClassNames(token.cls) }),
+                )
+              }
+              return true
+            })
+            return decorations.length === 0 ? null : DecorationSet.create(state.doc, decorations)
           },
         },
       }),
@@ -836,6 +1001,7 @@ export function createNoteExtensions(
       // 快捷语法 `# `（Obsidian 习惯）与既有笔记里的 `# 标题` 都要能原样往返，收窄 levels 会直接丢内容。
     }),
     SafeCodeBlock,
+    SyntaxHighlight,
     Markdown,
     TaskList,
     TaskItem.configure({ nested: true }),
@@ -1043,6 +1209,8 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
     mermaidLabelsRef.current = {
       rendering: t('noteEditor.mermaidRendering'),
       error: t('noteEditor.mermaidError'),
+      collapse: t('noteEditor.mermaidCollapse'),
+      expand: t('noteEditor.mermaidExpand'),
     }
   }
   const minHeight = props.minHeight ?? 200

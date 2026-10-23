@@ -19,7 +19,7 @@ import {
 import type { CommandBus } from '../../src/domain/commandBus'
 import { createVaultStore } from '../../src/domain/store'
 import type { VaultStore } from '../../src/domain/store'
-import type { MindMap, MindNode, Task, Vault } from '../../src/domain/types'
+import type { Dependency, MindMap, MindNode, Task, Vault } from '../../src/domain/types'
 import { createAutosave } from '../../src/persistence/autosave'
 import { createNewVault } from '../../src/persistence/vaultRepository'
 
@@ -195,6 +195,27 @@ describe('undo / redo', () => {
     bus.undo()
 
     expect(store.getVault().tasks.map((t) => t.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('删除任务连带摘掉两端依赖，undo 把任务与依赖都放回原位', () => {
+    const first: Dependency = { id: 'l1', from: 'a', to: 'b', type: 'FS', lagDays: 0 }
+    const second: Dependency = { id: 'l2', from: 'b', to: 'c', type: 'SS', lagDays: 1 }
+    const untouched: Dependency = { id: 'l3', from: 'a', to: 'c', type: 'FS', lagDays: 0 }
+    store.update((current) => ({ ...current, links: [first, second, untouched] }))
+    const before = structuredClone(store.getVault())
+
+    bus.apply(deleteTaskCommand(before, 'b'))
+
+    expect(store.getVault().tasks.map((t) => t.id)).toEqual(['a', 'c'])
+    // 两端指向 b 的两条都要走，只剩 a→c 那条无关的
+    expect(store.getVault().links.map((link) => link.id)).toEqual(['l3'])
+
+    bus.undo()
+
+    expect(store.getVault().tasks.map((t) => t.id)).toEqual(['a', 'b', 'c'])
+    // 下标也要还原：l1 与 l2 各自回到原位，不是追加到尾部
+    expect(store.getVault().links.map((link) => link.id)).toEqual(['l1', 'l2', 'l3'])
+    expect(store.getVault()).toEqual(before)
   })
 })
 
