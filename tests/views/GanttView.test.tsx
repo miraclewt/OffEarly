@@ -704,3 +704,48 @@ function bigVault(count: number): Vault {
 
   return makeVault(tasks, [{ id: 'm-cross-big', topicId: null, title: '跨话题里程碑', date: '2026-03-10', done: false }], links)
 }
+
+/**
+ * T52（QA 巡检后的修复）：首屏带「今天」进视野，并留一个回到今天的入口。
+ *
+ * 首屏自动居中发生在画布侧（clientsWidth 为 0 的 jsdom 里自然不生效），
+ * 这里验的是按钮那条路：点一次就真的把 scrollLeft 写了一个正数（今天在视野中间），
+ * 且不动刻度 / 缩放（回到今天不该顺带改变用户选的视图）。
+ */
+describe('T52 · 回到今天', () => {
+  it('工具栏按钮把今天滚到视野中间，且不改刻度与缩放', () => {
+    const { getByTestId } = renderGantt()
+
+    const button = getByTestId('gantt-today-jump')
+    expect(button.getAttribute('aria-label')).toBe('回到今天')
+
+    const scroll = getByTestId('gantt-canvas-scroll') as HTMLDivElement
+    let written: number | null = null
+    Object.defineProperty(scroll, 'clientWidth', { value: 400, configurable: true })
+    Object.defineProperty(scroll, 'scrollLeft', {
+      configurable: true,
+      get: () => written ?? 0,
+      set: (value: number) => {
+        written = value
+      },
+    })
+
+    const view = getByTestId('gantt-view')
+    const scaleBefore = view.getAttribute('data-scale')
+    const zoomBefore = view.getAttribute('data-zoom')
+
+    fireEvent.click(button)
+
+    // 2026-10-15 在 10 月范围里大致居中：偏移必须为正，且小于「今天位置本身」
+    expect(written).not.toBeNull()
+    expect(written as unknown as number).toBeGreaterThan(0)
+    expect(view.getAttribute('data-scale')).toBe(scaleBefore)
+    expect(view.getAttribute('data-zoom')).toBe(zoomBefore)
+
+    // 连点两次各自生效（用单调计数而不是布尔量，正是为了这一条）
+    const first = written as unknown as number
+    Object.defineProperty(scroll, 'clientWidth', { value: 600, configurable: true })
+    fireEvent.click(button)
+    expect(written as unknown as number).toBeLessThan(first)
+  })
+})

@@ -320,3 +320,38 @@ describe('T28-4 · 导入（文件 / 文件夹 → 预览 → 二次确认）', 
     expect((screen.getByTestId('backup-import-dir') as HTMLButtonElement).disabled).toBe(true)
   })
 })
+
+/**
+ * T52（QA 巡检后的修复）：Esc 关闭 + 文案可覆盖。
+ *
+ * 设置 / 筛选 / 里程碑三个面板都能按 Esc 退出，备份面板此前只能点 × 或遮罩——
+ * 同一个应用里四个同款浮层三种退出方式，是纯粹的不一致。
+ */
+describe('T52 · Esc 关闭与文案覆盖', () => {
+  it('Esc 请求关闭（只在受控且有 onOpenChange 时生效）', () => {
+    const onOpenChange = vi.fn()
+    setup({ onOpenChange, open: true })
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('未受控（没有 onOpenChange）时 Esc 不做事，也不抛错', () => {
+    setup({})
+    expect(() => fireEvent.keyDown(window, { key: 'Escape' })).not.toThrow()
+  })
+
+  it('label 覆盖生效：英文文案替换掉中文兜底', () => {
+    setup({ labels: { title: 'Backup & cleanup', snapshotNow: 'Snapshot now' } })
+    const panel = screen.getByTestId('backup-panel')
+    expect(panel.textContent).toContain('Backup & cleanup')
+    expect(panel.textContent).toContain('Snapshot now')
+    expect(panel.textContent).not.toContain('备份与清理')
+  })
+
+  it('收起（open=false）不渲染面板，展开后 hook 数量一致（不抛 Rendered more hooks）', () => {
+    const { rerender } = render(<BackupPanel open={false} gc={makePort()} />)
+    expect(screen.queryByTestId('backup-panel')).toBeNull()
+    expect(() => rerender(<BackupPanel open gc={makePort()} />)).not.toThrow()
+    expect(screen.getByTestId('backup-panel')).toBeTruthy()
+  })
+})

@@ -30,6 +30,17 @@ const COLOR: Record<SaveState, string> = {
 export function SaveIndicator(props: {
   autosave: SaveIndicatorSource
   t: (key: MsgKey) => string
+  /**
+   * 测试锚点，默认 `save-indicator`（顶栏那一处）。
+   * 任务弹窗里也挂了一个同类指示（T52），必须换一个名字——同一份 DOM 里出现两个
+   * `save-indicator` 会让所有「等保存收敛」的 e2e 断言变成 strict mode 冲突。
+   */
+  testId?: string
+  /**
+   * 是否作为 live region 播报。顶栏常驻那处是 true；弹窗里的副本传 false ——
+   * 同一状态两处播报等于对读屏用户重复念一遍。
+   */
+  live?: boolean
   style?: CSSProperties
 }) {
   const { autosave, t } = props
@@ -37,8 +48,8 @@ export function SaveIndicator(props: {
 
   return (
     <div
-      role="status"
-      data-testid="save-indicator"
+      role={props.live === false ? undefined : 'status'}
+      data-testid={props.testId ?? 'save-indicator'}
       data-state={state}
       style={{
         display: 'flex',

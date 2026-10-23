@@ -126,6 +126,9 @@ export function GanttView(props: GanttViewProps) {
   // T23：导出入口状态。默认「仅可见区 + PNG」；pngSupported 为 null 表示探针还在跑。
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
 
+  // T52：「回到今天」的触发计数（首屏自动居中在画布侧做，这里只管按钮）
+  const [jumpToTodayNonce, setJumpToTodayNonce] = useState(0)
+
   // T23 收尾：导出弹层的 Esc / 点击外部关闭（此前只有「取消」与再点按钮切换两条出路）。
   // mousedown 判「不在弹层容器内」——按钮本身在容器内，再点按钮仍走既有 toggle，不受影响。
   const exportMenuRef = useRef<HTMLDivElement | null>(null)
@@ -439,6 +442,19 @@ export function GanttView(props: GanttViewProps) {
           <Icon name="zoom-in" />
         </button>
 
+        {/* T52：「回到今天」。首屏已自动滚到今天，但用户横向滚远之后没有回去的路——
+            时间范围跨两三个月时，靠拖滚动条找回今天并不现实。 */}
+        <button
+          type="button"
+          data-testid="gantt-today-jump"
+          aria-label={t('gantt.todayJump')}
+          title={t('gantt.todayJump')}
+          onClick={() => setJumpToTodayNonce((nonce) => nonce + 1)}
+          style={{ ...iconButtonStyle, marginLeft: sp(6), color: INDIGO }}
+        >
+          <Icon name="calendar" />
+        </button>
+
         <span style={{ flex: 1, minWidth: sp(8) }} />
 
         <label
@@ -618,6 +634,7 @@ export function GanttView(props: GanttViewProps) {
           t={t}
           onScroll={handleScroll}
           onZoomWheel={handleZoomWheel}
+          jumpToTodayNonce={jumpToTodayNonce}
         />
 
         {/* T22：未排期侧栏（spec 5.4）——挂在画布右侧，数据取 model.unscheduled（与 rows 同源、随 filter 收缩） */}

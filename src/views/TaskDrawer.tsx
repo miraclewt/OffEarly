@@ -747,7 +747,9 @@ export function TaskDrawer(props: TaskDrawerProps) {
           }}
         >
           <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: sp(8) }}>
-            {props.autosave === undefined ? null : <SaveIndicator autosave={props.autosave} t={t} />}
+            {props.autosave === undefined ? null : (
+              <SaveIndicator autosave={props.autosave} t={t} testId="drawer-save-indicator" live={false} />
+            )}
           </span>
           <span style={{ fontSize: fs(13), fontWeight: 650, color: TEXT }}>{t('drawer.title')}</span>
           <span style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>

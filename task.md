@@ -174,6 +174,9 @@ tests/**                         与 src 镜像
 ### Phase 12 · 知识库两栏折叠（T51；用户新增需求）
 - [x] **T51** 知识库左两栏（笔记本 / 文档树）可折叠：收起只留 30px 竖轨、竖轨本身是展开入口，正文可占满整宽（纯 UI 态，不写库、不进撤销栈） → done (2026-10-22, workbuddy:sess-1022d, commit: "T51: collapsible notebook and doc-tree panes in the knowledge base")
 
+### Phase 13 · 全面 QA 巡检与修复（T52；用户要求「当测试工程师全面细致测一遍」→「根据测试结果完成修复」）
+- [x] **T52** 11 项体验缺陷修复：撤销/重做入口（顶栏按钮 + 全局快捷键，跳过编辑区）、1024 宽下卡片 meta 挤碎、甘特首屏看不到今天、备份面板英文界面全中文、备份面板 Esc、任务弹窗内无保存指示、话题右键菜单 Esc 与视口钳制、800 宽布局压碎、空库引导不可点、话题树键盘不可达（其中「日期格式不统一」按原生控件特性判为不改） → done (2026-10-23, workbuddy:sess-1023a, commit: "T52: fix the 11 findings from the QA sweep")
+
 ---
 
 ## 任务明细
@@ -1229,6 +1232,37 @@ tests/**                         与 src 镜像
 
 ---
 
+### T52 · 全面 QA 巡检发现的 11 项体验缺陷修复
+
+**背景：** 用户要求「假设你是一位测试工程师，对当前这个应用进行全面细致的测试，包括各个小细节，确保使用流畅，不影响用户体验」，随后要求「根据测试结果，完成修复」。巡检报告在 `docs/qa-report.md`：自动化基线（`tsc` / 1063 单测 / build 10/10 / e2e 46 passed）全绿，问题全部落在自动化覆盖不到的「手感」层——2 项 P1、4 项 P2、5 项 P3。
+
+**依赖：** T10（`CommandBus` 的 undo/redo 栈与 `guardCommandBus` 透传的 `canUndo/canRedo`）/ T40（`fs()/sp()` 尺度层，最小宽度与容器查询都要吃尺度）/ T28（备份面板与它的 `labels` 覆盖位）/ T49（知识库同理）/ 无数据格式改动
+
+**产出：** 改 `src/App.tsx`（`UndoRedo` 组件 + 全局快捷键 + 最小宽度 + 备份面板 labels 接线 + 空库建话题）、`src/views/{TaskCard,BoardView,BackupPanel,GanttCanvas,GanttView,SaveIndicator,TaskDrawer,TopicSidebar}.tsx`、`src/styles/theme.css`（卡片容器查询）、`src/locales/{zh,en}.ts`（`backupPanel.*` 36 键 + `undoRedo.*` 4 键 + `boardGuide.*` 4 键 + `gantt.todayJump`）；测试：`tests/App.test.tsx`（+2）、`tests/views/{BackupPanel(+4),BoardView(+2),GanttView(+1),TopicSidebar(+4)}.test.tsx`，`e2e/{04-gantt,07-create-task-settings}.spec.ts` 按新口径改写
+
+**验收标准：**
+- [x] 撤销 / 重做有可见入口，且与快捷键共用同一条栈：顶栏两个按钮随栈深亮灭，`Ctrl+Z` / `Ctrl+Shift+Z` / `Ctrl+Y` 生效
+- [x] 输入框与 contenteditable 内的 `Ctrl+Z` 不抢（笔记正文有自己的历史栈）；任务弹窗打开时让位给它（它要先提交标题草稿）
+- [x] 1024 宽下卡片第二行不再挤碎：话题名省略号、到期日完整、chip 在窄卡下隐藏、卡片高度不因文案变化
+- [x] 甘特打开就能看到今天与主力任务条；切日/周刻度保持左边缘那天不变；工具栏有「回到今天」
+- [x] 备份面板在英文界面全英文；Esc 能关；弹窗内的保存指示可见且不重复播报
+- [x] 话题右键菜单 Esc 可关、贴边不出界；话题树纯键盘可用（↑↓←→ / Home / End / Enter / Space，整棵树一个 Tab 停靠点）
+- [x] 800 宽不再压碎布局（改为横向滚动）；空库看板顶部有可点的「新建话题」
+- [x] `tsc` 0 / `npm test` **1076 passed（59 files）** / `npm run e2e` **46 passed + 1 skipped** / `npm run build` **10/10**（6,362,499 字节）
+
+**实施注记（T52）**
+1. **撤销入口是「功能都在、只差按钮」**：栈、`canUndo/canRedo`、`guardCommandBus` 的透传全都现成，缺的只是顶栏两个按钮 + 一个全局 keydown。跳过编辑区这一条最关键——否则用户在笔记里撤销刚打的字，会变成撤销十分钟前的拖拽。
+2. **卡片 meta 行用容器查询而不是媒体查询**：卡片宽度由列宽决定，与视口宽没有线性关系（1440 下 244px、1024 下 172px）。所以 `theme.css` 里给 `.oe-card` 加 `container-type: inline-size`，窄卡时 `@container (max-width: 188px)` 先舍掉类别 chip。
+3. **甘特首屏居中只做一次**：`todayCenteredRef` 保证之后滚动位置归用户；`clientWidth` 为 0（jsdom）时不动，留给下一帧。切刻度另有一条「按左边缘日期落回」的规则，否则日→周会跳到半个月外。
+4. **备份面板的早退位置是个真 bug**：`if (open === false) return null` 原本在 `useState` 之前，收起→展开会让 hook 数量从 0 变 12。生产构建侥幸不炸（React 只在 dev 抛错），开发构建必崩。已移到所有 hook 之后，并给快照加载 effect 加 `shown` 守卫。
+5. **弹窗内保存指示要换 testid**：同屏出现两个 `save-indicator` 会让所有「等保存收敛」的 e2e 撞 strict mode（`waitSaved` 就是这么炸的）。顶栏保持原名，弹窗用 `drawer-save-indicator` 且不重复播报。
+6. **最小宽度是「不压碎」而不是「支持窄窗」**：1024 是实测最后一档还能读的宽度；再窄就横向滚。真正的窄屏单列策略是另一个任务。
+7. **F10（日期格式）判为不改**：差异来自原生 `<input type="date">` 按浏览器区域设置渲染，页面 `lang` 改不动；统一只能自造日期选择器，风险远大于收益。
+
+**预估：** 0.5d（实际：同日完成，含真浏览器逐项核对与截图）
+
+---
+
 ## 完成记录（只追加）
 
 <!-- 格式：
@@ -1348,3 +1382,5 @@ tests/**                         与 src 镜像
 - [2026-10-22] T50 | agent: workbuddy:sess-1022c | commit: "T50: notebook export, adjustable note font size and inline mermaid rendering" | 验收: 15/15 全部勾选（截图核对两轮，首轮抓到 mermaid 全图变黑的真 bug，见备注 ①） | 备注: ①**最难的一处：SVG 的 id 作用域不只是 id**。mermaid 把节点配色写在 `<style>` 的 `#<svgid> .node rect{fill:…}` 选择器上，而同一段代码在缓存命中时会被复用、插到文档两处。最初只重写 `id="…"` / `url(#…)` / `href="#…"`，结果 CSS 选择器全部失配 → 节点退回 `<rect>` 的浏览器默认样式（纯黑填充），整张流程图变成一团黑块与黑三角（截图才看出来）。修法是四处一起改，且 CSS 那条用「`#id` 后不能紧跟标识符字符」的负向断言，否则短 id 会吃掉长 id 的前缀（`#a` 命中 `#a-arrow`）；单测用「颜色值 `#eef0ff` 不许被当 id 改写」钉住。②**体积是唯一躲不开的取舍**：mermaid 12.2.0 进包后产物 1,196,672 → **6,347,769 字节**，`verify-bundle` 上限因此 1.6MB → 8MB，并在脚本里写清理由；库内四个新主机（`www.eclipse.org` 是 ELK 的 XML 命名空间标识符、chevrotain / langium / wikipedia 是解析器报错文案里的文档链接）逐条在产物里复核上下文后进白名单。③**图必须是装饰不能是节点**：存 ` ```mermaid ` 围栏 → Obsidian / Typora / 导出都能原样读走；`Decoration.widget` 挂在代码块之后，代码照旧可编辑（换自定义 atom 节点会把"改一行看效果"变远）。引擎用动态 import，没写过 mermaid 的库首屏不初始化。④**导出必须取编辑器而不是 vault**：编辑器有 400ms debounce，打完字立刻点导出，vault 里还是上一版——`NotebookView` 存编辑器句柄，导出优先 `editor.getMarkdown()`。这是"导出的和屏幕上不一样"的根因。⑤**图片宽度在导出文件里会失效**：`<img width="62%">` 的百分比被浏览器当非法值丢弃（width 属性只认像素），导出前改写成 `style="width:62%"`，否则所有手动缩放过的大图变回原尺寸。⑥**mermaid 源码被 HTML 转义**：`A --> B` 序列化成 `A --&gt; B`，直接喂引擎必解析失败，导出侧先还原实体（单测用箭头图钉住）。⑦**字号是两个旋钮之一**：`--oe-ui-scale`（T40）管高分屏整体放大，`--oe-note-font-size` 管正文想看多大，两者相乘互不覆盖；离散档位而非连续滑块——行高 / 图片限高 / 虚拟化都依赖确定像素。schema 用 `catch + clamp` 而非 min/max：一个坏字号不该让整个库打不开。⑧**标题重复是导出特有的问题**：编辑器里「标题输入框 + 正文 H1」并排有意义，导出后页头已经写着标题，再来一行同名特大号字就是重复（首轮截图很显眼）→ `stripLeadingHeading()` 只剥开篇那一处且必须完全相同（正文中间的同名 H1 是章节分隔，动它就是改内容）。⑨**PDF 走浏览器打印而不是引库**：`window.open` 会被弹窗拦截且用户看到"还没打开完就弹打印"的空页，改用隐藏 iframe 同步写入再 `print()`，`afterprint` + 定时器摘掉；打印样式含 A4 边距与「图表不跨页断开」。⑩**导出菜单的 backdrop 必须 `onMouseDown`**：与 T49 的抽屉语义一致（`onClick` 会在拖选正文后误关菜单） | 越界改动: ①`schema.ts` / `types.ts` 给 Settings 增 `noteFontSize`（旧库缺键补 13，schemaVersion 不升、不注册迁移），25 个测试文件的 26 处夹具随之补 `noteFontSize: 13`；②`App.tsx` 的 `Workspace` 增 `locale` prop 并下传 `NotebookView`（导出文件的 `<html lang>` 与页脚文案）；③`TaskDrawer.tsx` 增字号接线（同一个编辑器共用同一个设置值，不给它留"另一个字号"）；④`package.json` / `package-lock.json` 新增 `mermaid@12.2.0`（+115 个传递依赖），`scripts/verify-bundle.mjs` 调整体积上限与白名单；⑤新增 `docs/t50-notebook-mermaid.png`、`docs/t50-notebook-export.png`（真 Chromium 截图，2x）；⑥`e2e/10-notebook.spec.ts` 追加 4 条（mermaid 渲染 / 语法错误 / 字号落盘重开 / 导出下载），临时截图脚本用完即删、未入库 | 遗留: ①mermaid 图**不能点击放大到灯箱**（当前按正文宽度显示、超宽横向滚动），大图只能靠浏览器缩放；②图内字号固定 13px，不跟随正文字号设置；③渲染在主线程（首次 ~200ms、命中缓存后几乎为 0），没有 Worker，超大图（数百节点）会有一次可感知的停顿；④导出只有 HTML 与「打印/另存为 PDF」，没有 `.docx`（需引转换库且表格/任务列表/mermaid 会走形）与单篇 `.md`（迁移格式，不是成品）；⑤PDF 依赖用户在打印对话框里选"另存为 PDF"，没有直接产出 PDF 二进制的管线；⑥整本导出的目录只有按树缩进的一层列表，没有多级编号与锚点回链；⑦图内字体不随 `--oe-ui-scale` 之外的导出上下文变化（导出文件固定 15px 正文基准） | 全量验证: `tsc` 0 / `npm test` **1060 passed (59 files)**（基线 1018 + 本任务 42：mermaid 15 + 导出 17 + 字号控件 4 + settings 4 + 知识库视图 2）/ `npm run e2e` **45 passed + 1 skipped**（+4：mermaid 渲染、语法错误保留代码、字号落盘并重开仍在、导出下载自包含 HTML）/ `npm run build` **10/10**（产物 **6347769 字节**，上限 8388608，余量约 1.95MB）
 
 - [2026-10-22] T51 | agent: workbuddy:sess-1022d | commit: "T51: collapsible notebook and doc-tree panes in the knowledge base" | 验收: 7/7 全部勾选（真实布局用量宽断言钉住，不是看截图猜） | 备注: ①**先问清「折叠什么」再动手**：这句话有三种读法（两栏面板折叠 / 笔记本与文档合并成一棵树 / 正文按标题折叠），实现代价差一个量级，问一句比返工便宜。②**展开入口必须在竖轨上**：折叠按钮长在面板头部，一收起头部就跟着消失——竖轨若不可点，「收起」就是单向操作，用户只能刷新页面找回面板。所以竖轨整体是一个 `<button>`（`aria-expanded={false}` + `aria-label="展开笔记本栏"`），键盘天然可达。③**没有 chevron-left 图标，也不该有**：sprite 里只有 `chevron-right`，「收起」就是把同一份路径 `rotate(180deg)`；与甘特任务表（T39）收起箭头同一手法，两处收起看起来是一套语言。④**不持久化是刻意的**：折叠是「界面现在怎么摆」，写进 `settings` 会顺带进撤销栈（`patchSettingsCommand` 的逆元本身就是一条命令）——Ctrl+Z 会先弹出面板而不是撤销刚打的字，这是撤销栈卫生问题，不是懒。与甘特 `tableOpen`、文档树 `collapsed` 完全同口径。⑤**首轮截图抓到的问题**：折叠按钮 12px + MUTED 太浅，几乎看不见（用户根本找不到功能入口）→ 改成 `PaneToggle` 小组件：常驻但静音，悬停给底色与正文色；竖轨悬停同理。⑥**e2e 量的是真布局**：用「标题输入框宽度」当编辑区宽度的代理（它铺满编辑列、与正文内容无关），断言 `> start + 100` / `> afterBooks + 150` / 收回 `toBeCloseTo(start)`——jsdom 没有布局，这类「面板真的让出了宽度吗」只能在真 Chromium 里钉住 | 越界改动: 仅 `src/views/NotebookView.tsx`、`src/locales/{zh,en}.ts`（各 +5 键）、`tests/views/NotebookView.test.tsx`（+3）、`e2e/10-notebook.spec.ts`（+1）、新增 `docs/t51-notebook-panes-collapsed.png`；**未改** `schema.ts` / `types.ts`（不持久化）、未加依赖、未动 `theme.css`（悬停走本地 state） | 遗留: ①折叠态**不跨视图切换保留**（去看板再回来恢复默认展开）——要留存得先进 `settings` 并处理撤销栈噪音，本次刻意没做；②两栏都收起后没有任何「当前在哪本笔记本」的提示（只有正文上方面包屑还写着笔记本名）；③两个折叠按钮大小（18px）比工具栏其它图标（20px）略小，密集面板头里够用但不够统一；④没有快捷键（如 `Ctrl+\` 只留正文）；⑤竖轨标签是固定的「笔记本 / 文档」，不显示当前笔记本名（长名字竖排会烂） | 全量验证: `tsc` 0 / `npm test` **1063 passed (59 files)**（基线 1060 + 本任务 3 条视图用例）/ `npm run e2e` **46 passed + 1 skipped**（+1：收起两栏后面板变竖轨、正文变宽、点竖轨原样展开）/ `npm run build` **10/10**（产物 **6350595 字节**，上限 8388608）
+
+- [2026-10-23] T52 | agent: workbuddy:sess-1023a | commit: "T52: fix the 11 findings from the QA sweep" | 验收: 8/8 全部勾选（其中「日期格式不统一」按原生控件特性判为不改，理由见备注 ⑦） | 备注: ①**性质是「功能都在、只差入口」而不是坏**：撤销栈、`canUndo/canRedo`、`guardCommandBus` 的透传自 T10 起就完整，缺的只是顶栏两个按钮加一个全局 keydown。跳过 INPUT/TEXTAREA/SELECT/contenteditable 是最关键的一条——否则在笔记里撤销刚打的字会变成撤销十分钟前的拖拽；任务弹窗打开时同理要让位（它要先提交标题草稿）。②**卡片 meta 用容器查询而不是媒体查询**：卡片宽度由列宽决定（1440 下 244px、1024 下 172px），与视口宽没有线性关系，所以 `theme.css` 给 `.oe-card` 加 `container-type: inline-size`，`@container (max-width: 188px)` 下先舍掉类别 chip，话题名走省略号、到期日保完整、卡片高度不随文案变。③**甘特首屏居中只做一次**（`todayCenteredRef` 守住，之后滚动位置归用户），jsdom 下 `clientWidth` 为 0 时不动、留给下一帧；另加一条「切刻度按左边缘日期落回」——否则日→周会跳到半个月外。这条先弄红了 `e2e/04-gantt` 一条老断言（原来断言首列是范围起点），是预期的口径变更，非回归。④**备份面板的早退位置是个真 bug（顺带修掉）**：`if (open === false) return null` 原本在 `useState` 之前，收起→展开会让 hook 数从 0 变 12，开发构建抛 `Rendered more hooks than during the previous render`（生产侥幸不炸），已移到所有 hook 之后并给快照加载 effect 加 `shown` 守卫。⑤**弹窗内的保存指示必须换 testid**：同屏出现两个 `save-indicator` 会让所有「等保存收敛」的 e2e 撞 strict mode（`waitSaved` 就是这么炸的）。顶栏保持原名，弹窗用 `drawer-save-indicator` 且 `role=status` 只留一处，避免重复播报。⑥**空库那条死路是这批里最影响第一印象的**：原来只有列底一行不可点的灰说明，现在看板顶部是一条可点的主按钮，走 `createTopicActions` 建「未命名话题」，建完引导条自动消失、列底恢复正常新建入口。800 宽则改为横向滚动（`minWidth: sp(1024)`）而不是把布局压碎，真正的窄屏单列策略属另一个任务。⑦**F10（日期格式）判为不改**：差异来自原生 `<input type="date">` 按浏览器区域设置渲染，页面 `lang` 改不动；要统一只能自造日期选择器，风险远大于收益。这是本轮 11 项里唯一刻意保留的一项。⑧**逐项在真 Chromium 里核对过**（截图在 `docs/qa/fixed/`，临时脚本用完即删）：撤销链路 6→7→6、1024 宽下 chip 隐藏且到期日宽 53px、甘特首屏 `scrollLeft=907` 今日可见、英文备份面板零 CJK 残留、800 宽 `scrollWidth=973` 走横滚。 | 遗留: ①甘特左缘仍会截断条内标签（例如只剩「回归」），属「滚动视图 + 条内标签」的固有现象，要彻底解决得让标签贴视口左缘重绘；②撤销栈无容量上限，长会话会持续增长（内存压力，非正确性问题）；③F10 日期格式维持现状。 | 全量验证: `tsc` 0 / `npm test` **1076 passed (59 files)**（基线 1063 + 13）/ `npm run e2e` **46 passed + 1 skipped** / `npm run build` **10/10**（产物 **6362499 字节**，上限 8388608）

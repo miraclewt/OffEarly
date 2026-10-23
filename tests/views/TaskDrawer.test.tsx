@@ -488,26 +488,26 @@ describe('顶部保存指示与撤销', () => {
     const fake = fakeAutosave()
     const { view } = setup({ autosave: fake.source })
 
-    const indicator = view.getByTestId('save-indicator')
+    const indicator = view.getByTestId('drawer-save-indicator')
     expect(indicator.getAttribute('data-state')).toBe('saved')
     expect(indicator.textContent).toContain('已保存')
 
     act(() => {
       fake.set('dirty')
     })
-    expect(view.getByTestId('save-indicator').getAttribute('data-state')).toBe('dirty')
-    expect(view.getByTestId('save-indicator').textContent).toContain('未保存')
+    expect(view.getByTestId('drawer-save-indicator').getAttribute('data-state')).toBe('dirty')
+    expect(view.getByTestId('drawer-save-indicator').textContent).toContain('未保存')
 
     act(() => {
       fake.set('error')
     })
-    expect(view.getByTestId('save-indicator').textContent).toContain('保存失败')
+    expect(view.getByTestId('drawer-save-indicator').textContent).toContain('保存失败')
     expect(view.getByRole('button', { name: '重试' })).toBeDefined()
   })
 
   it('不传 autosave 源时不渲染指示器（独立挂载仍可用）', () => {
     const { view } = setup()
-    expect(view.queryByTestId('save-indicator')).toBeNull()
+    expect(view.queryByTestId('drawer-save-indicator')).toBeNull()
   })
 
   it('Ctrl+Z 撤销走 CommandBus（属性改动可还原），Ctrl+Shift+Z 重做', () => {

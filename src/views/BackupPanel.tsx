@@ -205,8 +205,7 @@ export function BackupPanel(props: BackupPanelProps) {
     labels,
   } = props
   const text: BackupPanelLabels = { ...BACKUP_LABELS_ZH, ...labels }
-
-  if (open === false) return null
+  const shown = open !== false
 
   // ── T26 附件清理状态 ──
   const [preview, setPreview] = useState<AssetGcPreview | null>(null)
@@ -233,9 +232,9 @@ export function BackupPanel(props: BackupPanelProps) {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
-  // 挂载即加载快照列表；端口未注入则跳过。
+  // 挂载即加载快照列表；端口未注入或面板收起时跳过。
   useEffect(() => {
-    if (snapshots === undefined) return
+    if (!shown || snapshots === undefined) return
     let cancelled = false
     void snapshots
       .list()
@@ -248,7 +247,22 @@ export function BackupPanel(props: BackupPanelProps) {
     return () => {
       cancelled = true
     }
-  }, [snapshots])
+  }, [shown, snapshots])
+
+  /**
+   * Esc 关闭（T52）：设置 / 筛选 / 里程碑三个面板都能按 Esc 退出，只有备份面板不能，
+   * 属于同一类浮层的交互不一致。这里补齐，且只在受控（接线方给了 onOpenChange）时生效。
+   */
+  useEffect(() => {
+    if (!shown || onOpenChange === undefined) return
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') onOpenChange?.(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [shown, onOpenChange])
 
   function runScan() {
     if (gc === undefined || busy) return
@@ -370,6 +384,10 @@ export function BackupPanel(props: BackupPanelProps) {
   const snapshotsDisabled = snapshots === undefined
   const exporterDisabled = exporter === undefined
   const importerDisabled = importer === undefined
+
+  // 早退必须放在**所有 hook 之后**：此前它在 useState 之前，收起→展开时 hook 数量从 0
+  // 变成 12，开发构建会直接抛「Rendered more hooks than during the previous render」。
+  if (!shown) return null
 
   return (
     <div

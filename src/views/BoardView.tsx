@@ -25,7 +25,7 @@ import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core'
 import { applyBoardDrop, isAboveCenter, sortByOrder } from '../controllers/boardDnd'
 import type { BoardDrop } from '../controllers/boardDnd'
 import { BoardColumn } from './BoardColumn'
-import { sp } from '../styles/scale'
+import { fs, px, sp } from '../styles/scale'
 import { createDependencyGraph } from '../domain/dependencyGraph'
 import { createEmptyFilter, createQueryEngine, localDateKey } from '../domain/queryEngine'
 import type { CommandBus } from '../domain/commandBus'
@@ -37,6 +37,9 @@ const BOARD_COLUMNS: readonly Status[] = ['todo', 'doing', 'review', 'done']
 
 /** 指针拖动超过 6px 才判定为拖拽；否则视为点击（打开详情）。 */
 const DRAG_ACTIVATION_DISTANCE = 6
+
+const TEXT = 'var(--oe-text)'
+const MUTED = 'var(--oe-text-muted)'
 
 export interface BoardViewProps {
   vault: Vault
@@ -55,6 +58,12 @@ export interface BoardViewProps {
   onCreateTask?: (status: Status, title: string) => void
   /** 不可创建时的说明（库里没有未归档话题）。 */
   createHint?: string
+  /**
+   * 空库引导（T52）：一个未归档话题都没有时，看板顶部渲染「新建话题」主按钮。
+   * 此前这种情况下四列各重复一行灰字，新用户找不到任何可点的入口。
+   * 省略即不渲染引导（组件仍可独立挂载）。
+   */
+  onCreateTopic?: () => void
   /** 判定逾期的今天（YYYY-MM-DD）；省略取本地当天，测试注入以确定化。 */
   today?: string
   style?: CSSProperties
@@ -168,6 +177,9 @@ export function BoardView(props: BoardViewProps) {
     clearSuppressClick()
   }
 
+  // 引导与列底的灰行是同一件事的两种说法：有引导时不再让四列各重复一遍
+  const showGuide = props.onCreateTopic !== undefined && props.onCreateTask === undefined
+
   return (
     <DndContext
       sensors={sensors}
@@ -182,36 +194,86 @@ export function BoardView(props: BoardViewProps) {
         data-testid="board"
         style={{
           display: 'flex',
-          // T40：看板留白与列间距同样跟随界面尺度 —— 只放大字号而间距不动，
-          // 大屏上会变成"字很大、卡片挤在一起"，反而比原来更难看。
-          gap: sp(12),
-          padding: sp(16),
+          flexDirection: 'column',
           height: '100%',
           boxSizing: 'border-box',
           ...props.style,
         }}
       >
-        {BOARD_COLUMNS.map((status) => (
-          <BoardColumn
-            key={status}
-            status={status}
-            title={t(`status.${status}`)}
-            tasks={columns.get(status) ?? []}
-            topicsById={topicsById}
-            blockedIds={blockedIds}
-            dependencyCountById={dependencyCountById}
-            today={today}
-            t={t}
-            onOpenTask={openTask}
-            // 列底新建：把 status 绑进回调，列组件只管「回车提交了标题」
-            onCreateTask={
-              props.onCreateTask === undefined
-                ? undefined
-                : (title: string) => props.onCreateTask?.(status, title)
-            }
-            createHint={props.createHint}
-          />
-        ))}
+        {showGuide ? (
+          <div
+            data-testid="board-guide"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: sp(12),
+              margin: `${sp(16)} ${sp(16)} 0`,
+              padding: `${sp(12)} ${sp(14)}`,
+              background: 'var(--oe-surface)',
+              border: '1px solid var(--oe-card-border)',
+              borderRadius: 'var(--oe-radius-card)',
+              boxShadow: 'var(--oe-shadow-card)',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: fs(13), fontWeight: 600, color: TEXT }}>{t('boardGuide.noTopicTitle')}</div>
+              <div style={{ fontSize: fs(12), color: MUTED, marginTop: sp(2) }}>{t('boardGuide.noTopicHint')}</div>
+            </div>
+            <button
+              type="button"
+              data-testid="board-create-topic"
+              onClick={() => {
+                props.onCreateTopic?.()
+              }}
+              style={{
+                flex: '0 0 auto',
+                padding: px('6px 14px'),
+                fontSize: fs(13),
+                fontWeight: 600,
+                color: 'var(--oe-on-accent)',
+                background: 'var(--oe-accent)',
+                border: 'none',
+                borderRadius: 'var(--oe-radius-control)',
+                cursor: 'pointer',
+              }}
+            >
+              {t('boardGuide.createTopic')}
+            </button>
+          </div>
+        ) : null}
+
+        <div
+          style={{
+            display: 'flex',
+            gap: sp(12),
+            padding: sp(16),
+            flex: 1,
+            minHeight: 0,
+            boxSizing: 'border-box',
+          }}
+        >
+          {BOARD_COLUMNS.map((status) => (
+            <BoardColumn
+              key={status}
+              status={status}
+              title={t(`status.${status}`)}
+              tasks={columns.get(status) ?? []}
+              topicsById={topicsById}
+              blockedIds={blockedIds}
+              dependencyCountById={dependencyCountById}
+              today={today}
+              t={t}
+              onOpenTask={openTask}
+              // 列底新建：把 status 绑进回调，列组件只管「回车提交了标题」
+              onCreateTask={
+                props.onCreateTask === undefined
+                  ? undefined
+                  : (title: string) => props.onCreateTask?.(status, title)
+              }
+              createHint={showGuide ? undefined : props.createHint}
+            />
+          ))}
+        </div>
       </div>
     </DndContext>
   )

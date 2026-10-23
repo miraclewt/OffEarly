@@ -47,6 +47,7 @@ import { FilterBar } from './views/FilterBar'
 import { MilestonePanel } from './views/MilestonePanel'
 import { createAssetStore } from './persistence/assetStore'
 import type { AssetStore } from './persistence/assetStore'
+import { createTopicActions } from './controllers/topicActions'
 import { createNoteAssetsPort } from './controllers/noteAssets'
 import type { NoteAssetsPortHandle } from './controllers/noteAssets'
 import { createBackupExportPort, createBackupImportPort } from './controllers/backupPort'
@@ -60,6 +61,7 @@ import type { SafeModeLabels } from './views/SafeModeBanner'
 import { SaveIndicator } from './views/SaveIndicator'
 import { TopicSidebar } from './views/TopicSidebar'
 import { BackupPanel } from './views/BackupPanel'
+import type { BackupPanelLabels } from './views/BackupPanel'
 import { SettingsPanel } from './views/SettingsPanel'
 import { fs, px, sp } from './styles/scale'
 
@@ -362,6 +364,61 @@ function StartupScreen(props: {
 }
 
 /**
+ * 顶栏的撤销 / 重做（T52）。
+ *
+ * 背景：CommandBus 从 T10 起就有完整的 undo/redo 栈，`guardCommandBus` 也一直透传
+ * canUndo / canRedo，但全库只有任务弹窗绑了 Ctrl+Z（TaskDrawer.tsx）——拖错列、归档话题、
+ * 删除里程碑、删除知识库文档之后没有任何入口能退回去，用户只能去 .backup/ 找整库快照。
+ *
+ * 这两个按钮直接订阅 bus 的栈深通知（apply / undo / redo / clear 都会 emit），
+ * 所以禁用态与快捷键永远一致，不存在"按钮亮着但按了没反应"。
+ */
+function UndoRedo(props: { bus: CommandBus; t: (key: MsgKey, params?: TranslateParams) => string }) {
+  const { bus, t } = props
+  const undoDepth = useSyncExternalStore(bus.subscribe, bus.undoDepth, bus.undoDepth)
+  const redoDepth = useSyncExternalStore(bus.subscribe, bus.redoDepth, bus.redoDepth)
+  const style = (enabled: boolean): CSSProperties => ({
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: sp(26),
+    height: sp(24),
+    padding: 0,
+    color: enabled ? 'var(--oe-text-secondary)' : 'var(--oe-text-faint)',
+    background: 'transparent',
+    border: 'none',
+    borderRadius: 'var(--oe-radius-control)',
+    cursor: enabled ? 'pointer' : 'default',
+  })
+  return (
+    <div data-testid="undo-redo" style={{ display: 'flex', alignItems: 'center', gap: sp(2) }}>
+      <button
+        type="button"
+        data-testid="undo-button"
+        aria-label={t('undoRedo.undo')}
+        title={t('undoRedo.undoHint')}
+        disabled={undoDepth === 0}
+        onClick={() => bus.undo()}
+        style={style(undoDepth > 0)}
+      >
+        <Icon name="undo" />
+      </button>
+      <button
+        type="button"
+        data-testid="redo-button"
+        aria-label={t('undoRedo.redo')}
+        title={t('undoRedo.redoHint')}
+        disabled={redoDepth === 0}
+        onClick={() => bus.redo()}
+        style={style(redoDepth > 0)}
+      >
+        <Icon name="redo" />
+      </button>
+    </div>
+  )
+}
+
+/**
  * 视图宿主：vault 与 filter 只在这里派生一次，看板与甘特共用（spec §6.2）。
  * 看板走 T15 的 BoardView（根元素自带 data-testid="board"，E2E 依赖它）；
  * 甘特走 T20/T21 的 GanttView。任务详情弹窗（T17；T36 起改为居中弹窗）在 App 顶层挂载（fixed 遮罩），此处不再留挂载位。
@@ -396,6 +453,15 @@ function Workspace(props: {
    */
   function createTask(status: Status, title: string): void {
     applyCreateTask(bus, store.getVault(), { title, status })
+  }
+
+  /**
+   * 空库引导（T52）：一个未归档话题都没有时，看板顶部给一个**真能点**的入口。
+   * 此前四列只重复一行灰字「先建一个话题」，而新用户唯一的入口是侧栏那个 14px 的「+」。
+   * 走的是侧栏同一个写入口（topicActions），名字先落占位，随后可在侧栏改名。
+   */
+  function createTopicFromBoard(): void {
+    createTopicActions({ store, bus }).createTopic(null, t('boardGuide.untitledTopic'))
   }
 
   return (
@@ -456,6 +522,7 @@ function Workspace(props: {
             onOpenTask={onOpenTask}
             onCreateTask={canCreateTask ? createTask : undefined}
             createHint={t('newTask.noTopic')}
+            onCreateTopic={canCreateTask ? undefined : createTopicFromBoard}
           />
         )}
       </div>
@@ -621,6 +688,41 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
     }
   }, [autosave])
 
+  /**
+   * T52：全局撤销 / 重做（Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y）。
+   *
+   * 三条边界，缺一条就会和既有交互打架：
+   *   ① 输入框 / contenteditable 里的 Ctrl+Z 归浏览器——笔记正文有自己的历史栈，
+   *      抢过来会把「撤销刚打的字」变成「撤销十分钟前的拖拽」；
+   *   ② 任务弹窗打开时由它自己处理（它会先把正在编辑的标题草稿提交，再退栈）；
+   *   ③ 只读安全模式 / 没有会话时压根不挂（bus 的写入口已被 T29 的闸门封住）。
+   */
+  useEffect(() => {
+    if (session === null) return
+    const bus = session.bus
+    function isEditable(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false
+      if (target.isContentEditable) return true
+      const tag = target.tagName
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+    }
+    function onKeyDown(event: KeyboardEvent): void {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return
+      const key = event.key.toLowerCase()
+      const redo = (key === 'z' && event.shiftKey) || key === 'y'
+      const undo = key === 'z' && !event.shiftKey
+      if (!undo && !redo) return
+      if (drawerOpen || isEditable(event.target)) return
+      event.preventDefault()
+      if (undo) bus.undo()
+      else bus.redo()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [session, drawerOpen])
+
   function handlePick() {
     void ports
       .pickDir()
@@ -723,6 +825,50 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
     busy: t('safemode.busy'),
     failed: t('safemode.failed'),
     resolved: t('safemode.resolved'),
+  }
+
+  /**
+   * T52：备份面板文案（与 conflict / safemode 同一手法）。
+   * 这个面板此前只带中文兜底、完全不看 locale，英文界面下整屏中文。
+   */
+  const backupLabels: Partial<BackupPanelLabels> = {
+    title: t('backupPanel.title'),
+    attachments: t('backupPanel.attachments'),
+    noAssets: t('backupPanel.noAssets'),
+    scan: t('backupPanel.scan'),
+    scanHint: t('backupPanel.scanHint'),
+    scanning: t('backupPanel.scanning'),
+    unreferenced: t('backupPanel.unreferenced'),
+    reclaimable: t('backupPanel.reclaimable'),
+    empty: t('backupPanel.empty'),
+    confirm: t('backupPanel.confirm'),
+    confirmHint: t('backupPanel.confirmHint'),
+    cleaning: t('backupPanel.cleaning'),
+    cleaned: t('backupPanel.cleaned'),
+    failed: t('backupPanel.failed'),
+    snapshots: t('backupPanel.snapshots'),
+    snapshotEmpty: t('backupPanel.snapshotEmpty'),
+    snapshotNow: t('backupPanel.snapshotNow'),
+    snapshotting: t('backupPanel.snapshotting'),
+    snapshotHint: t('backupPanel.snapshotHint'),
+    taskCount: t('backupPanel.taskCount'),
+    restore: t('backupPanel.restore'),
+    restoreConfirm: t('backupPanel.restoreConfirm'),
+    restoreConfirmAction: t('backupPanel.restoreConfirmAction'),
+    restoring: t('backupPanel.restoring'),
+    restored: t('backupPanel.restored'),
+    export: t('backupPanel.export'),
+    exporting: t('backupPanel.exporting'),
+    exported: t('backupPanel.exported'),
+    import: t('backupPanel.import'),
+    importFile: t('backupPanel.importFile'),
+    importDir: t('backupPanel.importDir'),
+    importPreview: t('backupPanel.importPreview'),
+    importConfirm: t('backupPanel.importConfirm'),
+    importConfirmHint: t('backupPanel.importConfirmHint'),
+    importing: t('backupPanel.importing'),
+    imported: t('backupPanel.imported'),
+    cancel: t('backupPanel.cancel'),
   }
 
   let main: ReactNode
@@ -897,6 +1043,11 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
         display: 'flex',
         flexDirection: 'column',
         height: '100vh',
+        // T52：外壳最小宽度。窗口拖到 800 宽时，顶栏分段控件与列头会被压成竖排、
+        // 卡片内容整个消失（页面还凭空多出横向滚动）。桌面工具可以「不支持这么窄」，
+        // 但不该「压碎」——给一个下限，让它老老实实横向滚，而不是把布局挤烂。
+        // 1024 是本轮实测里最后一档还能正常读的宽度（卡片 meta 行已在 T52 修过）。
+        minWidth: sp(1024),
         margin: 0,
         background: 'var(--oe-bg)',
         color: TEXT,
@@ -964,7 +1115,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
               borderBottom: '1px solid var(--oe-separator)',
             }}
           >
-            {/* 视图切换与顶栏提示；撤销/重做按钮随 T15 的卡片交互一起挂 */}
+            {/* 视图切换与顶栏提示；撤销/重做（T52）挂在视图切换右侧 */}
             {session === null ? null : (
               <div role="group" className="oe-seg" style={{ marginRight: 'auto' }}>
                 {(['board', 'gantt', 'mindmap', 'notebook'] as const).map((mode) => (
@@ -988,6 +1139,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
                 ))}
               </div>
             )}
+            {session === null ? null : <UndoRedo bus={session.bus} t={t} />}
             {notice === null ? null : (
               <span data-testid="shell-notice" style={{ fontSize: fs(12), color: 'var(--oe-blocked)' }}>
                 {'text' in notice ? notice.text : t(notice.key, notice.params)}
@@ -1017,6 +1169,10 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           onOpenChange={setDrawerOpen}
           taskId={drawerTaskId}
           onSelect={(task) => setDrawerTaskId(task?.id ?? null)}
+          // T52：面板头部的保存指示（插槽早就存在，只是没人传）。
+          // 顶栏那个「已保存」在弹窗打开时被遮罩整个盖住，用户在弹窗里改完标题 / 进度
+          // 完全看不出有没有落盘。
+          autosave={phase.kind === 'ready' ? phase.autosave : undefined}
           // T25：图片三条插入路径 + blob URL 显示都经这个端口（编辑器本身不碰文件系统）
           assets={session.noteAssets}
           // T24：笔记里的 [[标题]] 点击跳转——同名多任务取第一条任务候选；
@@ -1052,6 +1208,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
         <BackupPanel
           open={backupOpen}
           onOpenChange={setBackupOpen}
+          labels={backupLabels}
           // 无会话（safe-mode）时各端口缺失，面板对应分区自动置灰，只留快照可用
           gc={session?.backupGc}
           assetCount={session?.store.getVault().assets.length ?? 0}

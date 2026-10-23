@@ -82,6 +82,7 @@ export const zh = {
     resetZoom: '重置缩放',
     crossTopicMilestone: '跨话题里程碑',
     empty: '暂无已排期任务',
+    todayJump: '回到今天',
   },
 
   // 集成车道追加：应用外壳 + 冲突/安全模式文案（尾部追加，不改动既有键）
@@ -466,6 +467,65 @@ export const zh = {
     exporting: '正在导出…',
     exportFailed: '导出失败，请重试',
     exportDone: '已导出 {name}',
+  },
+
+  // T52 尾部追加：备份面板文案。
+  // 此前这个面板完全不走消息表（组件内自带中文兜底），英文界面下整屏是中文——
+  // 现在键集中在这里，App 用 t() 组成 labels 传进去（与 conflict / safemode 同一手法）。
+  backupPanel: {
+    title: '备份与清理',
+    attachments: '附件：{count} 个，共 {bytes}',
+    noAssets: '当前库还没有附件',
+    scan: '扫描未引用附件',
+    scanHint: '找出笔记里不再引用的图片，确认后再删除',
+    scanning: '正在扫描…',
+    unreferenced: '未引用附件：{count} 个',
+    reclaimable: '可释放 {bytes}',
+    empty: '没有可回收的附件',
+    confirm: '确认清理 {count} 个附件',
+    confirmHint: '删除后不可恢复，请确认这些图片确实不再需要',
+    cleaning: '正在清理…',
+    cleaned: '已清理 {count} 个附件，释放 {bytes}',
+    failed: '操作失败',
+    snapshots: '快照',
+    snapshotEmpty: '还没有快照',
+    snapshotNow: '立即快照',
+    snapshotting: '正在快照…',
+    snapshotHint: '把当前 vault.json 复制一份到 .backup/',
+    taskCount: '{count} 个任务',
+    restore: '恢复',
+    restoreConfirm: '恢复到此快照？当前版本会先自动打一份快照',
+    restoreConfirmAction: '确认恢复',
+    restoring: '正在恢复…',
+    restored: '已恢复到此快照',
+    export: '导出库副本',
+    exporting: '正在导出…',
+    exported: '已导出 {files} 个文件，共 {bytes}',
+    import: '导入',
+    importFile: '导入 vault.json 文件',
+    importDir: '从文件夹导入',
+    importPreview: '将导入 {tasks} 个任务、{milestones} 个里程碑、{assets} 个附件',
+    importConfirm: '确认导入（覆盖当前 {tasks} 个任务）',
+    importConfirmHint: '导入会覆盖当前库内容，建议先导出副本',
+    importing: '正在导入…',
+    imported: '已导入',
+    cancel: '取消',
+  },
+
+  // T52 尾部追加：撤销 / 重做（顶栏按钮的可访问名与提示）
+  undoRedo: {
+    undo: '撤销',
+    redo: '重做',
+    undoHint: '撤销上一步（Ctrl+Z）',
+    redoHint: '重做（Ctrl+Shift+Z）',
+  },
+
+  // T52 尾部追加：空库引导（一个可用话题都没有时，看板顶部的入口）
+  boardGuide: {
+    noTopicTitle: '还没有话题',
+    noTopicHint: '任务必须挂在话题下。先建一个话题，再往列里加任务。',
+    createTopic: '新建话题',
+    untitledTopic: '未命名话题',
   },
 } as const
 

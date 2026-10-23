@@ -111,7 +111,7 @@ function makeVault(): Vault {
 function setup(
   filter = createEmptyFilter(),
   // 只放「接线方注入的可选 props」：vault/filter/bus/t/today 由 Harness 自己派生
-  extra: Pick<BoardViewProps, 'onCreateTask' | 'createHint'> = {},
+  extra: Pick<BoardViewProps, 'onCreateTask' | 'createHint' | 'onCreateTopic'> = {},
 ) {
   const store = createVaultStore(makeVault())
   const bus = createCommandBus(store)
@@ -566,5 +566,31 @@ describe('列内新建任务入口', () => {
     expect(within(column).getByTestId('board-column-count-todo').textContent).toBe('3')
     expect(within(column).getByTestId('board-column-ratio-todo').textContent).toBe('0%')
     expect(within(column).getByTestId('task-card-k1')).toBeDefined()
+  })
+})
+
+/**
+ * T52（QA 巡检后的修复）：空库引导。
+ *
+ * 一个可用话题都没有时，此前四列各重复一行灰字「先建一个话题，再新建任务」，
+ * 全屏没有任何可点的入口——新用户只能去猜侧栏那个 14px 的「+」。
+ */
+describe('T52 · 空库引导', () => {
+  it('有 onCreateTopic 且列内不可新建时，顶部给一条可点的引导', () => {
+    const onCreateTopic = vi.fn()
+    const { view } = setup(createEmptyFilter(), { onCreateTopic, createHint: '先建一个话题，再新建任务' })
+
+    expect(view.getByTestId('board-guide').textContent).toContain('还没有话题')
+    fireEvent.click(view.getByTestId('board-create-topic'))
+    expect(onCreateTopic).toHaveBeenCalledTimes(1)
+
+    // 有引导就不再让四列各重复一遍灰行（同一句话出现在四个地方既吵又无用）
+    expect(view.queryByTestId('board-add-task-blocked-todo')).toBeNull()
+  })
+
+  it('没接线 onCreateTopic 时不渲染引导（组件仍可独立挂载）', () => {
+    const { view } = setup(createEmptyFilter(), { createHint: '先建一个话题，再新建任务' })
+    expect(view.queryByTestId('board-guide')).toBeNull()
+    expect(view.getByTestId('board-add-task-blocked-todo')).toBeTruthy()
   })
 })

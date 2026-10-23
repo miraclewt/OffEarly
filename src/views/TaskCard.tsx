@@ -186,88 +186,103 @@ export const TaskCard = memo(function TaskCard(props: TaskCardProps) {
         </span>
       </div>
 
-      {/* 第二行 meta：话题色点+话题名 / 类别 chip / 优先级点 / 到期日 / 笔记图标 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: sp(6), marginTop: sp(6) }}>
-        <span
-          data-testid={`task-topic-dot-${task.id}`}
-          data-color={topicColor}
-          title={topic?.name}
-          style={{
-            width: sp(8),
-            height: sp(8),
-            flex: px('0 0 8px'),
-            borderRadius: '50%',
-            background: topicColor,
-          }}
-        />
-        <span
-          style={{
-            fontSize: fs(11),
-            color: MUTED,
-            maxWidth: sp(96),
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {topic?.name ?? ''}
-        </span>
-
-        <span
-          data-testid={`task-kind-${task.id}`}
-          style={{
-            padding: `0 ${sp(6)}`,
-            fontSize: fs(11),
-            lineHeight: sp(16),
-            color: 'var(--oe-text-secondary)',
-            background: 'var(--oe-fill)',
-            borderRadius: sp(6),
-          }}
-        >
-          {t(`card.kind.${task.kind}` as MsgKey)}
-        </span>
-
-        <span style={{ flex: 1 }} />
-
-        <span
-          data-testid={`task-priority-${task.id}`}
-          data-priority={task.priority}
-          title={task.priority}
-          style={{
-            width: sp(8),
-            height: sp(8),
-            flex: px('0 0 8px'),
-            borderRadius: '50%',
-            background: PRIORITY_DOT[task.priority],
-          }}
-        />
-
-        {task.due === undefined ? null : (
+      {/*
+        第二行 meta：话题色点+话题名 / 类别 chip ／ 优先级点 / 到期日 / 笔记图标。
+        分两组而不是「一串 flex 项 + 一个 flex:1 撑子」：后者在 1024 宽窗口下（一列只有
+        172px）会让所有子项一起被压扁——话题名只剩一个字、类别 chip 竖排成两行、
+        卡片因此被撑高 14px。现在左组可收缩（话题名省略号），右组一律不收缩，
+        窄到放不下时由容器的 container query 先舍掉类别 chip（见 theme.css）。
+      */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: sp(6), marginTop: sp(6), minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: sp(6), flex: '1 1 auto', minWidth: 0 }}>
           <span
-            data-testid={`task-due-${task.id}`}
-            data-overdue={overdue ? 'true' : 'false'}
-            title={task.due}
+            data-testid={`task-topic-dot-${task.id}`}
+            data-color={topicColor}
+            title={topic?.name}
+            style={{
+              width: sp(8),
+              height: sp(8),
+              flex: px('0 0 8px'),
+              borderRadius: '50%',
+              background: topicColor,
+            }}
+          />
+          <span
             style={{
               fontSize: fs(11),
-              color: overdue ? OVERDUE : MUTED,
-              fontWeight: overdue ? 600 : 400,
+              color: MUTED,
+              // 可收缩项：卡窄时先牺牲话题名（title 里有全名），别去挤右侧的日期
+              flex: '0 1 auto',
+              minWidth: 0,
+              maxWidth: sp(96),
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              fontVariantNumeric: 'tabular-nums',
             }}
           >
-            {task.due}
+            {topic?.name ?? ''}
           </span>
-        )}
 
-        {hasNote ? (
           <span
-            data-testid={`task-note-${task.id}`}
-            title={t('card.hasNote')}
-            style={{ display: 'inline-flex', flex: '0 0 auto', color: FAINT }}
+            data-testid={`task-kind-${task.id}`}
+            className="oe-card-kind"
+            style={{
+              // chip 自己不收缩、不换行：竖排两行比省下的 10px 难看一百倍
+              flex: '0 0 auto',
+              whiteSpace: 'nowrap',
+              padding: `0 ${sp(6)}`,
+              fontSize: fs(11),
+              lineHeight: sp(16),
+              color: 'var(--oe-text-secondary)',
+              background: 'var(--oe-fill)',
+              borderRadius: sp(6),
+            }}
           >
-            <Icon name="note" size={13} />
+            {t(`card.kind.${task.kind}` as MsgKey)}
           </span>
-        ) : null}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: sp(6), flex: '0 0 auto' }}>
+          <span
+            data-testid={`task-priority-${task.id}`}
+            data-priority={task.priority}
+            title={task.priority}
+            style={{
+              width: sp(8),
+              height: sp(8),
+              flex: px('0 0 8px'),
+              borderRadius: '50%',
+              background: PRIORITY_DOT[task.priority],
+            }}
+          />
+
+          {task.due === undefined ? null : (
+            <span
+              data-testid={`task-due-${task.id}`}
+              data-overdue={overdue ? 'true' : 'false'}
+              title={task.due}
+              style={{
+                fontSize: fs(11),
+                color: overdue ? OVERDUE : MUTED,
+                fontWeight: overdue ? 600 : 400,
+                whiteSpace: 'nowrap',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {task.due}
+            </span>
+          )}
+
+          {hasNote ? (
+            <span
+              data-testid={`task-note-${task.id}`}
+              title={t('card.hasNote')}
+              style={{ display: 'inline-flex', flex: '0 0 auto', color: FAINT }}
+            >
+              <Icon name="note" size={13} />
+            </span>
+          ) : null}
+        </div>
       </div>
     </div>
   )

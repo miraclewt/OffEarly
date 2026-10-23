@@ -319,8 +319,10 @@ describe('应用外壳：新建任务与设置面板', () => {
   it('无话题时列底给提示；建话题后可在列内新建任务，并随 Ctrl+S 落盘', async () => {
     const { dir } = await openBoard()
 
-    // 新库没有话题：topicId 是必填字段，此时不提供可点的入口
-    expect(screen.getByTestId('board-add-task-blocked-todo').textContent).toBe('先建一个话题，再新建任务')
+    // 新库没有话题：topicId 是必填字段，列底不给入口；改为看板顶部的引导条（T52）。
+    // 四列不再各重复一行灰字——同一句话出现在四个地方既吵又没有出路。
+    expect(screen.getByTestId('board-guide')).toBeTruthy()
+    expect(screen.queryByTestId('board-add-task-blocked-todo')).toBeNull()
     expect(screen.queryByTestId('board-add-task-todo')).toBeNull()
 
     // 侧栏建一个话题
@@ -381,5 +383,70 @@ describe('应用外壳：新建任务与设置面板', () => {
     const saved = decodeVault(dir)
     expect(saved.settings.calendar.workdays).toEqual([1, 2, 3, 4, 5, 6])
     expect(saved.settings.calendar.holidays).toEqual(['2026-10-01'])
+  })
+})
+
+/**
+ * T52（QA 巡检后的修复）：空库引导 + 撤销入口。
+ *
+ * 两条都是「功能其实都在、只差一个入口」：看板在无话题时只重复灰字，
+ * CommandBus 一直有完整的 undo/redo 栈却只有任务弹窗绑了快捷键。
+ */
+describe('T52：空库引导与顶栏撤销', () => {
+  async function openBoard() {
+    const dir = dirWith({ vault: vaultJson() })
+    const captured: Session[] = []
+    await renderApp(ports({ dir }), (session) => captured.push(session))
+    await waitFor(() => expect(screen.getByTestId('board')).toBeTruthy())
+    const session = captured[0]
+    if (session === undefined) throw new Error('会话未建立')
+    return { dir, session }
+  }
+
+  it('空库引导条的「新建话题」能建出话题，随后列内新建入口出现', async () => {
+    const { dir } = await openBoard()
+
+    expect(screen.getByTestId('board-guide')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('board-create-topic'))
+
+    await waitFor(() => expect(screen.queryByTestId('board-guide')).toBeNull())
+    expect(screen.getByTestId('board-add-task-todo')).toBeTruthy()
+    expect(screen.getByTestId('topic-tree').textContent).toContain('未命名话题')
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+    expect(decodeVault(dir).topics.map((topic) => topic.name)).toEqual(['未命名话题'])
+  })
+
+  it('顶栏撤销 / 重做按钮与 Ctrl+Z 都能退回刚建的任务', async () => {
+    await openBoard()
+
+    fireEvent.click(screen.getByTestId('topic-add-root'))
+    const nameInput = screen.getByTestId('topic-name-input')
+    fireEvent.change(nameInput, { target: { value: '支付重构' } })
+    fireEvent.keyDown(nameInput, { key: 'Enter' })
+
+    fireEvent.click(await screen.findByTestId('board-add-task-doing'))
+    const input = screen.getByTestId('board-new-task-input-doing')
+    fireEvent.change(input, { target: { value: '接入支付回调' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(screen.getByTestId('board-column-count-doing').textContent).toBe('1'))
+
+    // 初始态：撤销栈刚被 push，重做栈是空的
+    const undo = screen.getByTestId('undo-button') as HTMLButtonElement
+    const redo = screen.getByTestId('redo-button') as HTMLButtonElement
+    expect(undo.disabled).toBe(false)
+    expect(redo.disabled).toBe(true)
+
+    fireEvent.click(undo)
+    await waitFor(() => expect(screen.getByTestId('board-column-count-doing').textContent).toBe('0'))
+    expect((screen.getByTestId('redo-button') as HTMLButtonElement).disabled).toBe(false)
+
+    fireEvent.click(screen.getByTestId('redo-button'))
+    await waitFor(() => expect(screen.getByTestId('board-column-count-doing').textContent).toBe('1'))
+
+    // 键盘路径：焦点不在输入框时 Ctrl+Z 生效
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+    await waitFor(() => expect(screen.getByTestId('board-column-count-doing').textContent).toBe('0'))
   })
 })

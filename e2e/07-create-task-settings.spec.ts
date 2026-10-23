@@ -6,7 +6,7 @@
  */
 import { expect, test } from '@playwright/test'
 
-import { connectWorkspace, createTopic, openAppWith, waitSaved } from './fixtures/app'
+import { connectWorkspace, openAppWith, waitSaved } from './fixtures/app'
 import { EMPTY_FS, fromBase64, readFakeFs } from './fixtures/fakeFs'
 import { loadExampleVaultFs } from './fixtures/exampleVault'
 
@@ -48,15 +48,27 @@ test('列内新建任务：立刻出现在看板，并随自动保存落盘', as
   expect(created?.topicId).toBe(before.topics.find((topic) => topic.name === '支付重构')?.id)
 })
 
-test('空库：没有话题时列底只给提示，建话题后就能新建任务', async ({ page }) => {
+test('空库：看板引导条一步建话题，之后就能在列内新建任务', async ({ page }) => {
   await openAppWith(page, EMPTY_FS)
   await connectWorkspace(page, { create: true })
 
-  // 没有可用话题：不提供可点入口，只给一句说明
-  await expect(page.getByTestId('board-add-task-blocked-todo')).toContainText('先建一个话题')
+  // 没有可用话题：列底不给入口，改由看板顶部的引导条给出路（T52）
+  await expect(page.getByTestId('board-guide')).toContainText('还没有话题')
+  await expect(page.getByTestId('board-guide')).toContainText('先建一个话题')
   await expect(page.getByTestId('board-add-task-todo')).toHaveCount(0)
+  // 四列不再各重复一行灰字
+  await expect(page.getByTestId('board-add-task-blocked-todo')).toHaveCount(0)
 
-  await createTopic(page, 'E2E 新话题')
+  // 引导条上的按钮是真能点的：一步之后列内入口就出现
+  await page.getByTestId('board-create-topic').click()
+  await expect(page.getByTestId('board-guide')).toHaveCount(0)
+  await expect(page.getByTestId('board-add-task-todo')).toBeVisible()
+
+  // 侧栏也看得到这个新话题（与侧栏新建走同一个写入口）
+  await waitSaved(page)
+  const created = parseVault(await readFakeFs(page))
+  expect(created.topics.map((topic) => topic.name)).toEqual(['未命名话题'])
+
   await page.getByTestId('board-add-task-todo').click()
   const input = page.getByTestId('board-new-task-input-todo')
   await input.fill('第一条任务')

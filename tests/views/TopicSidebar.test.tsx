@@ -403,3 +403,75 @@ describe('topicActions 契约', () => {
     expect(a.order < b.order).toBe(true)
   })
 })
+
+/**
+ * T52（QA 巡检后的修复）：菜单能按 Esc 退出、贴边不出界，树本身键盘可达。
+ *
+ * 这三个都是「鼠标用户感知不到、键盘用户一步都走不了」的问题：
+ * 右键菜单只有点遮罩一条出路、位置直接用 clientX/Y、树行没有 tabIndex 也没有方向键。
+ */
+describe('T52 · 键盘可达与菜单边界', () => {
+  it('Esc 关闭右键菜单，也关闭改色调色板', () => {
+    const { view } = setup()
+
+    fireEvent.contextMenu(view.getByTestId('topic-row-p-fe'))
+    expect(view.queryByTestId('topic-menu')).not.toBeNull()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(view.queryByTestId('topic-menu')).toBeNull()
+
+    fireEvent.contextMenu(view.getByTestId('topic-row-p-fe'))
+    fireEvent.click(view.getByTestId('topic-menu-color'))
+    expect(view.queryByTestId('topic-palette')).not.toBeNull()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(view.queryByTestId('topic-palette')).toBeNull()
+  })
+
+  it('贴着窗口右下角右键时，菜单被钳制在视口内', () => {
+    const { view } = setup()
+
+    fireEvent.contextMenu(view.getByTestId('topic-row-ops'), { clientX: 5000, clientY: 4000 })
+    const menu = view.getByTestId('topic-menu')
+    const left = Number.parseFloat(menu.style.left)
+    const top = Number.parseFloat(menu.style.top)
+
+    expect(left).toBeLessThanOrEqual(window.innerWidth - 132)
+    expect(top).toBeLessThanOrEqual(window.innerHeight - 128)
+    expect(left).toBeGreaterThan(0)
+    expect(top).toBeGreaterThan(0)
+  })
+
+  it('方向键在树内移动焦点：↓ 下一行 / ← 收起 / → 展开', () => {
+    const { view } = setup()
+
+    const root = view.getByTestId('topic-row-p')
+    // roving tabindex：只有一行可被 Tab 探到
+    expect(root.getAttribute('tabindex')).toBe('0')
+    expect(view.getByTestId('topic-row-ops').getAttribute('tabindex')).toBe('-1')
+
+    root.focus()
+    fireEvent.keyDown(root, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(view.getByTestId('topic-row-p-fe'))
+
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(view.getByTestId('topic-row-p'))
+
+    // 根行默认展开（depth 0），← 收起后子行从 DOM 消失
+    fireEvent.keyDown(view.getByTestId('topic-row-p'), { key: 'ArrowLeft' })
+    expect(view.queryByTestId('topic-row-p-fe')).toBeNull()
+    // → 再展开
+    fireEvent.keyDown(view.getByTestId('topic-row-p'), { key: 'ArrowRight' })
+    expect(view.queryByTestId('topic-row-p-fe')).not.toBeNull()
+  })
+
+  it('Enter / Space 切换话题筛选（与鼠标点击同一条写入口）', () => {
+    const { store, view } = setup()
+
+    const row = view.getByTestId('topic-row-ops')
+    row.focus()
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(store.getVault().settings.lastFilter?.topicIds).toEqual(['ops'])
+
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(store.getVault().settings.lastFilter?.topicIds).toEqual([])
+  })
+})

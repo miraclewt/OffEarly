@@ -11,8 +11,8 @@
 // 视觉：色块 swatch 与 T15 卡片色点共用同一套话题色（读 topic.color）；图标走 inline SVG sprite；
 // 圆角 6–8px、无渐变、无 emoji。
 
-import { Fragment, useMemo, useState } from 'react'
-import type { CSSProperties, ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { useStore } from 'zustand'
 
 import { TOPIC_PALETTE, createTopicActions } from '../controllers/topicActions'
@@ -24,7 +24,7 @@ import type { Topic } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
 import type { IconName } from './IconSprite'
-import { fs, px, sp } from '../styles/scale'
+import { currentUiScale, fs, px, sp } from '../styles/scale'
 
 const TEXT = 'var(--oe-text)'
 const MUTED = 'var(--oe-text-muted)'
@@ -37,6 +37,35 @@ const DEFAULT_EXPANDED_DEPTH = 0
 
 /** 每层的缩进像素。 */
 const INDENT = 14
+
+/**
+ * 右键菜单的估算盒子（T52）：`minWidth: 132`、四个菜单项各约 30px 高、外框内边距 8px。
+ * 菜单是 fixed 定位，直接落在 clientX/clientY 上，贴着窗口右下角右键就会整个跑到视口外。
+ * 这里在打开时钳制一次——用估算值而不是「渲染后测量再回移」，后者会看到一次跳动。
+ */
+const MENU_WIDTH = 132
+const MENU_HEIGHT = 4 * 30 + 8
+const MENU_MARGIN = 8
+
+function clampMenuPosition(x: number, y: number): { x: number; y: number } {
+  const scale = currentUiScale()
+  const viewportW = typeof window === 'undefined' ? 0 : window.innerWidth
+  const viewportH = typeof window === 'undefined' ? 0 : window.innerHeight
+  const maxX = Math.max(MENU_MARGIN, viewportW - MENU_WIDTH * scale - MENU_MARGIN)
+  const maxY = Math.max(MENU_MARGIN, viewportH - MENU_HEIGHT * scale - MENU_MARGIN)
+  return {
+    x: Math.min(Math.max(MENU_MARGIN, x), maxX),
+    y: Math.min(Math.max(MENU_MARGIN, y), maxY),
+  }
+}
+
+/** 话题树的一行（按显示顺序拍平后供键盘导航用）。 */
+interface TopicRow {
+  topic: Topic
+  depth: number
+  hasChildren: boolean
+  expanded: boolean
+}
 
 export interface TopicSidebarProps {
   store: VaultStore
@@ -97,6 +126,96 @@ export function TopicSidebar(props: TopicSidebarProps) {
   }, [vault.tasks, tree])
 
   const selectedIds = vault.settings.lastFilter?.topicIds ?? []
+
+  /** 可见行的拍平序列（深度优先，只含展开了的行）：键盘上下移动与 roving tabindex 共用。 */
+  const rows = useMemo(() => {
+    const out: TopicRow[] = []
+    const walk = (topic: Topic, depth: number): void => {
+      const children = tree.childrenOf(topic.id).filter((child) => !hidden.has(child.id))
+      const expanded = overrides[topic.id] ?? depth === DEFAULT_EXPANDED_DEPTH
+      out.push({ topic, depth, hasChildren: children.length > 0, expanded })
+      if (!expanded) return
+      for (const child of children) walk(child, depth + 1)
+    }
+    for (const root of tree.roots()) {
+      if (!hidden.has(root.id)) walk(root, 0)
+    }
+    return out
+  }, [tree, hidden, overrides])
+
+  const rowIndexById = useMemo(() => new Map(rows.map((row, index) => [row.topic.id, index])), [rows])
+  const rowRefs = useRef(new Map<string, HTMLDivElement>())
+  const [focusId, setFocusId] = useState<string | null>(null)
+  // roving tabindex：整棵树只占一个 Tab 停靠点，进树之后靠方向键走（WAI-ARIA tree 的标准做法）。
+  // focusId 指向的行已经不可见（被收起 / 归档）时回落到第一行，否则 Tab 会掉进虚空。
+  const activeRowId = focusId !== null && rowIndexById.has(focusId) ? focusId : rows[0]?.topic.id ?? null
+
+  function focusRow(id: string | null): void {
+    if (id === null) return
+    setFocusId(id)
+    rowRefs.current.get(id)?.focus()
+  }
+
+  /** 方向键导航（T52）：↑↓ 换行、→ 展开或进子行、← 收起或回父行、Enter/Space 切换筛选。 */
+  function handleRowKeyDown(event: ReactKeyboardEvent<HTMLDivElement>, row: TopicRow, index: number): void {
+    const move = (delta: number): void => {
+      event.preventDefault()
+      focusRow(rows[index + delta]?.topic.id ?? null)
+    }
+    switch (event.key) {
+      case 'ArrowDown':
+        move(1)
+        return
+      case 'ArrowUp':
+        move(-1)
+        return
+      case 'Home':
+        event.preventDefault()
+        focusRow(rows[0]?.topic.id ?? null)
+        return
+      case 'End':
+        event.preventDefault()
+        focusRow(rows[rows.length - 1]?.topic.id ?? null)
+        return
+      case 'ArrowRight':
+        event.preventDefault()
+        if (row.hasChildren && !row.expanded) {
+          setOverrides((prev) => ({ ...prev, [row.topic.id]: true }))
+        } else if (row.expanded) {
+          focusRow(rows[index + 1]?.topic.id ?? null)
+        }
+        return
+      case 'ArrowLeft':
+        event.preventDefault()
+        if (row.hasChildren && row.expanded) {
+          setOverrides((prev) => ({ ...prev, [row.topic.id]: false }))
+        } else if (row.topic.parentId !== null) {
+          focusRow(row.topic.parentId)
+        }
+        return
+      case 'Enter':
+      case ' ':
+        event.preventDefault()
+        actions.toggleTopicFilter(row.topic.id)
+        return
+      default:
+    }
+  }
+
+  // Esc 关闭右键菜单 / 调色板（T52）：此前只有「点遮罩」一条出路，
+  // 而遮罩盖住整页——用户按 Esc 完全没反应，只能去点一下别处。
+  useEffect(() => {
+    if (menuFor === null && paletteFor === null) return
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key !== 'Escape') return
+      setMenuFor(null)
+      setPaletteFor(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menuFor, paletteFor])
 
   function closeOverlays(): void {
     setMenuFor(null)
@@ -210,6 +329,9 @@ export function TopicSidebar(props: TopicSidebarProps) {
     const expanded = overrides[topic.id] ?? (depth === DEFAULT_EXPANDED_DEPTH)
     const selected = selectedIds.includes(topic.id)
     const hovered = hoverId === topic.id
+    const focused = focusId === topic.id
+    const index = rowIndexById.get(topic.id) ?? 0
+    const row = rows[index] ?? { topic, depth, hasChildren, expanded }
 
     return (
       <Fragment key={topic.id}>
@@ -218,13 +340,26 @@ export function TopicSidebar(props: TopicSidebarProps) {
           aria-level={depth + 1}
           aria-expanded={hasChildren ? expanded : undefined}
           aria-selected={selected}
+          // roving tabindex：只有一个行可被 Tab 探到，其余靠方向键
+          tabIndex={activeRowId === topic.id ? 0 : -1}
+          ref={(node) => {
+            if (node === null) rowRefs.current.delete(topic.id)
+            else rowRefs.current.set(topic.id, node)
+          }}
           data-testid={`topic-row-${topic.id}`}
           data-topic-id={topic.id}
           data-depth={depth}
           data-archived={topic.archived ? 'true' : 'false'}
           data-selected={selected ? 'true' : 'false'}
           onClick={() => {
+            setFocusId(topic.id)
             actions.toggleTopicFilter(topic.id)
+          }}
+          onFocus={() => {
+            setFocusId(topic.id)
+          }}
+          onKeyDown={(event) => {
+            handleRowKeyDown(event, row, index)
           }}
           onMouseEnter={() => {
             setHoverId(topic.id)
@@ -235,7 +370,8 @@ export function TopicSidebar(props: TopicSidebarProps) {
           onContextMenu={(event) => {
             event.preventDefault()
             setPaletteFor(null)
-            setMenuFor({ id: topic.id, x: event.clientX, y: event.clientY })
+            const at = clampMenuPosition(event.clientX, event.clientY)
+            setMenuFor({ id: topic.id, x: at.x, y: at.y })
           }}
           style={{
             display: 'flex',
@@ -315,7 +451,9 @@ export function TopicSidebar(props: TopicSidebarProps) {
             {countOf(topic.id)}
           </span>
 
-          {hovered && !topic.archived ? (
+          {/* 新建子话题：鼠标悬停时出现，键盘用户则是「焦点在这一行」时出现——
+              此前只有 hover 一条路，纯键盘永远看不到这个按钮。 */}
+          {!topic.archived && (hovered || focused) ? (
             <button
               type="button"
               data-testid={`topic-add-child-${topic.id}`}

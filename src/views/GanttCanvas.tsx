@@ -367,6 +367,11 @@ export interface GanttCanvasProps {
   t: (key: MsgKey, params?: TranslateParams) => string
   onScroll(input: { scrollTop: number; scrollLeft: number }): void
   onZoomWheel(event: WheelEvent): void
+  /**
+   * T52：「回到今天」的触发计数。每次 +1 就把今天那列滚到视野中间。
+   * 用计数而不是布尔量，连续点两次也能各自生效（布尔量第二次没有变化）。
+   */
+  jumpToTodayNonce?: number
 }
 
 export function GanttCanvas(props: GanttCanvasProps) {
@@ -403,6 +408,56 @@ export function GanttCanvas(props: GanttCanvasProps) {
   const headerBottom = clipHeaderCells(model.headerRows[1] ?? [], columnWindow, zoom)
   const todayColumn = model.columns.find((column) => column.isToday)
   const todayX = todayColumn === undefined ? null : (todayColumn.x + todayColumn.width / 2) * zoom
+
+  /**
+   * T52：首屏把「今天」带进视野。
+   *
+   * 画布的横向原点固定在时间范围起点，而范围是「最小 42 天、缺口 2/3 给未来」推导出来的，
+   * 起点常常比今天早一个多月——日刻度下画布 3300px、视口只有 650px，于是首屏是 9 月的空白格，
+   * 今天在屏外 565px，任务条也大半在屏外。用户第一眼会以为「图是空的」。
+   *
+   * 只在挂载后应用一次（`appliedRef`），之后滚动位置归用户；切刻度 / 缩放都不再抢。
+   */
+  const todayCenteredRef = useRef(false)
+  const centerToday = (): void => {
+    const element = scrollRef.current
+    if (element === null || todayX === null) return
+    element.scrollLeft = Math.max(0, todayX - element.clientWidth / 2)
+  }
+  useEffect(() => {
+    if (todayCenteredRef.current) return
+    // 首帧容器可能还没有布局（jsdom 恒为 0，真浏览器里通常已就绪），拿不到宽度就留给下一帧
+    if (scrollRef.current === null || scrollRef.current.clientWidth === 0) return
+    todayCenteredRef.current = true
+    centerToday()
+  }, [todayX])
+
+  // 「回到今天」按钮：靠单调计数触发，连点两次也各生效一次
+  const jumpNonce = props.jumpToTodayNonce ?? 0
+  useEffect(() => {
+    if (jumpNonce === 0) return
+    centerToday()
+  }, [jumpNonce])
+
+  /**
+   * 切刻度时保持「左边缘是哪一天」不变。
+   *
+   * 日 / 周的列宽差 7 倍（32px vs 14px），如果沿用一个 scrollLeft 像素值，
+   * 视野会一下子跳到半个月之外——用户为了「看更远」切到周刻度，结果丢了当前位置。
+   * 这里把旧视野的左缘折算成「第几天」，在新刻度里落回同一天。
+   */
+  const scaleAnchorRef = useRef<{ scale: string; cell: number; zoom: number } | null>(null)
+  useEffect(() => {
+    const element = scrollRef.current
+    const previous = scaleAnchorRef.current
+    const cell = model.columns[0]?.width ?? 0
+    scaleAnchorRef.current = { scale: model.scale, cell, zoom }
+    if (element === null || previous === null) return
+    if (previous.scale === model.scale) return
+    if (cell <= 0 || previous.cell <= 0) return
+    const anchorDay = Math.max(0, Math.floor(props.scrollLeft / (previous.cell * previous.zoom)))
+    element.scrollLeft = anchorDay * cell * zoom
+  }, [model, zoom, props.scrollLeft])
 
   // 行显示 y 由视图按下标重新投影（跨 topic 里程碑被提到顶部轨道后，模型行号会有空洞）
   const displayOffset = (row: GanttRow, index: number): number => (props.window.startRow + index) * rowHeight - row.y

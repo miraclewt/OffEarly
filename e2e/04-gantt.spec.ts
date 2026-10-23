@@ -51,7 +51,8 @@ test('日 / 周刻度切换会改变列集合与按钮态', async ({ page }) => 
   // 本模型里「列」恒为一天：刻度只改每天占的宽度（day 32px / week 14px，见 ganttModel.cellWidthOf），
   // 所以切到周刻度是**缩小**而不是合并——同一块画布装得下更多天，可见列数只增不减。
   expect(weekColumns.length).toBeGreaterThan(dayColumns.length)
-  // 两者都从范围起点铺开（scrollLeft 仍为 0），周刻度是「同一段日程看得更远」
+  // T52：切换刻度保持「左边缘是哪一天」不变（日→周列宽差 7 倍，沿用像素偏移会跳到半个月外），
+  // 所以首列仍是同一天，只是同一块画布装得下更多天。
   expect(weekColumns[0]).toBe(dayColumns[0])
   expect(weekColumns).not.toEqual(dayColumns)
 })

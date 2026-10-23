@@ -530,3 +530,20 @@ input[type='checkbox'] {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   word-break: break-word;
 }
+
+/* ── T52 · 看板卡片 meta 行：窄卡片下的取舍 ───────────────────────────────
+   卡片的宽度由「列宽」决定，与视口宽没有线性关系（1440 视口下一列约 244px，
+   1024 视口下只剩 172px），所以这里用容器查询而不是媒体查询。
+   规则只有一条：卡太窄时先舍类别 chip，把宽度让给话题名与到期日——
+   这两条才是看板上真正要读的信息；chip 的语义在任务弹窗里仍然完整。
+   阈值 188px 的来历：chip（约 30px）+ 右侧固定组（约 90px）+ 色点与间距
+   （约 20px）之后，话题名不足 3 个字就不再值得保留了。 */
+.oe-card {
+  container-type: inline-size;
+}
+
+@container (max-width: 188px) {
+  .oe-card-kind {
+    display: none;
+  }
+}
