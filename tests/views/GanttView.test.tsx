@@ -35,6 +35,8 @@ import {
   GANTT_OFF_COLUMN_FILL,
   GANTT_TODAY_COLOR,
   MILESTONE_SIZE,
+  resolveMilestoneLabel,
+  resolveTaskLabel,
 } from '../../src/views/GanttCanvas'
 import GanttViewDefault, { GanttView, UNSCHEDULED_PANEL_WIDTH } from '../../src/views/GanttView'
 
@@ -524,6 +526,63 @@ describe('T39 · 任务名标签（条内为主，深浅自适应）', () => {
     expect(body).toBeDefined()
     expect(view.container.querySelector('[data-gantt-label="t1"]')!.getAttribute('opacity')).toBeNull()
     expect(farLabel.getAttribute('opacity')).toBe(String(GANTT_HOVER_DIM_OPACITY))
+  })
+})
+
+describe('T53 · 条左端滚出视口后标签钉在视口左缘', () => {
+  it('未滚动时与旧口径逐字一致', () => {
+    const label = resolveTaskLabel('任务 t1', 100, 200, 0, 0)
+    expect(label.placement).toBe('inside')
+    expect(label.text).toBe('任务 t1')
+    expect(label.x).toBe(100 + GANTT_LABEL_PAD_X)
+  })
+
+  it('条左端滚出视口时，标签起点跟着视口走，而不是留在画布外被切掉', () => {
+    const label = resolveTaskLabel('任务 t1', 100, 200, 0, 150)
+    expect(label.placement).toBe('inside')
+    expect(label.text).toBe('任务 t1')
+    expect(label.x).toBe(150 + GANTT_LABEL_PAD_X)
+  })
+
+  it('条整体滚到视口左侧之外后不再画标签', () => {
+    expect(resolveTaskLabel('任务 t1', 100, 40, 0, 200).text).toBe('')
+    // 边界：条右缘恰好压在视口左缘上也算「看不见」
+    expect(resolveTaskLabel('任务 t1', 100, 100, 0, 200).text).toBe('')
+  })
+
+  it('钉住后深浅判定只看标签实际压住的那段进度', () => {
+    // 条 100..300，进度铺满：标签从 156 起，压在深色进度上
+    expect(resolveTaskLabel('任务 t1', 100, 200, 200, 150).fill).toBe(GANTT_LABEL_ON_PROGRESS_FILL)
+    // 进度只到 140，视口左缘 150 → 标签下面全是浅底
+    expect(resolveTaskLabel('任务 t1', 100, 200, 40, 150).fill).toBe(GANTT_LABEL_FILL)
+  })
+
+  it('视口吃掉大半条时截断预算同步收窄（不溢出条的右缘）', () => {
+    // 条 100..300，视口左缘 200 → 可用宽只剩 300-6-206 = 88，放不下 12 个汉字
+    const label = resolveTaskLabel('这是一条很长很长的任务标题', 100, 200, 0, 200)
+    expect(label.placement).toBe('inside')
+    expect(label.text.endsWith('…')).toBe(true)
+    expect(label.text.length).toBeLessThan('这是一条很长很长的任务标题'.length)
+  })
+})
+
+describe('T53 · 里程碑名字的可见性', () => {
+  it('名字画在菱形右尖之外，菱形还在视口内就整条可见', () => {
+    expect(resolveMilestoneLabel(200, 0)).toEqual({
+      x: 200 + MILESTONE_SIZE / 2 + GANTT_LABEL_OUTSIDE_GAP,
+      visible: true,
+    })
+    // 菱形横跨左缘：右尖仍在视口内，名字起点本来就落在视口里，不需要额外偏移
+    expect(resolveMilestoneLabel(150, 140)).toEqual({
+      x: 150 + MILESTONE_SIZE / 2 + GANTT_LABEL_OUTSIDE_GAP,
+      visible: true,
+    })
+  })
+
+  it('菱形整体滚出视口后连名字一起收掉（否则左缘会悬着一个无主标签）', () => {
+    expect(resolveMilestoneLabel(100, 120).visible).toBe(false)
+    // 边界：右尖恰好压在视口左缘上也算看不见
+    expect(resolveMilestoneLabel(100, 106).visible).toBe(false)
   })
 })
 

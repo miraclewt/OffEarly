@@ -84,6 +84,13 @@ export interface MutationPayloads {
 
 export type MutationType = keyof MutationPayloads
 
+/**
+ * T53 · 撤销栈容量上限。栈里每条命令都携着自己的逆元（笔记正文的逆 patch 带一整段
+ * Markdown），拖拽与连续输入都会进栈，长会话不刷新会一直涨。200 对个人工具足够深，
+ * 正常使用到不了；触顶时丢最旧的一条（见 `createCommandBus` 的 `trim`）。
+ */
+export const COMMAND_STACK_LIMIT = 200
+
 /** 一次事实变更（无逆元），undo/redo 的统一执行单位。 */
 export type Mutation = {
   [K in MutationType]: { type: K; payload: MutationPayloads[K] }
@@ -696,6 +703,19 @@ export function createCommandBus(store: VaultStore): CommandBus {
     for (const listener of [...listeners]) listener()
   }
 
+  /**
+   * T53 · 栈深上限（T52 遗留 3：长会话里每次拖拽 / 每段笔记正文都进栈，理论上一直涨）。
+   *
+   * 超出后丢**最旧**的一条，而不是干脆不入栈：丢的只是「还能撤多深」，
+   * 一致性不受影响——被丢的命令早已无 redo 归路，磁盘上也早就是它的结果。
+   * 正常会话远远到不了 200，只有长时间不刷新才可能触及。
+   */
+  function trim(stack: Command[]): void {
+    if (stack.length > COMMAND_STACK_LIMIT) {
+      stack.splice(0, stack.length - COMMAND_STACK_LIMIT)
+    }
+  }
+
   function run(mutation: Mutation): void {
     // 先算再写：reducer 抛错时 Store 原样不动，也不会半途改一半
     const next = reduce(store.getVault(), mutation)
@@ -706,6 +726,7 @@ export function createCommandBus(store: VaultStore): CommandBus {
     apply(command) {
       run(command)
       undoStack.push(command)
+      trim(undoStack)
       redoStack.length = 0
       notify()
     },
@@ -714,6 +735,7 @@ export function createCommandBus(store: VaultStore): CommandBus {
       if (command === undefined) return false
       run(command.inverse)
       redoStack.push(command)
+      trim(redoStack)
       notify()
       return true
     },
@@ -722,6 +744,7 @@ export function createCommandBus(store: VaultStore): CommandBus {
       if (command === undefined) return false
       run(command)
       undoStack.push(command)
+      trim(undoStack)
       notify()
       return true
     },

@@ -122,29 +122,46 @@ export interface GanttLabelPlacement {
   placement: 'inside' | 'outside'
 }
 
-/** 输入坐标一律是已按 zoom 缩放后的画布像素。 */
+/**
+ * 输入坐标一律是已按 zoom 缩放后的画布像素。
+ *
+ * `viewportLeft` 是画布内容左缘在视口里的位置（= 滚动容器的 `scrollLeft`，因为内容 1:1 铺开）。
+ * T53：条左端滚出视口时，标签**钉在视口左缘**而不是跟着条一起被切掉——否则首屏滚到「今天」
+ * 之后，跨越今天的那几条只剩半个字（实测只剩「回归」）。截断预算同步收窄到条的可见段，
+ * 深浅判定也只看标签实际压住的那段进度，所以钉住后不会出现「白字压在浅底上」。
+ * 导出路径不滚动，传默认 0 即旧行为。
+ */
 export function resolveTaskLabel(
   label: string,
   barX: number,
   barWidth: number,
   progressWidth: number,
+  viewportLeft = 0,
 ): GanttLabelPlacement {
   // 标签的边距与字号都跟着界面尺度走；传入的 barWidth 已经是模型放大后的像素
   const s = currentUiScale()
-  const inner = barWidth - GANTT_LABEL_PAD_X * 2 * s
-  const inside = truncateGanttLabel(label, inner, GANTT_LABEL_FONT_SIZE * s)
+  const padX = GANTT_LABEL_PAD_X * s
+  const barRight = barX + barWidth
+  // 条整体滚到视口左侧之外：名字跟着一起消失，不在边上凭空留一条看不见的条的名字
+  if (barRight <= viewportLeft) {
+    return { text: '', x: barRight + GANTT_LABEL_OUTSIDE_GAP * s, fill: GANTT_LABEL_FILL, placement: 'inside' }
+  }
+  const startX = Math.max(barX + padX, viewportLeft + padX)
+  const inner = barRight - padX - startX
+  const inside = inner > 0 ? truncateGanttLabel(label, inner, GANTT_LABEL_FONT_SIZE * s) : ''
   if (inside !== '') {
     const width = Math.min(estimateGanttLabelWidth(inside, GANTT_LABEL_FONT_SIZE * s), inner)
+    const covered = Math.max(0, Math.min(barX + progressWidth, startX + width) - startX)
     return {
       text: inside,
-      x: barX + GANTT_LABEL_PAD_X * s,
-      fill: labelOverProgress(progressWidth, width) ? GANTT_LABEL_ON_PROGRESS_FILL : GANTT_LABEL_FILL,
+      x: startX,
+      fill: labelOverProgress(covered, width) ? GANTT_LABEL_ON_PROGRESS_FILL : GANTT_LABEL_FILL,
       placement: 'inside',
     }
   }
   return {
     text: label,
-    x: barX + barWidth + GANTT_LABEL_OUTSIDE_GAP * s,
+    x: barRight + GANTT_LABEL_OUTSIDE_GAP * s,
     fill: GANTT_LABEL_FILL,
     placement: 'outside',
   }
@@ -154,6 +171,21 @@ export function resolveTaskLabel(
 export function milestoneLabelX(cx: number): number {
   const s = currentUiScale()
   return cx + (MILESTONE_SIZE / 2 + GANTT_LABEL_OUTSIDE_GAP) * s
+}
+
+/**
+ * T53 · 里程碑标签的可见性（名字画在菱形右侧，不截断）。
+ *
+ * 名字起点只在右尖之外 6px，所以它**永远不会被左缘截掉**：菱形右尖还在视口内，名字就整条可见。
+ * 真正要处理的是另一半——菱形整体滚出视口后，名字会变成屏幕左缘一个无主的悬空标签，
+ * 所以这里给一个 `visible`，菱形看不见就连名字一起收掉。
+ */
+export function resolveMilestoneLabel(cx: number, viewportLeft = 0): { x: number; visible: boolean } {
+  const s = currentUiScale()
+  return {
+    x: milestoneLabelX(cx),
+    visible: cx + (MILESTONE_SIZE / 2) * s > viewportLeft,
+  }
 }
 
 /** 折线拐点（模型坐标）。 */
@@ -704,27 +736,32 @@ export function GanttCanvas(props: GanttCanvasProps) {
                   height={laneHeight}
                   fill={LANE_FILL}
                 />
-                {props.lane.map((row) =>
-                  row.bar === null ? null : (
+                {props.lane.map((row) => {
+                  if (row.bar === null) return null
+                  const cx = (row.bar.x + row.bar.width / 2) * zoom
+                  const label = resolveMilestoneLabel(cx, props.scrollLeft)
+                  return (
                     <g key={`lane-${row.id}`}>
                       <MilestoneDiamond
                         id={row.id}
-                        cx={(row.bar.x + row.bar.width / 2) * zoom}
+                        cx={cx}
                         cy={laneHeight / 2}
                         fill={topicBarFill(row.color)}
                         title={row.label}
                       />
-                      <GanttBarLabel
-                        id={row.id}
-                        text={row.label}
-                        x={milestoneLabelX((row.bar.x + row.bar.width / 2) * zoom)}
-                        y={laneHeight / 2}
-                        fill={GANTT_LABEL_FILL}
-                        placement="outside"
-                      />
+                      {label.visible ? (
+                        <GanttBarLabel
+                          id={row.id}
+                          text={row.label}
+                          x={label.x}
+                          y={laneHeight / 2}
+                          fill={GANTT_LABEL_FILL}
+                          placement="outside"
+                        />
+                      ) : null}
                     </g>
-                  ),
-                )}
+                  )
+                })}
               </g>
             )}
 
@@ -741,6 +778,23 @@ export function GanttCanvas(props: GanttCanvasProps) {
                 // T21：关键路径开关打开时，criticalIds 内的任务条描边加粗
                 const barCritical = props.criticalPathVisible && row.critical
                 const dimOpacity = dimmed ? GANTT_HOVER_DIM_OPACITY : undefined
+                // T53：条整体滚到视口左侧之外时 resolveTaskLabel 返回空文本——那种情况下
+                // 整条标签不渲染（而不是留一个空 <text>），DOM 里「有标签」就等于「看得见名字」。
+                const barLabel =
+                  row.bar === null || row.kind !== 'task'
+                    ? null
+                    : resolveTaskLabel(
+                        row.label,
+                        row.bar.x * zoom,
+                        row.bar.width * zoom,
+                        row.bar.progressWidth * zoom,
+                        props.scrollLeft,
+                      )
+                // 里程碑同理：菱形可见就钉住名字，菱形滚出视口就连名字一起收掉
+                const milestoneLabel =
+                  row.bar === null || row.kind !== 'milestone'
+                    ? null
+                    : resolveMilestoneLabel((row.bar.x + row.bar.width / 2) * zoom, props.scrollLeft)
                 return (
                   <g key={`row-${row.id}`}>
                     <rect
@@ -784,17 +838,14 @@ export function GanttCanvas(props: GanttCanvasProps) {
                             pointerEvents="none"
                           />
                         ) : null}
-                        <GanttBarLabel
-                          id={row.id}
-                          y={row.bar.y + offset + row.bar.height / 2}
-                          opacity={dimOpacity}
-                          {...resolveTaskLabel(
-                            row.label,
-                            row.bar.x * zoom,
-                            row.bar.width * zoom,
-                            row.bar.progressWidth * zoom,
-                          )}
-                        />
+                        {barLabel !== null && barLabel.text !== '' ? (
+                          <GanttBarLabel
+                            id={row.id}
+                            y={row.bar.y + offset + row.bar.height / 2}
+                            opacity={dimOpacity}
+                            {...barLabel}
+                          />
+                        ) : null}
                         {props.baselineVisible && row.baseline !== null ? (
                           <rect
                             data-gantt-baseline={row.id}
@@ -819,14 +870,16 @@ export function GanttCanvas(props: GanttCanvasProps) {
                           fill={topicBarFill(row.color)}
                           title={row.label}
                         />
-                        <GanttBarLabel
-                          id={row.id}
-                          text={row.label}
-                          x={milestoneLabelX((row.bar.x + row.bar.width / 2) * zoom)}
-                          y={row.bar.y + row.bar.height / 2 + offset}
-                          fill={GANTT_LABEL_FILL}
-                          placement="outside"
-                        />
+                        {milestoneLabel !== null && milestoneLabel.visible ? (
+                          <GanttBarLabel
+                            id={row.id}
+                            text={row.label}
+                            x={milestoneLabel.x}
+                            y={row.bar.y + row.bar.height / 2 + offset}
+                            fill={GANTT_LABEL_FILL}
+                            placement="outside"
+                          />
+                        ) : null}
                       </>
                     ) : null}
                   </g>

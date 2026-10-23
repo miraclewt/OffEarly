@@ -115,6 +115,54 @@ test('任务名画在条上，文字与左侧任务表同源', async ({ page }) 
   expect(await inside.first().evaluate((node) => getComputedStyle(node).pointerEvents)).toBe('none')
 })
 
+test('条左端滚出视口后，任务名钉在画布左缘而不是被切掉半个字', async ({ page }) => {
+  await openGantt(page)
+
+  // 挑一条「左边还有内容、自己又够宽、且滚过去不会撞到右边界」的条，
+  // 把视口滚到它的左端之外 40px——这一步之后它就横跨视口左缘了。
+  const picked = await page.evaluate(() => {
+    const scroller = document.querySelector('[data-testid="gantt-canvas-scroll"]')
+    if (!(scroller instanceof HTMLElement)) return null
+    const maxScroll = scroller.scrollWidth - scroller.clientWidth
+    const candidates = [...document.querySelectorAll('[data-gantt-bar]')]
+      .map((node) => ({
+        id: node.getAttribute('data-gantt-bar') ?? '',
+        x: Number(node.getAttribute('x')),
+        width: Number(node.getAttribute('width')),
+      }))
+      .filter((bar) => bar.x > 120 && bar.width > 160 && bar.x + 44 < maxScroll)
+    const pick = candidates[candidates.length - 1]
+    if (pick === undefined) return null
+    scroller.scrollLeft = pick.x + 40
+    return pick
+  })
+  expect(picked).not.toBeNull()
+  const id = picked?.id ?? ''
+
+  const scroll = page.getByTestId('gantt-canvas-scroll')
+  // 滚动是受控的（scrollLeft 进视口状态才重投影标签），所以用轮询等它落到新位置
+  await expect.poll(async () => Number(await page.locator(`[data-gantt-label="${id}"]`).getAttribute('x'))).toBeGreaterThan(
+    (picked?.x ?? 0) + 10,
+  )
+
+  const viewportLeft = await scroll.evaluate((node) => node.getBoundingClientRect().left)
+  const label = await page.locator(`[data-gantt-label="${id}"]`).evaluate((node) => {
+    const rect = node.getBoundingClientRect()
+    return { left: rect.left, width: rect.width, text: node.textContent ?? '' }
+  })
+  const barLeft = await page
+    .locator(`[data-gantt-bar="${id}"]`)
+    .evaluate((node) => node.getBoundingClientRect().left)
+
+  // 前提：条自己确实横跨左缘（否则这条用例根本没测到「钉住」）
+  expect(barLeft).toBeLessThan(viewportLeft)
+  // 名字完整画出来，且起点贴着视口左缘（内边距 6 × 当前界面尺度，1280 宽下 0.95 档）
+  expect(label.text.length).toBeGreaterThan(0)
+  expect(label.width).toBeGreaterThan(0)
+  expect(label.left - viewportLeft).toBeGreaterThanOrEqual(2)
+  expect(label.left - viewportLeft).toBeLessThanOrEqual(12)
+})
+
 test('左侧任务表可折叠，收起后画布真的变宽', async ({ page }) => {
   await openGantt(page)
 

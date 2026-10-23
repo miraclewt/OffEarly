@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  COMMAND_STACK_LIMIT,
   addNodeCommand,
   createCommandBus,
   createMapCommand,
@@ -499,5 +500,38 @@ describe('思维导图命令', () => {
     expect(bus.redo()).toBe(true)
     expect(store.getVault()).toEqual(after)
     expect(store.getVault().mindmaps.map((m) => m.id)).toEqual(['map-2'])
+  })
+})
+
+describe('T53 · 撤销栈容量上限', () => {
+  it('超过上限后丢最旧的一条：退到底只能回到第 6 次改动，而不是最初状态', () => {
+    const excess = 5
+    for (let index = 1; index <= COMMAND_STACK_LIMIT + excess; index += 1) {
+      bus.apply(patchTaskCommand(store.getVault(), 'a', { title: `v${index}` }))
+    }
+    expect(bus.undoDepth()).toBe(COMMAND_STACK_LIMIT)
+
+    let undone = 0
+    while (bus.undo()) undone += 1
+    expect(undone).toBe(COMMAND_STACK_LIMIT)
+    // 最旧的 5 次改动已被丢弃，所以只能退回到第 5 次的结果
+    expect(store.getVault().tasks[0]!.title).toBe(`v${excess}`)
+    expect(bus.canUndo()).toBe(false)
+  })
+
+  it('redo 一并受控：整栈撤完再整栈重放，回到撤销前的版本', () => {
+    const total = COMMAND_STACK_LIMIT + 3
+    for (let index = 1; index <= total; index += 1) {
+      bus.apply(patchTaskCommand(store.getVault(), 'a', { title: `v${index}` }))
+    }
+    while (bus.undo()) {
+      // 一路退到底
+    }
+    expect(bus.redoDepth()).toBe(COMMAND_STACK_LIMIT)
+    while (bus.redo()) {
+      // 一路重放回来
+    }
+    expect(store.getVault().tasks[0]!.title).toBe(`v${total}`)
+    expect(bus.undoDepth()).toBe(COMMAND_STACK_LIMIT)
   })
 })
