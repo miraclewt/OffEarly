@@ -240,7 +240,7 @@ export function BoardColumn(props: BoardColumnProps) {
           {tasks.length}
         </span>
         <span style={{ flex: 1 }} />
-        {/* T64：这个数字原来只有一个笼统的 title（悬停才有、读屏读不到），
+        {/* T61：这个数字原来只有一个笼统的 title（悬停才有、读屏读不到），
             而「该列平均完成度」恰恰是看板上最容易被误读的读数（有人会以为是完成率）。
             改成一句自述：鼠标悬停看得到，读屏也念得出，空列不再显示一个无解释的「—」。 */}
         <span

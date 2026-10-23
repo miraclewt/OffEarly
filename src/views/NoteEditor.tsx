@@ -41,6 +41,7 @@ import { TaskList } from '@tiptap/extension-task-list'
 import { Markdown } from '@tiptap/markdown'
 import StarterKit from '@tiptap/starter-kit'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
+import type { EditorState } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
@@ -63,7 +64,7 @@ import { Lightbox } from './Lightbox'
 import { isMermaidLanguage, mermaidBlockRefs, normalizeMermaidCode, renderMermaidSvg, scopeSvgIds } from './mermaid'
 import { highlightCode, tokenClassNames } from '../domain/codeHighlight'
 import { NOTE_FONT_SIZE_DEFAULT, NOTE_FONT_SIZE_MAX, NOTE_FONT_SIZE_MIN } from '../domain/types'
-import { fs, sp, px } from '../styles/scale'
+import { fs, pxNum, sp, px } from '../styles/scale'
 
 const BORDER = 'var(--oe-border)'
 const SEPARATOR = 'var(--oe-separator)'
@@ -1163,6 +1164,74 @@ const TOOLS: readonly ToolSpec[] = [
   { id: 'divider', icon: 'divider', label: 'noteEditor.divider', isActive: () => false, run: (e) => e.chain().focus().setHorizontalRule().run() },
 ]
 
+/**
+ * T63 · 光标落在表格里时浮出的行列工具条。
+ *
+ * 为什么必须有这一条：`TableKit` 只给了**建表**的命令，行列的增删命令（`addRowAfter` /
+ * `deleteColumn` …）虽然全在，却没有任何入口——Tab 只会在末行追加一行，Backspace 只会在
+ * 全选单元格时删掉整张表。于是「表格建成之后」就只能靠源码模式改 md，而 md 表格还得
+ * 逐列对齐写竖线才算数。
+ *
+ * `danger` 只决定颜色（删除类），`disabled` 决定可不可点（合并/拆分要看当前选区）。
+ */
+interface TableToolSpec {
+  id: string
+  icon: IconName
+  label: MsgKey
+  danger?: boolean
+  /** 同一组之间画一条细分隔线（视觉分组：行 / 列 / 结构 / 危险）。 */
+  group?: boolean
+  disabled?: (editor: Editor) => boolean
+  run: (editor: Editor) => void
+}
+
+const TABLE_TOOLS: readonly TableToolSpec[] = [
+  { id: 'row-above', icon: 'table-row-above', label: 'noteEditor.tableRowAbove', run: (e) => { e.chain().focus().addRowBefore().run() } },
+  { id: 'row-below', icon: 'table-row-below', label: 'noteEditor.tableRowBelow', run: (e) => { e.chain().focus().addRowAfter().run() } },
+  { id: 'row-remove', icon: 'table-row-remove', label: 'noteEditor.tableRowRemove', group: true, run: (e) => { e.chain().focus().deleteRow().run() } },
+  { id: 'col-left', icon: 'table-col-left', label: 'noteEditor.tableColLeft', group: true, run: (e) => { e.chain().focus().addColumnBefore().run() } },
+  { id: 'col-right', icon: 'table-col-right', label: 'noteEditor.tableColRight', run: (e) => { e.chain().focus().addColumnAfter().run() } },
+  { id: 'col-remove', icon: 'table-col-remove', label: 'noteEditor.tableColRemove', run: (e) => { e.chain().focus().deleteColumn().run() } },
+  { id: 'header', icon: 'table-header', label: 'noteEditor.tableHeaderRow', group: true, run: (e) => { e.chain().focus().toggleHeaderRow().run() } },
+  {
+    id: 'merge',
+    icon: 'table-merge',
+    label: 'noteEditor.tableMerge',
+    group: true,
+    disabled: (e) => !e.can().mergeCells(),
+    run: (e) => { e.chain().focus().mergeCells().run() },
+  },
+  {
+    id: 'split',
+    icon: 'table-split',
+    label: 'noteEditor.tableSplit',
+    disabled: (e) => !e.can().splitCell(),
+    run: (e) => { e.chain().focus().splitCell().run() },
+  },
+  { id: 'delete', icon: 'trash', label: 'noteEditor.tableDelete', danger: true, group: true, run: (e) => { e.chain().focus().deleteTable().run() } },
+]
+
+/** 光标是否在表格里；在的话给出表格节点的**起始位置**（`before(depth)`，`nodeDOM` 要用它）。 */
+function findTablePosition(state: EditorState): number | null {
+  const { $from } = state.selection
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    if ($from.node(depth).type.name === 'table') return $from.before(depth)
+  }
+  return null
+}
+
+/**
+ * 工具条的实测位置（内容坐标，相对于正文容器；随内容滚动，不需要监听 scroll）。
+ * 可点状态（合并 / 拆分）不存进来：它在渲染时现问 `editor.can()`，比存快照更不容易过期。
+ */
+interface TableBarState {
+  pos: number
+  top: number
+  left: number
+  /** 在表格上方（true）还是被挤到下方（false）。 */
+  above: boolean
+}
+
 export function NoteEditor(props: NoteEditorProps): ReactElement {
   const t = props.t ?? fallbackI18n.t
   const debounceMs = props.debounceMs ?? DEFAULT_DEBOUNCE_MS
@@ -1176,8 +1245,14 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   const [mode, setMode] = useState<'rich' | 'source'>('rich')
   const [sourceDraft, setSourceDraft] = useState(props.value)
   const [charCount, setCharCount] = useState(() => countNoteChars(props.value))
+  /** T63 · 表格工具条（null = 光标不在表格里，不渲染）。 */
+  const [tableBar, setTableBar] = useState<TableBarState | null>(null)
+  /** 窗口尺寸变化只影响几何、不改文档 → 用一个计数器把「重新量一次」通知出去（值本身不用）。 */
+  const [, setMeasureTick] = useState(0)
 
   const editorRef = useRef<Editor | null>(null)
+  /** 正文滚动容器：工具条的绝对定位基准（也是滚动容器，故工具条随内容一起滚）。 */
+  const bodyRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const anchorRef = useRef<number | null>(null)
   const timerRef = useRef<number | null>(null)
@@ -1339,6 +1414,53 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
       props.onReady?.(null)
     },
   }, [])
+
+  // 窗口尺寸变了只影响几何：把计数器加一，让下面的测量再跑一遍。
+  useEffect(() => {
+    const onResize = () => setMeasureTick((value) => value + 1)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // T63 · 表格工具条跟着光标所在的表格走。
+  //
+  // 位置在**内容坐标**里算（表格 rect − 容器 rect + scroll），因为工具条是正文容器的
+  // 绝对定位子元素：它随内容一起滚，于是完全不用监听 scroll，也不会在惯性滚动里掉帧。
+  // 不写依赖数组是刻意的 —— `shouldRerenderOnTransaction` 让每次事务都重渲染一次，
+  // 这里借这次渲染重新量一遍；状态没变时 setState 返回同一个引用，不会自激。
+  useEffect(() => {
+    const host = bodyRef.current
+    // 还要「正在编辑」：打开一篇以表格开头的文档时，初始光标本来就落在第一格里，
+    // 只按选区判断会让工具条在用户还没动手时就挂在那儿挡字。
+    const pos = mode === 'rich' && editor !== null && editor.isFocused ? findTablePosition(editor.state) : null
+    const table = pos !== null && host !== null ? editor?.view.nodeDOM(pos) : null
+    if (pos === null || host === null || !(table instanceof HTMLElement)) {
+      setTableBar((prev) => (prev === null ? prev : null))
+      return
+    }
+    const rect = table.getBoundingClientRect()
+    const frame = host.getBoundingClientRect()
+    const contentTop = rect.top - frame.top + host.scrollTop
+    const contentLeft = rect.left - frame.left + host.scrollLeft
+    // 几何必须用**数值**：工具条的 top/left 要参与加减（`sp()` 返回的是 calc 字符串）。
+    const barHeight = pxNum(28)
+    const gap = pxNum(6)
+    // 默认浮在表格**上方**；表格已经贴住可视区顶部时改到下方——否则工具条会压住第一行，
+    // 而那正是用户最常点的地方。
+    //
+    // 上方这一档用 `translateY(-100%)` 而不是「减去一个估的高度」：工具条的高度由图标与
+    // 界面尺度共同决定（不是写死的 28px），用估值做减法会差两三像素，浮件就会压住表头边框。
+    // 让浏览器自己把底边贴到 top 上，尺子就永远是准的。
+    const above = contentTop - barHeight - gap >= host.scrollTop
+    const top = above ? contentTop - gap : contentTop + rect.height + gap
+    const maxLeft = Math.max(0, host.clientWidth - pxNum(292))
+    const left = Math.max(0, Math.min(contentLeft, maxLeft))
+    setTableBar((prev) =>
+      prev !== null && prev.pos === pos && prev.top === top && prev.left === left && prev.above === above
+        ? prev
+        : { pos, top, left, above },
+    )
+  })
 
   // 卸载补交：debounce 未到就切任务/关弹窗时，把最后一次编辑交给「发起它的那个任务」
   // （commitRef 的闭包在挂载时已绑定该任务的 onCommit）。
@@ -1655,6 +1777,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
         />
       ) : (
         <div
+          ref={bodyRef}
           className="oe-prose"
           data-testid="note-body"
           style={{
@@ -1665,6 +1788,45 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
           }}
         >
           <EditorContent editor={editor} />
+
+          {/* T63 · 光标在表格里时浮出的行列工具条（绝对定位在正文容器内，随内容滚动） */}
+          {tableBar === null || editor === null ? null : (
+            <div
+              data-testid="note-table-bar"
+              role="toolbar"
+              aria-label={t('noteEditor.tableTools')}
+              className="oe-table-bar"
+              style={{
+                top: tableBar.top,
+                left: tableBar.left,
+                transform: tableBar.above ? 'translateY(-100%)' : undefined,
+              }}
+            >
+              {TABLE_TOOLS.map((tool) => {
+                const disabled = tool.disabled?.(editor) ?? false
+                return (
+                  <span key={tool.id} style={{ display: 'contents' }}>
+                    {tool.group === true ? <span className="oe-table-bar-sep" aria-hidden="true" /> : null}
+                    <button
+                      type="button"
+                      data-testid={`table-tool-${tool.id}`}
+                      data-danger={tool.danger === true ? 'true' : undefined}
+                      disabled={disabled}
+                      aria-label={t(tool.label)}
+                      title={t(tool.label)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        const current = editorRef.current
+                        if (current !== null) tool.run(current)
+                      }}
+                    >
+                      <Icon name={tool.icon} size={14} />
+                    </button>
+                  </span>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -1800,6 +1962,8 @@ const TOOLBAR: CSSProperties = {
 const NOTE_BODY: CSSProperties = {
   minWidth: 0,
   background: SURFACE,
+  // T63：表格工具条是这里的绝对定位子元素（定位基准 = 正文容器，随内容滚动）
+  position: 'relative',
 }
 
 const SOURCE_AREA: CSSProperties = {

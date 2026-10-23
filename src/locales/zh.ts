@@ -39,7 +39,7 @@ export const zh = {
   },
   board: {
     emptyColumn: '暂无任务',
-    // T64 追加：列头平均完成度的自述（只增不改）
+    // T63 追加：列头平均完成度的自述（只增不改）
     columnRatio: '该列平均完成度 {n}%',
     columnRatioEmpty: '该列暂无任务，完成度按空显示',
   },
@@ -314,6 +314,18 @@ export const zh = {
     link: '链接',
     linkPrompt: '输入链接地址',
     table: '表格',
+    // T63 追加：表格行列工具条（只增不改）
+    tableTools: '表格操作',
+    tableRowAbove: '上方插入行',
+    tableRowBelow: '下方插入行',
+    tableRowRemove: '删除本行',
+    tableColLeft: '左侧插入列',
+    tableColRight: '右侧插入列',
+    tableColRemove: '删除本列',
+    tableHeaderRow: '切换表头行',
+    tableMerge: '合并单元格',
+    tableSplit: '拆分单元格',
+    tableDelete: '删除表格',
     image: '图片',
     divider: '分隔线',
     linkSearch: '搜索任务或里程碑',

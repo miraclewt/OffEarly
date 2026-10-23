@@ -192,6 +192,7 @@ tests/**                         与 src 镜像
 - [x] **T60** 代码块着色 + mermaid 源码收放：零依赖扫描器 `codeHighlight.ts`（编辑器 inline decoration 与导出 span 共用）、预览标题行的「收起源码 / 展开源码」 → done
 - [x] **T61** 看板卡片第三行（负责人 + 更新日期）与容器查询二档、筛选面板「条件开关」置顶、列头完成度改成可朗读的自述、示例库补 2 本笔记本 / 4 篇文档 → done
 - [x] **T62** 从 Outlook 导入会议：`.ics` 解析（折行 / 转义 / Windows 时区名 / 全天 / 取消态 / RRULE 只取单场）+ 导入面板（拖入或选择文件、逐场勾选、已导入不重复）→ 按模板生成**会议笔记**（`NoteDoc` 而非 `Task`），令牌 `ics:<uid>@<date>` 去重 → done
+- [x] **T63** 表格行列工具条：光标在表格内浮出「上/下插行、左/右插列、删行/删列、表头、合并/拆分、删表」；顺带修掉 `th/td` 没有定位导致框选单元格时整页蒙色的 bug → done
 
 ---
 
@@ -1502,3 +1503,13 @@ tests/**                         与 src 镜像
 ⑤**审批与体验对齐既有口径**：文件走隐藏 `<input type="file">`（T28 先例，jsdom 可测）+ 面板内拖放区（`file://` 下 dataTransfer.files 无需权限）；浮层 `createPortal` 到 body（外壳 backdrop-filter 会造包含块）、z-30（压过任务弹窗 25、低于灯箱 60）；遮罩关闭要求按下与抬起都落在遮罩上。生成正文用引用块装「原始邀请」，免得邀请里的 `#` 变成大纲标题。
 ⑥**刻意不做**：Graph API 直连（Entra 的 SPA 重定向 URI 只收 https 或 localhost，`file://` 不在其列；且会打破「离线零请求」的产品承诺）、日历同步 / 回写、粘贴文本解析（下一轮再说）。
  | 全量验证: `tsc` 0 / `npm test` **1254 passed (70 files)** / `npm run e2e` **57 passed + 1 skipped**（新增 2 条走真 Chromium 的 setInputFiles → 落盘断言）/ `npm run build` **10/10**（产物 **6428284 字节**） | 备注（环境）: 全量 e2e 首轮有 3 条 unrelated 用例报 `browserContext.close: ENOENT … trace`（01/02/03），单独复跑 13/13 全绿——是 `test-results/` 产物堆积撞沙箱批量删除保护的已知噪音，不是回归
+
+- [2026-10-23] T63 | agent: workbuddy:sess-1024a | commit: "T63: give tables a row/column toolbar, and stop the cell-selection overlay from covering the page" | 验收: 用户报「表格的行列好像无法随意添加和删除」→ 真 Chromium 逐项核对（10 个按钮、两个视口、合并/拆分/删除全过） | 备注:
+①**根因是「命令全在、入口为零」**：`TableKit` 只提供了一个「建表」按钮；`addRowAfter` / `deleteColumn` / `mergeCells` 这些命令早就注册好了，却没有一处 UI 调它们。Tab 只在末行追加一行，Backspace 只在全选单元格时删整张表 —— 于是表格建成之后想加一列，只能切源码模式手写竖线（还得把每列对齐）。
+②**顺手抓到一个更脏的 bug**：`.selectedCell::after` 是 `position:absolute; inset:0`，而 `th/td` 从来没设过定位 —— 绝对定位的包含块一路往上找到视口，框选两个格子会在**整页**盖一层紫。这条 jsdom 完全量不出（布局全 0），是截图里看见的。修法是给单元格 `position:relative`，让蒙层被关在格子里。
+③**工具条的出现条件是「光标在表格里 **且** 编辑器有焦点」**：打开一篇以表格开头的文档时，初始光标本来就落在第一格里，只按选区判断会让它一进页面就挂在那儿挡字（第一次 e2e 就是这么红的）。
+④**位置用 `translateY(-100%)` 而不是「减去估算高度」**：工具条高度由图标尺寸与界面尺度共同决定（不是写死的 28px），用估值做减法会差两三像素，正好压住表头边框 —— e2e 量到 bar 底边 252.48 > 表格顶边 158.53 就是这么来的。改成让浏览器把底边贴到 top 上，1024 与 1600 两个视口实测 gap 都是 6px。
+⑤**绝对定位的基准是正文容器 `.oe-prose`（内容坐标）**：工具条是它的绝对定位子元素，随内容一起滚 —— 于是完全不监听 scroll，也不会在惯性滚动里掉帧。表格贴住可视区顶部时自动翻到表格下方。
+⑥**合并 / 拆分按选区置灰**（现问 `editor.can()`，不存快照）：点了没反应比按钮不存在更让人困惑。删除表格用危险色，其余是中性色。
+ | 越界改动: ①`IconSprite` 新增 9 个图标（横带=行、竖带=列；带+朝外箭头=插入，带+短横=删除）；②`theme.css` 给 `th/td` 补 `position:relative`（这是 ② 那个 bug 的正解）、新增 `.oe-table-bar`；③`NoteEditor` 新增 `TABLE_TOOLS` / `findTablePosition` / 跟随测量（每帧事务量一次，值不变则 setState 返回同一引用）；④`BoardColumn` 里一条写错编号的注释（T64 → T61）；⑤**未改** schema / package.json（零新依赖）。
+ | 全量验证: `tsc` 0 / `npm test` **1257 passed (70 files)**（本批 +11）/ `npm run e2e` **57 passed + 1 skipped**（新增 2 条：落盘断言 + 蒙层断言）/ `npm run build` **10/10**（产物 **6428397 字节**，余量 1.87MB）

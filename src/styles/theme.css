@@ -450,6 +450,12 @@ input[type='checkbox'] {
   border: 1px solid var(--oe-separator);
   vertical-align: top;
   text-align: left;
+  /*
+   * 多选单元格的底色是 `.selectedCell::after`（position: absolute; inset: 0）。
+   * 单元格本身没有定位，那个绝对定位就会一路往上找到最近的有定位祖先——
+   * 结果是选中两个格子、整页盖上一层紫。T63 修：让单元格成为它自己的包含块。
+   */
+  position: relative;
 }
 
 .oe-prose th {
@@ -463,6 +469,54 @@ input[type='checkbox'] {
   inset: 0;
   background: var(--oe-accent-tint);
   pointer-events: none;
+}
+
+/*
+ * T63 · 表格行列工具条。
+ * 位置（top/left）由 NoteEditor 实测后内联给出，这里只管外观——
+ * 尺寸一律乘 --oe-ui-scale，与正文别的控件同一个尺度旋钮。
+ */
+.oe-table-bar {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: calc(1px * var(--oe-ui-scale, 1));
+  padding: calc(2px * var(--oe-ui-scale, 1));
+  background: var(--oe-surface);
+  border: 1px solid var(--oe-separator);
+  border-radius: var(--oe-radius-control);
+  box-shadow: var(--oe-shadow-card);
+}
+
+.oe-table-bar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(24px * var(--oe-ui-scale, 1));
+  height: calc(24px * var(--oe-ui-scale, 1));
+  padding: 0;
+  color: var(--oe-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: calc(6px * var(--oe-ui-scale, 1));
+  cursor: pointer;
+}
+
+.oe-table-bar button[data-danger='true'] {
+  color: var(--oe-overdue);
+}
+
+.oe-table-bar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.oe-table-bar-sep {
+  width: 1px;
+  height: calc(14px * var(--oe-ui-scale, 1));
+  margin: 0 calc(2px * var(--oe-ui-scale, 1));
+  background: var(--oe-separator);
 }
 
 /* 空文档占位：装饰节点挂 class 与 data-placeholder（见 NotePlaceholder） */

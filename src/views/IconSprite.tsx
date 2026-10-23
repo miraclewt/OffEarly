@@ -161,6 +161,31 @@ const ICON_GEOMETRY = {
     'M7 12 H19',
     'M10 17.5 H19',
   ],
+  /**
+   * T63 · 表格行列操作。
+   *
+   * 一套视觉语言：**横带 = 行、竖带 = 列**；带 + 朝外箭头 = 插入，带 + 短横 = 删除。
+   * 只画一个带子（而不是整张表格）是为了 15px 下还分得清 —— 整张网格缩到这个尺寸时，
+   * 「哪条边被选中」完全看不见。
+   */
+  'table-row-above': [roundRect(3, 12, 18, 8.5, 1.5), 'M12 9 V3', 'M9 5.6 L12 3 L15 5.6'],
+  'table-row-below': [roundRect(3, 3.5, 18, 8.5, 1.5), 'M12 15 V21', 'M9 18.4 L12 21 L15 18.4'],
+  'table-col-left': [roundRect(12, 3, 8.5, 18, 1.5), 'M9 12 H3', 'M5.6 9 L3 12 L5.6 15'],
+  'table-col-right': [roundRect(3.5, 3, 8.5, 18, 1.5), 'M15 12 H21', 'M18.4 9 L21 12 L18.4 15'],
+  'table-row-remove': [roundRect(3, 8, 18, 8.5, 1.5), 'M9.5 12.2 H14.5'],
+  'table-col-remove': [roundRect(8, 3, 8.5, 18, 1.5), 'M12 9.5 V14.5'],
+  'table-merge': [
+    roundRect(3, 5.5, 7.5, 13, 1.5),
+    roundRect(13.5, 5.5, 7.5, 13, 1.5),
+    'M10.5 12 H13.5',
+  ],
+  'table-split': [
+    roundRect(3, 5.5, 18, 13, 1.5),
+    'M12 5.5 V18.5',
+    'M6.8 9.8 L4.6 12 L6.8 14.2',
+    'M17.2 9.8 L19.4 12 L17.2 14.2',
+  ],
+  'table-header': [roundRect(3, 4.5, 18, 15, 1.5), 'M3 9.5 H21', 'M6.5 7 H11'],
 } as const satisfies Record<string, readonly string[]>
 
 export type IconName = keyof typeof ICON_GEOMETRY

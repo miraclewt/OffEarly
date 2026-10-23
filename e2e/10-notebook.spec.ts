@@ -300,3 +300,110 @@ test('收起两栏面板（T51/T57）：面板变竖轨，窄屏正文变宽、�
   await page.setViewportSize({ width: 1600, height: 900 })
   expect(await width()).toBeLessThan(1000)
 })
+
+const TABLE_DOC = [
+  '表格上面这段文字用来把表格从版心顶部推开，也用来确认「光标不在表格里」。',
+  '',
+  '| 项目 | 状态 |',
+  '| --- | --- |',
+  '| 支付 | 进行中 |',
+  '',
+  '后记：表格下面还有一段。',
+  '',
+].join('\n')
+
+/**
+ * T63 · 表格的行列增删。
+ *
+ * 这条用例回答的是「表格建成之后还能不能改」：`TableKit` 只提供了一个「建表」按钮，
+ * 行列的增删命令虽然都在，却没有任何入口 —— 用户只能切到源码模式手写竖线。
+ */
+test('表格行列：光标进表格浮出工具条，加行加列后写进 vault.json', async ({ page }) => {
+  await openAppWith(page, withNotebooks([{ title: '表格文档', content: TABLE_DOC }]))
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-notebook').click()
+  await page.getByText('表格文档').first().click()
+
+  const table = page.locator('.oe-prose table').first()
+  await expect(table).toBeVisible()
+  // 光标在正文里时不该有工具条：它是悬浮件，常驻会挡字
+  await page.getByTestId('note-editor-content').getByText('表格上面这段文字').click()
+  await expect(page.getByTestId('note-table-bar')).toHaveCount(0)
+
+  await table.locator('td').first().click()
+  const bar = page.getByTestId('note-table-bar')
+  await expect(bar).toBeVisible()
+  // 工具条浮在表格**上方**，而不是压在表头那一行上
+  const barBox = (await bar.boundingBox()) as { y: number; height: number } | null
+  const tableBox = (await table.boundingBox()) as { y: number } | null
+  expect(barBox).not.toBeNull()
+  expect(tableBox).not.toBeNull()
+  expect((barBox?.y ?? 0) + (barBox?.height ?? 0)).toBeLessThanOrEqual((tableBox?.y ?? 0) + 1)
+
+  // 加两行、加一列
+  await page.getByTestId('table-tool-row-below').click()
+  await page.getByTestId('table-tool-row-below').click()
+  await page.getByTestId('table-tool-col-right').click()
+  await expect(table.locator('tr')).toHaveCount(4)
+  await expect(table.locator('tr').first().locator('th, td')).toHaveCount(3)
+
+  // 表格结构必须真的存进去（笔记正文只存 Markdown，存不下就等于没改）
+  await expect
+    .poll(
+      async () => {
+        // 按标题找，不按正文片段找：Markdown 表格序列化会**补空格对齐列**，
+        // `| 项目 |` 落盘后是 `| 项目 |` 还是 `| 项目   |` 取决于同列最宽的单元格。
+        const doc = (parseVault(await readFakeFs(page)).noteDocs ?? []).find((item) => item.title === '表格文档')
+        const content = doc?.content ?? ''
+        const lines = content.split('\n').filter((line) => line.trim().startsWith('|'))
+        const header = lines[0] ?? ''
+        return { rows: lines.length, cols: header.split('|').length - 2 }
+      },
+      { timeout: 15_000 },
+    )
+    .toEqual({ rows: 5, cols: 3 })
+})
+
+test('表格合并：框选两格才可合并，页面上不再出现整页蒙层', async ({ page }) => {
+  await openAppWith(page, withNotebooks([{ title: '合并文档', content: TABLE_DOC }]))
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-notebook').click()
+  await page.getByText('合并文档').first().click()
+
+  const table = page.locator('.oe-prose table').first()
+  await expect(table).toBeVisible()
+
+  // 单选时合并/拆分都置灰：点了没反应比按钮不存在更让人困惑
+  await table.locator('td').first().click()
+  await expect(page.getByTestId('table-tool-merge')).toBeDisabled()
+
+  const first = (await table.locator('td').nth(0).boundingBox()) as { x: number; y: number; width: number; height: number }
+  const second = (await table.locator('td').nth(1).boundingBox()) as { x: number; y: number; width: number; height: number }
+  await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(second.x + second.width / 2, second.y + second.height / 2, { steps: 6 })
+  await page.mouse.up()
+
+  await expect(page.getByTestId('table-tool-merge')).toBeEnabled()
+
+  // T63 顺手修掉的坑：单元格没有定位时，`.selectedCell::after` 会一路找到视口，
+  // 选中两格就在整页盖一层紫。这里量的是「那层蒙层不再盖住整页」。
+  const overlay = await page.evaluate(() => {
+    const cell = document.querySelector('.oe-prose td.selectedCell') as HTMLElement | null
+    const prose = document.querySelector('.oe-prose') as HTMLElement | null
+    if (cell === null || prose === null) return null
+    return {
+      afterPosition: getComputedStyle(cell, '::after').position,
+      // 修复的关键：单元格自己必须是包含块，蒙层才被关在格子里
+      cellPosition: getComputedStyle(cell).position,
+      cellWidth: Math.round(cell.getBoundingClientRect().width),
+      proseWidth: Math.round(prose.getBoundingClientRect().width),
+    }
+  })
+  expect(overlay?.afterPosition).toBe('absolute')
+  expect(overlay?.cellPosition).toBe('relative')
+  expect(overlay?.cellWidth ?? 0).toBeLessThan((overlay?.proseWidth ?? 0) * 0.75)
+
+  await page.getByTestId('table-tool-merge').click()
+  await expect(table.locator('td[colspan="2"]')).toHaveCount(1)
+})
