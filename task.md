@@ -191,6 +191,7 @@ tests/**                         与 src 镜像
 - [x] **T59** 导出 Markdown：知识库导出菜单新增 `.md`（绕过 HTML 管线，直接吐原文） → done
 - [x] **T60** 代码块着色 + mermaid 源码收放：零依赖扫描器 `codeHighlight.ts`（编辑器 inline decoration 与导出 span 共用）、预览标题行的「收起源码 / 展开源码」 → done
 - [x] **T61** 看板卡片第三行（负责人 + 更新日期）与容器查询二档、筛选面板「条件开关」置顶、列头完成度改成可朗读的自述、示例库补 2 本笔记本 / 4 篇文档 → done
+- [x] **T62** 从 Outlook 导入会议：`.ics` 解析（折行 / 转义 / Windows 时区名 / 全天 / 取消态 / RRULE 只取单场）+ 导入面板（拖入或选择文件、逐场勾选、已导入不重复）→ 按模板生成**会议笔记**（`NoteDoc` 而非 `Task`），令牌 `ics:<uid>@<date>` 去重 → done
 
 ---
 
@@ -1492,3 +1493,12 @@ tests/**                         与 src 镜像
 ②**标签管理的候选 chip 与管理清单抢位置**：15 个标签的候选区把管理清单挤到面板下沿之外（要滚才能看到第二行），而管理态的用途是「整理」不是「加条件」。管理态下让候选区收起，一屏能看到 8 行。
 ③**这轮的教训**：`npm test` 与 `npm run e2e` 都绿也不代表「看一眼是对的」——两条都是新 UI，最终是靠真浏览器截图 + 一段 `page.evaluate` 探针才确认的。
  | 全量验证: `tsc` 0 / `npm test` **1191 passed (66 files)** / `npm run e2e` **53 passed + 1 skipped** / `npm run build` **10/10**（产物 **6403645 字节**）
+
+- [2026-10-23] T62 | agent: workbuddy:sess-1023e | commit: "T62: import Outlook meetings from .ics into notebook meeting notes" | 验收: 4/4（用户口径「导入 ics 文件就行」） | 备注:
+①**落点是 `NoteDoc` 不是 `Task`，这不是随手选的**：`Task.start`/`due` 是 dateOnly（无时刻），一场 14:00–15:00 的会硬塞进去会让甘特图算成整天工期；`Task.assignee` 是单值，参会人列表无处安放。而 `applyCreateDoc` 本来就支持预填正文 → 零 schema 变更、零迁移、不碰 21 处夹具。
+②**解析器（`src/domain/ics.ts`）吃掉四个真实坑**：75 字节折行（空格/Tab 续行先拼回再解析）、TEXT 转义（`\,` `\;` `\n` `\\`，未知转义保留字符不吞内容）、`TZID=China Standard Time` 这类 **Windows 时区名**（25 条映射表 + IANA 直通 + 本机兜底，认不出也绝不丢事件）、`RRULE` 只取「这一场」并在正文注明。取消态（`STATUS:CANCELLED`）直接不产出。
+③**去重靠正文里一行 ASCII 令牌 `ics:<uid>@<date>`**：可见、可删、跨语言稳定；不用 HTML 注释（TipTap 的 Markdown 往返会吃掉），不往 schema 加字段。uid 缺失时退化为 `~<date>|<summary>`。
+④**批量新建的隐藏坑**：`applyCreateDoc` 从传入的 `vault` 快照算 `nextDocOrder`，循环里快照不变 → 一次导 3 场会得到 3 个**相同**排序键。为此给 `applyCreateDoc` 加了可选的 `order` 入参，`importMeetingNotes` 自己往下推排序键（已用「三篇 order 去重后 size=3」的单测钉死）。
+⑤**审批与体验对齐既有口径**：文件走隐藏 `<input type="file">`（T28 先例，jsdom 可测）+ 面板内拖放区（`file://` 下 dataTransfer.files 无需权限）；浮层 `createPortal` 到 body（外壳 backdrop-filter 会造包含块）、z-30（压过任务弹窗 25、低于灯箱 60）；遮罩关闭要求按下与抬起都落在遮罩上。生成正文用引用块装「原始邀请」，免得邀请里的 `#` 变成大纲标题。
+⑥**刻意不做**：Graph API 直连（Entra 的 SPA 重定向 URI 只收 https 或 localhost，`file://` 不在其列；且会打破「离线零请求」的产品承诺）、日历同步 / 回写、粘贴文本解析（下一轮再说）。
+ | 全量验证: `tsc` 0 / `npm test` **1254 passed (70 files)** / `npm run e2e` **57 passed + 1 skipped**（新增 2 条走真 Chromium 的 setInputFiles → 落盘断言）/ `npm run build` **10/10**（产物 **6428284 字节**） | 备注（环境）: 全量 e2e 首轮有 3 条 unrelated 用例报 `browserContext.close: ENOENT … trace`（01/02/03），单独复跑 13/13 全绿——是 `test-results/` 产物堆积撞沙箱批量删除保护的已知噪音，不是回归

@@ -31,6 +31,9 @@ import {
   applySaveDocContent,
 } from '../controllers/notebookActions'
 import type { NotebookActionDeps } from '../controllers/notebookActions'
+import { collectMeetingKeys, importMeetingNotes } from '../controllers/meetingImport'
+import type { MeetingLabels } from '../controllers/meetingImport'
+import type { IcsEvent } from '../domain/ics'
 import { patchNoteFontSize } from '../controllers/settingsActions'
 import type { CommandBus } from '../domain/commandBus'
 import {
@@ -47,6 +50,7 @@ import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
 import { NoteEditor } from './NoteEditor'
 import type { NoteAssetsPort, NoteLinkTarget } from './NoteEditor'
+import { MeetingImportPanel } from './MeetingImportPanel'
 import {
   buildExportHtml,
   createAssetResolver,
@@ -180,6 +184,8 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
   const [outlineOpen, setOutlineOpen] = useState(false)
   const [exporting, setExporting] = useState<ExportKind | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  /** T62 · 会议导入浮层：纯 UI 态，不落盘（与导出菜单同口径）。 */
+  const [importOpen, setImportOpen] = useState(false)
   /**
    * 当前编辑器的实例：导出要取「用户刚打完、还在 400ms debounce 里」的内容。
    * 只读 vault.noteDocs 会导出上一版——这正是过去所有"导出的和屏幕上不一样"的根因。
@@ -203,6 +209,31 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
   const notebookDocs = useMemo(
     () => (activeNotebookId === null ? [] : vault.noteDocs.filter((doc) => doc.notebookId === activeNotebookId)),
     [vault.noteDocs, activeNotebookId],
+  )
+
+  // T62：已导过的会议令牌（扫全库正文）。导入面板用它标「已导入」并默认不勾。
+  const importedMeetingKeys = useMemo(() => collectMeetingKeys(vault.noteDocs), [vault.noteDocs])
+
+  // 生成笔记用的正文模板文案：跟随当前界面语言，导入那一刻定格在笔记里
+  const meetingLabels = useMemo<MeetingLabels>(
+    () => ({
+      info: t('meetingImport.info'),
+      time: t('meetingImport.time'),
+      location: t('meetingImport.location'),
+      organizer: t('meetingImport.organizer'),
+      attendees: t('meetingImport.attendees'),
+      recurring: t('meetingImport.recurring'),
+      recurringValue: t('meetingImport.recurringValue'),
+      link: t('meetingImport.link'),
+      linkText: t('meetingImport.linkText'),
+      source: t('meetingImport.source'),
+      invite: t('meetingImport.invite'),
+      decisions: t('meetingImport.decisions'),
+      todos: t('meetingImport.todos'),
+      allDay: t('meetingImport.allDay'),
+      untitled: t('meetingImport.untitled'),
+    }),
+    [t],
   )
 
   /** 选中的文档：悬空时回退当前笔记本第一篇。 */
@@ -400,6 +431,30 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
     )
     setEditing(null)
     if (id !== null) focusDoc(activeNotebookId, id)
+  }
+
+  /**
+   * T62 · 把选中的会议写成笔记。每篇一条命令（撤销一次只回退一篇），
+   * 导入后聚焦第一篇并给一条结果提示——「新建的东西自己滚进视野」的同一口径。
+   */
+  function runMeetingImport(events: IcsEvent[]): void {
+    if (activeNotebookId === null || events.length === 0) return
+    const ids = importMeetingNotes(
+      bus,
+      vault,
+      {
+        notebookId: activeNotebookId,
+        events,
+        labels: meetingLabels,
+        existing: importedMeetingKeys,
+      },
+      deps,
+    )
+    const created = ids.filter((id): id is string => id !== null)
+    const first = created[0]
+    if (first === undefined) return
+    focusDoc(activeNotebookId, first)
+    setNotice(t('meetingImport.done', { n: created.length }))
   }
 
   function renameDoc(doc: NoteDoc, title: string): void {
@@ -620,6 +675,16 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
               style={ICON_BUTTON}
             >
               <Icon name="plus" size={13} />
+            </button>
+            <button
+              type="button"
+              data-testid="notebook-import-ics"
+              aria-label={t('meetingImport.title')}
+              title={t('meetingImport.title')}
+              onClick={() => setImportOpen(true)}
+              style={ICON_BUTTON}
+            >
+              <Icon name="calendar" size={13} />
             </button>
             <PaneToggle
               testId="notebook-tree-collapse"
@@ -933,6 +998,16 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
           </div>
         </aside>
       ) : null}
+
+      {/* T62 · 会议导入：选 .ics → 勾会议 → 落成笔记 */}
+      <MeetingImportPanel
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        notebookName={activeNotebook?.name ?? ''}
+        t={t}
+        importedKeys={importedMeetingKeys}
+        onImport={runMeetingImport}
+      />
 
       {notice === null ? null : (
         <div data-testid="notebook-export-notice" role="status" style={TOAST}>

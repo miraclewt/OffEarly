@@ -349,3 +349,73 @@ describe('T51 · 面板折叠', () => {
     expect(bus.undoDepth()).toBe(0)
   })
 })
+
+describe('T62 · 从 .ics 导入会议', () => {
+  const seed = { notebooks: [notebook('nb1', '会议纪要')], noteDocs: [] }
+
+  /** 一场带参与人与地点的最小会议。 */
+  const ICS = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'BEGIN:VEVENT',
+    'UID:t62-e2e',
+    'SUMMARY:支付对账文件解析方案评审',
+    'DTSTART;TZID=Asia/Shanghai:20261023T140000',
+    'DTEND;TZID=Asia/Shanghai:20261023T150000',
+    'LOCATION:3 楼会议室',
+    'ATTENDEE;CN=李四:mailto:lisi@example.com',
+    'END:VEVENT',
+    'END:VCALENDAR',
+    '',
+  ].join('\r\n')
+
+  it('文档树头部有入口，点开后是导入面板', () => {
+    setup(seed)
+    expect(screen.queryByTestId('meeting-import')).toBeNull()
+    fireEvent.click(screen.getByTestId('notebook-import-ics'))
+    expect(screen.getByTestId('meeting-import')).toBeTruthy()
+    expect(screen.getByTestId('meeting-import').textContent).toContain('会议纪要')
+  })
+
+  it('选文件 → 确认导入：笔记落进当前笔记本，并给出结果提示', async () => {
+    const { store, rerender } = setup(seed)
+    fireEvent.click(screen.getByTestId('notebook-import-ics'))
+
+    const file = new File([ICS], 'meeting.ics', { type: 'text/calendar' })
+    fireEvent.change(screen.getByTestId('meeting-import-file-input'), { target: { files: [file] } })
+    await waitFor(() => expect(screen.getAllByTestId('meeting-import-row')).toHaveLength(1))
+
+    fireEvent.click(screen.getByTestId('meeting-import-confirm'))
+
+    const docs = store.getVault().noteDocs
+    expect(docs).toHaveLength(1)
+    expect(docs[0]?.notebookId).toBe('nb1')
+    expect(docs[0]?.title).toBe('支付对账文件解析方案评审')
+    expect(docs[0]?.content).toContain('3 楼会议室')
+    expect(docs[0]?.content).toContain('@李四')
+
+    rerender()
+    expect(screen.getByTestId('notebook-export-notice').textContent).toContain('已导入 1 篇会议笔记')
+    // 导入后面板自己收起
+    expect(screen.queryByTestId('meeting-import')).toBeNull()
+  })
+
+  it('同一份文件再导一次：一篇也不多建', async () => {
+    const { store, rerender } = setup(seed)
+    fireEvent.click(screen.getByTestId('notebook-import-ics'))
+    fireEvent.change(screen.getByTestId('meeting-import-file-input'), {
+      target: { files: [new File([ICS], 'meeting.ics', { type: 'text/calendar' })] },
+    })
+    await waitFor(() => expect(screen.getAllByTestId('meeting-import-row')).toHaveLength(1))
+    fireEvent.click(screen.getByTestId('meeting-import-confirm'))
+    rerender()
+
+    fireEvent.click(screen.getByTestId('notebook-import-ics'))
+    fireEvent.change(screen.getByTestId('meeting-import-file-input'), {
+      target: { files: [new File([ICS], 'meeting.ics', { type: 'text/calendar' })] },
+    })
+    await waitFor(() => expect(screen.getByTestId('meeting-import-badge')).toBeTruthy())
+    expect((screen.getByTestId('meeting-import-confirm') as HTMLButtonElement).disabled).toBe(true)
+    expect(store.getVault().noteDocs).toHaveLength(1)
+  })
+})

@@ -98,6 +98,11 @@ export function applyCreateDoc(
     title?: string
     /** 新建文档的初始正文（通常是空串，测试/模板场景可预填）。 */
     content?: string
+    /**
+     * 显式排序键。批量新建（如 .ics 一次导入多场会议）时必须由调用方给：
+     * 每次 apply 后传入的 `vault` 快照仍是旧的，`nextDocOrder` 会重复算出同一个键。
+     */
+    order?: string
     fallbackTitle: string
   },
   deps: NotebookActionDeps = {},
@@ -114,7 +119,7 @@ export function applyCreateDoc(
     parentId,
     title: trimOr(input.title, input.fallbackTitle),
     content: input.content ?? '',
-    order: nextDocOrder(vault.noteDocs, input.notebookId, parentId),
+    order: input.order ?? nextDocOrder(vault.noteDocs, input.notebookId, parentId),
     createdAt: now,
     updatedAt: now,
   }
