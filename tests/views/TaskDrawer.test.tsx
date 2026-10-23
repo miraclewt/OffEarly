@@ -366,12 +366,18 @@ describe('日期与进度', () => {
     expect(view.getByTestId('drawer-date-error').textContent).toBe('结束日期不能早于开始日期')
     expect(findTask(store, 'x')?.due).toBeUndefined()
 
-    // date 输入框自身会把「2026-02-30」这类伪日期消毒成空串（浏览器与 jsdom 同行为），
-    // 于是它落到「清空」这条合法分支上——伪日期的拦截由纯函数 dateRangeErrorKey 兜底覆盖。
+    // T54：日期框不再是原生 date 控件，伪日期不再被浏览器消毒成空串——
+    // 原文保留、就地报错、不写库，失焦才回退到上次提交的值。
     fireEvent.change(view.getByTestId('drawer-start-input'), { target: { value: '2026-02-30' } })
-    expect((view.getByTestId('drawer-start-input') as HTMLInputElement).value).toBe('')
-    expect(findTask(store, 'x')?.start).toBeUndefined()
-    expect(view.queryByTestId('drawer-date-error')).toBeNull()
+    expect((view.getByTestId('drawer-start-input') as HTMLInputElement).value).toBe('2026-02-30')
+    expect(view.getByTestId('drawer-start-input-invalid')).toBeDefined()
+    expect(findTask(store, 'x')?.start).toBe('2026-10-09')
+    // 非法输入不经过 changeDate，区间错误提示原样留在上一次的状态上
+    expect(view.getByTestId('drawer-date-error').textContent).toBe('结束日期不能早于开始日期')
+
+    fireEvent.blur(view.getByTestId('drawer-start-input'))
+    expect((view.getByTestId('drawer-start-input') as HTMLInputElement).value).toBe('2026-10-09')
+    expect(view.queryByTestId('drawer-start-input-invalid')).toBeNull()
   })
 
   it('进度滑块写入 store', () => {

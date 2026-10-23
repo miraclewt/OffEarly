@@ -28,6 +28,7 @@ import type { VaultStore } from '../domain/store'
 import { createTopicTree } from '../domain/topicTree'
 import type { Milestone, Topic, Vault } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
+import { DateField } from './DateField'
 import { Icon } from './IconSprite'
 import { fs, sp, px } from '../styles/scale'
 
@@ -390,15 +391,16 @@ export function MilestonePanel(props: MilestonePanelProps) {
 
         <label style={FIELD_LABEL}>
           {t('milestonePanel.fieldDate')}
-          <input
-            data-testid="milestone-date-input"
-            type="date"
+          <DateField
+            testId="milestone-date-input"
+            ariaLabel={t('milestonePanel.fieldDate')}
+            t={t}
             value={draft.date}
-            onChange={(event) => {
-              setDraft({ ...draft, date: event.target.value })
+            onCommit={(next) => {
+              setDraft({ ...draft, date: next })
               setDateError(false)
             }}
-            style={INPUT}
+            inputStyle={INPUT}
           />
         </label>
         {dateError ? (

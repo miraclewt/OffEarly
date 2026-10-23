@@ -46,6 +46,7 @@ import { createTopicTree } from '../domain/topicTree'
 import type { Kind, Priority, Status, Task, Topic, WorkCalendar } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { DependencyEditor } from './DependencyEditor'
+import { DateField } from './DateField'
 import { Icon } from './IconSprite'
 import { isValidDateKey } from './MilestonePanel'
 import { NoteEditor } from './NoteEditor'
@@ -614,28 +615,28 @@ export function TaskDrawer(props: TaskDrawerProps) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: sp(8) }}>
             <label style={FIELD_LABEL}>
               {t('drawer.fieldStart')}
-              <input
-                data-testid="drawer-start-input"
-                type="date"
-                aria-label={t('drawer.fieldStart')}
+              <DateField
+                testId="drawer-start-input"
+                ariaLabel={t('drawer.fieldStart')}
+                t={t}
                 value={task.start ?? ''}
-                style={INPUT}
-                onChange={(event) => {
-                  changeDate('start', event.target.value)
+                onCommit={(next) => {
+                  changeDate('start', next)
                 }}
+                inputStyle={INPUT}
               />
             </label>
             <label style={FIELD_LABEL}>
               {t('drawer.fieldDue')}
-              <input
-                data-testid="drawer-due-input"
-                type="date"
-                aria-label={t('drawer.fieldDue')}
+              <DateField
+                testId="drawer-due-input"
+                ariaLabel={t('drawer.fieldDue')}
+                t={t}
                 value={task.due ?? ''}
-                style={INPUT}
-                onChange={(event) => {
-                  changeDate('due', event.target.value)
+                onCommit={(next) => {
+                  changeDate('due', next)
                 }}
+                inputStyle={INPUT}
               />
             </label>
           </div>

@@ -466,4 +466,14 @@ export const en: Record<MsgKey, string> = {
   'boardGuide.noTopicHint': 'Every task lives under a topic. Create one first, then add tasks to the columns.',
   'boardGuide.createTopic': 'New topic',
   'boardGuide.untitledTopic': 'Untitled topic',
+
+  // T54: date input (its own calendar, since native date fields follow the browser locale)
+  'dateField.openCalendar': 'Open calendar',
+  'dateField.calendar': 'Choose a date',
+  'dateField.previousMonth': 'Previous month',
+  'dateField.nextMonth': 'Next month',
+  'dateField.today': 'Today',
+  'dateField.clear': 'Clear',
+  'dateField.invalid': 'Invalid date — use YYYY-MM-DD',
+  'dateField.weekdays': 'M T W T F S S',
 }

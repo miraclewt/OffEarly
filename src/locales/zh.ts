@@ -527,6 +527,18 @@ export const zh = {
     createTopic: '新建话题',
     untitledTopic: '未命名话题',
   },
+
+  // T54 尾部追加：日期输入（接管原生 date 控件之后的日历与提示文案）
+  dateField: {
+    openCalendar: '打开日历',
+    calendar: '日期选择',
+    previousMonth: '上个月',
+    nextMonth: '下个月',
+    today: '今天',
+    clear: '清空',
+    invalid: '日期无效，按 YYYY-MM-DD 填写',
+    weekdays: '一 二 三 四 五 六 日',
+  },
 } as const
 
 export type MsgKey = NestedKeyOf<typeof zh>

@@ -46,6 +46,7 @@ import type { VaultStore } from '../domain/store'
 import type { Filter } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
+import { DateField } from './DateField'
 import { fs, sp, px } from '../styles/scale'
 
 const BORDER = 'var(--oe-border)'
@@ -559,28 +560,28 @@ export function FilterBar(props: FilterBarProps) {
             }
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: sp(4) }}>
-              <input
-                data-testid="filter-date-from"
-                type="date"
-                aria-label={t('filterBar.dateFrom')}
+              <DateField
+                testId="filter-date-from"
+                ariaLabel={t('filterBar.dateFrom')}
+                t={t}
                 value={filter.dateRange?.from ?? ''}
-                onChange={(event) => {
-                  const from = event.target.value
+                onCommit={(from) => {
                   apply((current) => setDateRange(current, { from, to: current.dateRange?.to }))
                 }}
-                style={{ ...INPUT, flex: 1, minWidth: 0 }}
+                style={{ flex: 1, minWidth: 0 }}
+                inputStyle={{ ...INPUT, width: '100%' }}
               />
               <span style={{ color: MUTED, fontSize: fs(11) }}>–</span>
-              <input
-                data-testid="filter-date-to"
-                type="date"
-                aria-label={t('filterBar.dateTo')}
+              <DateField
+                testId="filter-date-to"
+                ariaLabel={t('filterBar.dateTo')}
+                t={t}
                 value={filter.dateRange?.to ?? ''}
-                onChange={(event) => {
-                  const to = event.target.value
+                onCommit={(to) => {
                   apply((current) => setDateRange(current, { from: current.dateRange?.from, to }))
                 }}
-                style={{ ...INPUT, flex: 1, minWidth: 0 }}
+                style={{ flex: 1, minWidth: 0 }}
+                inputStyle={{ ...INPUT, width: '100%' }}
               />
             </div>
           </Section>
