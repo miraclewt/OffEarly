@@ -40,7 +40,7 @@ import { TaskItem } from '@tiptap/extension-task-item'
 import { TaskList } from '@tiptap/extension-task-list'
 import { Markdown } from '@tiptap/markdown'
 import StarterKit from '@tiptap/starter-kit'
-import { Plugin, PluginKey, Selection } from '@tiptap/pm/state'
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
@@ -325,6 +325,10 @@ function createMermaidPreviewDom(
   })
   toggle.addEventListener('click', (event) => {
     event.preventDefault()
+    // 必须掐断冒泡：ProseMirror 在编辑器根上监听 click 并按坐标重算选区，
+    // 而 widget 在它之后——上一次「点收起」会让紧随其后的图片被整块选中、
+    // 浮出一排缩放把手（看起来像误操作）。预览是装饰，不该动光标。
+    event.stopPropagation()
     onToggle()
   })
   head.append(title, toggle)
@@ -368,6 +372,24 @@ function caretInsideBlock(selection: { from: number; to: number; empty: boolean 
   const start = pos + 1
   const end = pos + size - 1
   return selection.from >= start && selection.from <= end
+}
+
+/**
+ * 收起源码后，把光标放到**代码块之外**的一处文字上。
+ *
+ * 为什么要自己找位置：`Selection.near()` 遇到代码块后面紧跟的图片 / 表格时会给一个
+ * 整块选中的 NodeSelection（图上立刻浮出缩放把手，看起来像误选）；而 `TextSelection.near()`
+ * 在「块后面只有非文字节点直至文末」时直接给 null，光标就留在块里——那正是要避免的隐形光标。
+ * 所以这里显式前后各找一次最近的可放光标位置，都找不到（整篇只有一个代码块）才放弃。
+ */
+function textPositionOutsideBlock(doc: { content: { size: number }; resolve: (pos: number) => { parent: { inlineContent: boolean } } }, before: number, after: number): number | null {
+  for (let pos = after; pos < doc.content.size; pos += 1) {
+    if (doc.resolve(pos).parent.inlineContent) return pos
+  }
+  for (let pos = before; pos > 0; pos -= 1) {
+    if (doc.resolve(pos).parent.inlineContent) return pos
+  }
+  return null
 }
 
 const MermaidPreview = Extension.create<{ labels: MermaidPreviewLabels }>({
@@ -450,8 +472,9 @@ const MermaidPreview = Extension.create<{ labels: MermaidPreviewLabels }>({
                       // 一敲键盘就是在改看不见的内容。块后面没有内容时不硬挪——
                       // 硬挪只能落到块左侧或整块选中，两种都比"光标停在原地"更糟；
                       // 那种情况由「一敲键盘就展开」兜底（见 apply 里的 docChanged 判断）。
-                      if (!isCollapsed && ref.after < view.state.doc.content.size) {
-                        tr.setSelection(Selection.near(view.state.doc.resolve(ref.after), 1))
+                      if (!isCollapsed) {
+                        const target = textPositionOutsideBlock(view.state.doc, ref.pos, ref.after)
+                        if (target !== null) tr.setSelection(TextSelection.create(view.state.doc, target))
                       }
                       view.dispatch(tr)
                     }),

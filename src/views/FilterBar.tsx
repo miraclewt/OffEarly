@@ -582,7 +582,9 @@ export function FilterBar(props: FilterBarProps) {
               }}
               style={{ ...INPUT, width: '100%' }}
             />
-            {tagSuggestions.length > 0 ? (
+            {/* 候选 chip 在管理态下让位：15 个标签的候选区能把管理清单挤到面板下沿之外，
+                而管理态的用途是「整理」，不是「加筛选条件」。 */}
+            {tagSuggestions.length > 0 && !tagManagerOpen ? (
               <div style={{ ...ROW, marginTop: sp(4) }}>
                 {tagSuggestions.map((tag, index) => (
                   <Chip
