@@ -193,6 +193,7 @@ tests/**                         与 src 镜像
 - [x] **T61** 看板卡片第三行（负责人 + 更新日期）与容器查询二档、筛选面板「条件开关」置顶、列头完成度改成可朗读的自述、示例库补 2 本笔记本 / 4 篇文档 → done
 - [x] **T62** 从 Outlook 导入会议：`.ics` 解析（折行 / 转义 / Windows 时区名 / 全天 / 取消态 / RRULE 只取单场）+ 导入面板（拖入或选择文件、逐场勾选、已导入不重复）→ 按模板生成**会议笔记**（`NoteDoc` 而非 `Task`），令牌 `ics:<uid>@<date>` 去重 → done
 - [x] **T63** 表格行列工具条：光标在表格内浮出「上/下插行、左/右插列、删行/删列、表头、合并/拆分、删表」；顺带修掉 `th/td` 没有定位导致框选单元格时整页蒙色的 bug → done
+- [x] **T64** 标签页图标独立可辨：favicon 从 mono 黑线稿换成 `brand/favicon.svg`（不透明品牌底 + 白色表盘，即 logo-mark 的 16px 简化版）；产物校验加一条「不得依赖 `currentColor`」，真 Chromium 用例按 16px 位图数像素钉住可辨识度 → done
 
 ---
 
@@ -1514,3 +1515,12 @@ tests/**                         与 src 镜像
 ⑦**影子要比卡片深一档**：第一版借的是 `--oe-shadow-card`（0.04/0.06 透明度），压在正文上跟下面的段落糊成一片，截图里读起来像「这段文字被截断了」。换成 `--oe-shadow-hover` 才读得出是浮件。成品图见 `docs/t63-table-toolbar.png` / `docs/t63-table-selection.png`（`capture/t63-table-bar.spec.ts` 出图，重跑一次素材即跟着改）。
  | 越界改动: ①`IconSprite` 新增 9 个图标（横带=行、竖带=列；带+朝外箭头=插入，带+短横=删除）；②`theme.css` 给 `th/td` 补 `position:relative`（这是 ② 那个 bug 的正解）、新增 `.oe-table-bar`；③`NoteEditor` 新增 `TABLE_TOOLS` / `findTablePosition` / 跟随测量（每帧事务量一次，值不变则 setState 返回同一引用）；④`BoardColumn` 里一条写错编号的注释（T64 → T61）；⑤**未改** schema / package.json（零新依赖）。
  | 全量验证: `tsc` 0 / `npm test` **1257 passed (70 files)**（本批 +11）/ `npm run e2e` **57 passed + 1 skipped**（新增 2 条：落盘断言 + 蒙层断言）/ `npm run build` **10/10**（产物 **6428398 字节**，余量 1.87MB）
+
+- [2026-10-26] T64 | agent: workbuddy:sess-1026a | commit: "T64: give the browser tab an icon that survives 16px" | 验收: 用户口径「html 打开时应该具备独立的图标显示，以和其他网页文件区分」→ 浅色/深色标签条 + 16/32/64 尺寸阶梯逐项核对通过 | 备注:
+①**问题不在「有没有 favicon」，在「16px 下画出来是什么」**：T31 早就内联了图标，DOM 断言一直绿，但那是 `stroke="currentColor"`。favicon 是一张独立图片，没有可以继承 `color` 的祖先，`currentColor` 落到 black —— 实测 16px 下不透明像素只有 31.3%、颜色全是 `rgb(0,0,0)`，深色标签栏里近乎整块消失。用户说「区分不了」时，缺的不是一个 link 标签，是底色和线宽。
+②**小尺寸必须简化，这是实测逼出来的，不是品味**：原 `logo-mark.svg` 是「开口圆环 + 右箭头」，缩进 24 圆角方块后出图对比（`docs/t64-favicon-final.png`），箭头描边在 16px 下糊成一个尖块、看着像颗心；开口圆环的缺口又和指针连在一起，读不出是表盘。定稿改成闭合圆环 + 双指针，箭头只留在 `logo-mark.svg`（应用内尺寸够大）。六个候选一律按 16px 真实位图放大裁决，不看 512px 矢量预览——后者会骗人。
+③**底色用不透明品牌靛蓝，不用透明底也不用 `prefers-color-scheme`**：浅色和深色标签条下都有稳定对比度，不必赌浏览器对 SVG favicon 里媒体查询的支持。这也是它和「白纸文档图标」一眼分开的根本原因。
+④**校验要换源，还要防「两边一起改回去」**：`verify-bundle.mjs` 的逐字节比对已从 `logo-mark-mono.svg` 改到 `favicon.svg`（源文件一改而 index.html 没同步，构建就失败）。但这套只在一边被改动时有效——若有人把 SVG 和 base64 一起改回 mono 版，会无声通过，所以另加一条独立检查「favicon 不得含 `currentColor`」，产物校验 10 → 11 项。`logo-mark-mono.svg` 保留（图标 sprite / 单色场景仍用），只是不再当 favicon。
+⑤**这条只能在真 Chromium 里收尾**：jsdom 不渲染图片、没有 canvas。e2e 把 href 画进 16×16 canvas 数像素，钉住四条——实心底 >85%（实测 99.2%，改造前 31.3%）、品牌底色 >35%（52%）、浅色前景 >5%（8.2%，21 个像素）、前景与底色亮度差 >150（178）。前两条正好把「纯黑线稿」这个老形态关在门外。阈值按实测留了余量（首版写成 >50 / >8，贴线必抖）。
+ | 遗留: ①**文件系统层面做不到**：资源管理器/桌面上 `.html` 的图标由 Windows 按扩展名决定，HTML 内容改不了它；要单独图标得附带 `.ico` + 快捷方式（IconFile）或打包成 exe，那会打破「单个 html 就是全部」的交付形态，本轮不做、也未经用户确认这个方向。②只做了 SVG 一种，没有 16/32 PNG 兜底——目标环境是 Chrome/Edge 113+，SVG favicon 均支持；将来要兼容旧浏览器需补 PNG 并对两份都加字节校验。③标签页文字仍是 `OffEarly - 早下班`，没做「文件名 + 应用名」的组合区分。
+ | 全量验证: `tsc` 0 / `npm test` **1257 passed (70 files)**（与 T63 持平，本批无新增单测：图标是静态资源，断言落在产物校验与 e2e）/ `npm run e2e` **59 passed + 1 skipped**（+2）/ `npm run build` **11/11**（产物 **6428979 字节**，上限 8388608）

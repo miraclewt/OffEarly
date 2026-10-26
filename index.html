@@ -5,14 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--
       T31 · favicon 必须内联：交付物是 file:// 下双击打开的单文件，任何外链图标都会 404。
-      下面是 brand/logo-mark-mono.svg 的 base64 data URI（逐字节相同）。
-      scripts/verify-bundle.mjs 会解码这段 base64 与 brand/logo-mark-mono.svg 比对，
+      T64 · 图标源是 brand/favicon.svg（下面这段 base64 与它逐字节相同）。
+      它是 logo-mark 的 16px 简化版：闭合圆环 + 不透明品牌底，理由见该文件头部注释。
+      scripts/verify-bundle.mjs 会解码这段 base64 与 brand/favicon.svg 比对，
       该文件一改而这里没跟着改，构建就会失败——所以不要手改这行。
     -->
     <link
       rel="icon"
       type="image/svg+xml"
-      href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIxLjgiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+CiAgPHBhdGggZD0iTTE3LjM0IDE0Ljk2IEE3IDcgMCAxIDEgMTcuMzQgOS4wNCIvPgogIDxwYXRoIGQ9Ik0xMSAxMiBWNy41Ii8+CiAgPHBhdGggZD0iTTExIDEyIEwxMi43NSAxNS4wMyIvPgogIDxwYXRoIGQ9Ik0xOSAxMiBIMjIuNSIvPgogIDxwYXRoIGQ9Ik0yMC42IDEwLjEgTDIyLjUgMTIgTDIwLjYgMTMuOSIvPgo8L3N2Zz4K"
+      href="data:image/svg+xml;base64,PCEtLQogIFQ2NCDCtyBPZmZFYXJseSBmYXZpY29u77yabG9nby1tYXJrLnN2ZyDnmoQgMTZweCDnroDljJbniYjjgIIKICDmoIfnrb7pobXlj6rmnIkgMTZweO+8jOWOn+WbvuOAjOW8gOWPo+WchueOryArIOWPs+eureWktOOAjeWcqOmCo+mHjOS8mueziuaIkOS4gOWbou+8iOWvueeFp+WbvuingQogIGRvY3MvdDY0LWZhdmljb24tZmluYWwucG5n77yJ77yM5omA5Lul6L+Z6YeM6Zet5ZCI5ZyG546v44CB5Y675o6J566t5aS077yM55So5LiN6YCP5piO5ZOB54mM5bqV6ImyCiAg5L+d6K+B5rex5rWF5Lik56eN5qCH562+5p2h5LiL6YO955yL5b6X5riF44CC5pS56L+Z6YeM5b+F6aG75ZCM5q2lIGluZGV4Lmh0bWwg55qEIGJhc2U2NOOAggotLT4KPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0Ij4KICA8cmVjdCB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHJ4PSI1LjQiIGZpbGw9IiM0RjQ2RTUiLz4KICA8ZyBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMi41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPgogICAgPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iNyIvPgogICAgPHBhdGggZD0iTTEyIDEyIFY3LjYiLz4KICAgIDxwYXRoIGQ9Ik0xMiAxMiBMMTUgMTQuMiIvPgogIDwvZz4KPC9zdmc+Cg=="
     />
     <title>OffEarly - 早下班</title>
   </head>

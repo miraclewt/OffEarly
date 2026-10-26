@@ -12,9 +12,10 @@
  *   4. 无外链 `<link href>`（只接受 data: URI，即内联 favicon）
  *   5. 无 `type="module"`（file:// 下必须是经典脚本）
  *   6. 无 http(s) 资源引用（含 src= / href= / url() 位置的兜底扫描）
- *   7. favicon 的 data URI 逐字节等于 brand/logo-mark-mono.svg
+ *   7. favicon 的 data URI 逐字节等于 brand/favicon.svg
  *   8. 内联脚本非空、#root 存在（防止产出一个「空的壳」）
  *   9. 禁 emoji（lint:emoji 并入 verify）
+ *  10. favicon 不依赖 currentColor（独立图片没有可继承的颜色）
  *
  * 只读脚本：不写任何文件，不改 dist。
  */
@@ -27,7 +28,7 @@ import { findEmoji } from './no-emoji.mjs'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = join(ROOT, 'dist')
 const ARTIFACT = join(DIST, 'OffEarly.html')
-const FAVICON_SOURCE = join(ROOT, 'brand', 'logo-mark-mono.svg')
+const FAVICON_SOURCE = join(ROOT, 'brand', 'favicon.svg')
 
 /**
  * 8MB。
@@ -152,13 +153,28 @@ function main() {
         'favicon 内联且与 brand 一致',
         same,
         same
-          ? `${decoded.length} 字节，与 brand/logo-mark-mono.svg 逐字节相同`
+          ? `${decoded.length} 字节，与 brand/favicon.svg 逐字节相同`
           : source === null
-            ? 'brand/logo-mark-mono.svg 缺失'
-            : `与 brand/logo-mark-mono.svg 不一致（产物 ${decoded.length} 字节 / 源文件 ${source.length} 字节），请重新生成 data URI`,
+            ? 'brand/favicon.svg 缺失'
+            : `与 brand/favicon.svg 不一致（产物 ${decoded.length} 字节 / 源文件 ${source.length} 字节），请重新生成 data URI`,
       )
     }
   }
+
+  // T64：icon 是一张独立图片，没有可以继承 `color` 的祖先——`currentColor` 会落到
+  // black，16px 下只剩一道 1px 黑线，深色标签栏里近乎消失。字节比对只在 index.html
+  // 没跟着改时生效；两边一起改回 mono 版的情况由这一条兜住。
+  const iconHref = faviconMatch === null ? '' : /\bhref\s*=\s*"([^"]*)"/i.exec(faviconMatch[0])?.[1] ?? ''
+  const ICON_PREFIX = 'data:image/svg+xml;base64,'
+  const iconSvg = iconHref.startsWith(ICON_PREFIX)
+    ? Buffer.from(iconHref.slice(ICON_PREFIX.length), 'base64').toString('utf8')
+    : ''
+  const usesCurrentColor = /currentColor/i.test(iconSvg)
+  record(
+    'favicon 不依赖 currentColor',
+    iconSvg !== '' && !usesCurrentColor,
+    iconSvg === '' ? '拿不到图标的 SVG 文本' : usesCurrentColor ? 'SVG 里出现 currentColor，16px 下会退化成一道黑线' : '颜色全部写死，深浅标签栏一致',
+  )
 
   const scriptBodies = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1])
   const nonEmpty = scriptBodies.filter((body) => body.trim().length > 0)

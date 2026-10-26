@@ -53,7 +53,7 @@ npm run capture      # 刷新落地页素材：抓 4 张真实界面图 + 把产
 npm run preview      # 预览构建产物
 ```
 
-构建管线内置了十项产物校验（`npm run verify`）：单文件、零外链、favicon 内联、禁 emoji 等，全部通过才产出 `dist/OffEarly.html`。
+构建管线内置了十一项产物校验（`npm run verify`）：单文件、零外链、favicon 内联且与 `brand/favicon.svg` 逐字节一致、禁 emoji 等，全部通过才产出 `dist/OffEarly.html`。
 
 `npm run capture` 依赖已存在的 `dist/OffEarly.html`，所以先 `npm run build` 再跑它。
 
@@ -66,7 +66,7 @@ git tag -a v0.1.0 -m "第一个正式版" -m "这里写的会变成 Release 说�
 git push origin v0.1.0
 ```
 
-`.github/workflows/release.yml` 跑 `npm ci && npm run build`（含 `tsc --noEmit` 和十项产物校验），把 `dist/OffEarly.html` 作为唯一附件传上去，之后下载链永久有效：
+`.github/workflows/release.yml` 跑 `npm ci && npm run build`（含 `tsc --noEmit` 和十一项产物校验），把 `dist/OffEarly.html` 作为唯一附件传上去，之后下载链永久有效：
 
 ```
 https://github.com/miraclewt/OffEarly/releases/latest/download/OffEarly.html
