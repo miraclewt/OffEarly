@@ -158,7 +158,7 @@ export function createNewVault(now: Date = new Date()): Vault {
   return VaultSchema.parse({
     schemaVersion: CURRENT_SCHEMA_VERSION,
     vaultId: nanoid(),
-    appVersion: 'OffEarly 0.4.0',
+    appVersion: 'OffEarly 0.5.0',
     revision: 0,
     updatedAt: now.toISOString(),
     topics: [],
