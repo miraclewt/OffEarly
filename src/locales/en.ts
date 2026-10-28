@@ -54,6 +54,8 @@ export const en: Record<MsgKey, string> = {
   'sidebar.filters': 'Filters',
   'sidebar.backup': 'Backup',
   'sidebar.settings': 'Settings',
+  // T64: trash entry in the sidebar footer
+  'sidebar.trash': 'Trash',
   'sidebar.untitled': 'Untitled topic',
   'sidebar.newTopicPlaceholder': 'Topic name',
 
@@ -185,7 +187,7 @@ export const en: Record<MsgKey, string> = {
   'drawer.archiveHint': 'Archived tasks leave the board and Gantt. Tick "include archived" in filters to find them again.',
   'drawer.delete': 'Delete task',
   'drawer.deleteConfirm': 'Confirm delete',
-  'drawer.deleteHint': 'Also removes its dependencies. Undo brings it back.',
+  'drawer.deleteHint': 'Moves it and its dependencies to the trash — restore any time.',
   'drawer.fieldStatus': 'Status',
   'drawer.fieldKind': 'Kind',
   'drawer.fieldPriority': 'Priority',
@@ -466,6 +468,13 @@ export const en: Record<MsgKey, string> = {
   'notebook.exporting': 'Exporting…',
   'notebook.exportFailed': 'Export failed, please retry',
   'notebook.exportDone': 'Exported {name}',
+  // T64: presentation mode (one page per H2, read-only overlay)
+  'notebook.present': 'Present',
+  'notebook.presentClose': 'Exit presentation',
+  'notebook.presentPrev': 'Previous',
+  'notebook.presentNext': 'Next',
+  'notebook.presentPage': 'Page {n} / {total}',
+  'notebook.presentIntro': 'Intro',
 
   // T52 tail-append: backup panel (it used to render its own Chinese defaults)
   'backupPanel.title': 'Backup & cleanup',
@@ -561,4 +570,27 @@ export const en: Record<MsgKey, string> = {
   'meetingImport.invite': 'Original invitation',
   'meetingImport.decisions': 'Decisions',
   'meetingImport.todos': 'Action items',
+
+  // T64 tail-append: trash panel
+  'trash.title': 'Trash',
+  'trash.count': '{n} items',
+  'trash.close': 'Close trash',
+  'trash.emptyTitle': 'Trash is empty',
+  'trash.emptyHint': 'Deleted tasks and notes land here first — a task with its dependencies, a note with its whole sub-tree. You can restore either at any time.',
+  'trash.kindTask': 'Task',
+  'trash.kindDoc': 'Note',
+  'trash.untitled': 'Untitled',
+  'trash.withChildren': '{n} sub-docs',
+  'trash.noContent': 'No content',
+  'trash.restore': 'Restore',
+  'trash.restoreHint': 'Put it back where it was',
+  'trash.restoreTopic': 'Cannot restore: its topic has been deleted',
+  'trash.restoreNotebook': 'Cannot restore: its notebook has been deleted',
+  'trash.restoreConflict': 'Cannot restore: an item with the same identity already exists',
+  'trash.missing': 'Cannot restore: this entry is no longer in the trash',
+  'trash.restored': 'Restored "{name}"',
+  'trash.purge': 'Delete forever',
+  'trash.purgeConfirm': 'Click again to delete forever',
+  'trash.purgeHint': 'Deleting forever cannot be undone from the trash (still undoable in this session)',
+  'trash.purged': 'Deleted "{name}" forever',
 }

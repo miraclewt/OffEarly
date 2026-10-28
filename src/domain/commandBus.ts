@@ -20,6 +20,9 @@ import type {
   Settings,
   Status,
   Task,
+  TrashDocEntry,
+  TrashEntry,
+  TrashTaskEntry,
   Vault,
 } from './types'
 import {
@@ -92,6 +95,19 @@ export interface MutationPayloads {
   'doc.patch': { id: string; patch: NoteDocPatch }
   'doc.delete': { id: string }
   'doc.restore': { docs: { doc: NoteDoc; index: number }[] }
+  /**
+   * T64 · 回收站。四个 mutation 两两成对，每一对都做完「数组 + 内容」两侧的改动，
+   * 因此任何一步都能被一条逆元精确回退：
+   *   trash.add     删除 → 内容出库、条目进回收站      ↔ trash.restore 条目出站、内容回库
+   *   trash.purge   条目出站（内容早已不在）           ↔ trash.reinsert 条目回站（不进内容）
+   *
+   * `index` 一律是**当时在数组里的下标**：删除时 trash 追加（null），恢复/回插时用记下的值，
+   * 这样 undo / redo 不会把条目或任务越挪越乱。
+   */
+  'trash.add': { entry: TrashEntry; index: number | null }
+  'trash.restore': { entry: TrashEntry }
+  'trash.purge': { entry: TrashEntry; index: number }
+  'trash.reinsert': { entry: TrashEntry; index: number }
 }
 
 export type MutationType = keyof MutationPayloads
@@ -459,6 +475,55 @@ export function reduce(vault: Vault, mutation: Mutation): Vault {
     }
     case 'doc.restore':
       return insertNoteDocs(vault, mutation.payload.docs)
+    case 'trash.add': {
+      const { entry, index } = mutation.payload
+      const trash = [...vault.trash]
+      trash.splice(Math.min(index ?? trash.length, trash.length), 0, entry)
+      if (entry.kind === 'task') {
+        // 与 task.delete 同一级联口径：两端指向它的依赖一起摘掉（条目里已冻结了这些依赖）
+        return {
+          ...vault,
+          tasks: vault.tasks.filter((task) => task.id !== entry.task.id),
+          links: vault.links.filter(
+            (link) => link.from !== entry.task.id && link.to !== entry.task.id,
+          ),
+          trash,
+        }
+      }
+      const doomed = new Set(entry.docs.map((item) => item.doc.id))
+      return { ...vault, noteDocs: vault.noteDocs.filter((doc) => !doomed.has(doc.id)), trash }
+    }
+    case 'trash.restore': {
+      const entry = mutation.payload.entry
+      if (!vault.trash.some((candidate) => candidate.id === entry.id)) {
+        throw new Error(`commandBus: 回收站条目不存在（${entry.id}）`)
+      }
+      const trash = vault.trash.filter((candidate) => candidate.id !== entry.id)
+      if (entry.kind === 'task') {
+        const tasks = [...vault.tasks]
+        tasks.splice(Math.min(entry.index, tasks.length), 0, entry.task)
+        const alive = new Set(tasks.map((task) => task.id))
+        const links = [...vault.links]
+        // 只在两个端点都还在时才插回：另一端可能在这期间被单独删掉了，
+        // 插回一条悬空依赖会让甘特图指向不存在的任务。
+        const back = entry.links
+          .filter((item) => alive.has(item.link.from) && alive.has(item.link.to))
+          .sort((a, b) => a.index - b.index)
+        for (const item of back) links.splice(Math.min(item.index, links.length), 0, item.link)
+        return { ...vault, tasks, links, trash }
+      }
+      return insertNoteDocs({ ...vault, trash }, entry.docs)
+    }
+    case 'trash.purge': {
+      const { entry } = mutation.payload
+      return { ...vault, trash: vault.trash.filter((candidate) => candidate.id !== entry.id) }
+    }
+    case 'trash.reinsert': {
+      const { entry, index } = mutation.payload
+      const trash = [...vault.trash]
+      trash.splice(Math.min(index, trash.length), 0, entry)
+      return { ...vault, trash }
+    }
   }
 }
 
@@ -780,7 +845,12 @@ export function patchNoteDocCommand(vault: Vault, id: string, patch: NoteDocPatc
   }
 }
 
-/** 删除文档（连同子树）；逆元携整棵子树与原下标，undo 后连位置一起还原。 */
+/**
+ * 删除文档（连同子树）；逆元携整棵子树与原下标，undo 后连位置一起还原。
+ * ——这是「撤销新建」与其他程序化删除用的**物理**删除；用户在界面上删文档走
+ * `trashNoteDocCommand`（进回收站）。两者不可互换：新建命令的逆元若进回收站，
+ * 每建一篇再撤销一次就会在回收站里堆一条垃圾。
+ */
 export function deleteNoteDocCommand(vault: Vault, id: string): Command {
   findNoteDoc(vault, id)
   const doomed = new Set(docSubtreeIds(vault.noteDocs, id))
@@ -791,6 +861,131 @@ export function deleteNoteDocCommand(vault: Vault, id: string): Command {
     type: 'doc.delete',
     payload: { id },
     inverse: { type: 'doc.restore', payload: { docs } },
+  }
+}
+
+// ── T64 · 回收站命令（界面删除的写入口；物理 delete 仍留给 create 的逆元） ─────────
+
+/** 条目 id 与删除时刻由调用方给（控制器注入时钟/id，便于测试确定化）。 */
+export interface TrashMeta {
+  entryId: string
+  deletedAt: string
+}
+
+/**
+ * 删除任务 → 进回收站。条目里冻结任务体、原下标与两端指向它的依赖，
+ * 于是恢复不需要任何外部快照：一次 `trash.restore` 就能把三者放回原位。
+ */
+export function trashTaskCommand(vault: Vault, id: string, meta: TrashMeta): Command {
+  const task = findTask(vault, id)
+  const index = vault.tasks.findIndex((candidate) => candidate.id === id)
+  const links = vault.links
+    .map((link, position) => ({ link, index: position }))
+    .filter((entry) => entry.link.from === id || entry.link.to === id)
+  const entry: TrashTaskEntry = {
+    id: meta.entryId,
+    kind: 'task',
+    deletedAt: meta.deletedAt,
+    index,
+    task,
+    links,
+  }
+  return {
+    type: 'trash.add',
+    payload: { entry, index: null },
+    inverse: { type: 'trash.restore', payload: { entry } },
+  }
+}
+
+/** 删除文档 → 整棵子树进回收站（一篇一张条目，恢复时子树整体回来）。 */
+export function trashNoteDocCommand(vault: Vault, id: string, meta: TrashMeta): Command {
+  findNoteDoc(vault, id)
+  const doomed = new Set(docSubtreeIds(vault.noteDocs, id))
+  const docs = vault.noteDocs
+    .map((doc, index) => ({ doc, index }))
+    .filter((entry) => doomed.has(entry.doc.id))
+  const entry: TrashDocEntry = {
+    id: meta.entryId,
+    kind: 'doc',
+    deletedAt: meta.deletedAt,
+    rootId: id,
+    docs,
+  }
+  return {
+    type: 'trash.add',
+    payload: { entry, index: null },
+    inverse: { type: 'trash.restore', payload: { entry } },
+  }
+}
+
+/**
+ * 从回收站恢复。
+ *
+ * 构造期拦三种「恢复了也看不见 / 会撞键」的情况，抛错发生在入栈之前：
+ *   ① 任务所属话题已不在 → 恢复出来也不属于任何一列
+ *   ② 文档所属笔记本已不在 → 文档树里无处安放
+ *   ③ 同 id 的对象已存在（例如先恢复过一次） → 数组里会出现重复 id
+ *
+ * 唯一自动降级：根文档的**外部父级**没了 → 降为顶层（子树内部关系原样不动）。
+ * 这条降级写进条目本身，因此 undo 后再次删除时也是这个形状——父级已不存在，保留旧
+ * parentId 只会让文档永远落在一个空引用下。
+ */
+export function restoreTrashCommand(vault: Vault, entryId: string): Command {
+  const index = vault.trash.findIndex((entry) => entry.id === entryId)
+  const entry = vault.trash[index]
+  if (entry === undefined) throw new Error(`commandBus: 回收站条目不存在（${entryId}）`)
+
+  if (entry.kind === 'task') {
+    if (!vault.topics.some((topic) => topic.id === entry.task.topicId)) {
+      throw new Error('commandBus: 任务所属话题已不存在，无法恢复')
+    }
+    if (vault.tasks.some((task) => task.id === entry.task.id)) {
+      throw new Error(`commandBus: 同 id 的任务已存在（${entry.task.id}）`)
+    }
+  } else {
+    for (const item of entry.docs) {
+      if (!vault.notebooks.some((notebook) => notebook.id === item.doc.notebookId)) {
+        throw new Error('commandBus: 文档所属笔记本已不存在，无法恢复')
+      }
+      if (vault.noteDocs.some((doc) => doc.id === item.doc.id)) {
+        throw new Error(`commandBus: 同 id 的文档已存在（${item.doc.id}）`)
+      }
+    }
+  }
+
+  const normalized = normalizeRestoredEntry(vault, entry)
+  return {
+    type: 'trash.restore',
+    // 正反两个方向用**同一个**条目：否则「降为顶层」只在逆元里生效，
+    // 正向恢复出来的文档仍然指着那个已不存在的父级。
+    payload: { entry: normalized },
+    inverse: { type: 'trash.add', payload: { entry: normalized, index } },
+  }
+}
+
+/** 恢复前的降级：根文档的外部父级若已消失，降为顶层。其余原样。 */
+function normalizeRestoredEntry(vault: Vault, entry: TrashEntry): TrashEntry {
+  if (entry.kind === 'task') return entry
+  const inside = new Set(entry.docs.map((item) => item.doc.id))
+  const parentAlive = (parentId: string | null): boolean =>
+    parentId === null || inside.has(parentId) || vault.noteDocs.some((doc) => doc.id === parentId)
+  const docs = entry.docs.map((item) =>
+    item.doc.id === entry.rootId && !parentAlive(item.doc.parentId)
+      ? { ...item, doc: { ...item.doc, parentId: null } }
+      : item,
+  )
+  return { ...entry, docs }
+}
+
+/** 彻底删除：只摘条目本身（内容在删除那一刻就已离开 vault）。两步确认在视图里。 */
+export function purgeTrashCommand(vault: Vault, entryId: string): Command {
+  const index = vault.trash.findIndex((entry) => entry.id === entryId)
+  const entry = vault.trash[index]
+  if (entry === undefined) throw new Error(`commandBus: 回收站条目不存在（${entryId}）`)
+  return {
+    type: 'trash.purge',
+    payload: { entry, index },
+    inverse: { type: 'trash.reinsert', payload: { entry, index } },
   }
 }
 

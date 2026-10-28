@@ -19,6 +19,7 @@ import type {
   Status,
   Task,
   Topic,
+  TrashEntry,
   Vault,
   WorkCalendar,
 } from './types'
@@ -136,6 +137,30 @@ export const NoteDocSchema = z.object({
   updatedAt: timestamp,
 })
 
+// T64 · 回收站：任务条目与文档条目是两个形状，用 discriminated union（kind 区分）。
+// 与 MindNode 的 z.lazy 同理，这里显式标注 z.ZodType<TrashEntry> 让 types.ts 继续做事实源。
+export const TrashTaskEntrySchema = z.object({
+  id,
+  kind: z.literal('task'),
+  deletedAt: timestamp,
+  index: z.number().int().min(0),
+  task: TaskSchema,
+  links: z.array(z.object({ link: DependencySchema, index: z.number().int().min(0) })),
+})
+
+export const TrashDocEntrySchema = z.object({
+  id,
+  kind: z.literal('doc'),
+  deletedAt: timestamp,
+  rootId: id,
+  docs: z.array(z.object({ doc: NoteDocSchema, index: z.number().int().min(0) })),
+})
+
+export const TrashEntrySchema: z.ZodType<TrashEntry> = z.discriminatedUnion('kind', [
+  TrashTaskEntrySchema,
+  TrashDocEntrySchema,
+])
+
 export const FilterSchema = z.object({
   topicIds: z.array(id),
   includeDescendants: z.boolean(),
@@ -209,6 +234,8 @@ export const VaultSchema = z.object({
   mindmaps: z.array(MindMapSchema).default([]),
   notebooks: z.array(NotebookSchema).default([]),
   noteDocs: z.array(NoteDocSchema).default([]),
+  // T64：旧库缺 trash 键 → 补空数组（与上面两个键同一先例），schemaVersion 保持 1
+  trash: z.array(TrashEntrySchema).default([]),
 })
 
 // 编译期防漂移：schema 推导出的类型必须与 types.ts 完全一致，
@@ -228,6 +255,7 @@ export type SchemaAlignment = [
   Assert<Equal<MindMap, z.infer<typeof MindMapSchema>>>,
   Assert<Equal<Notebook, z.infer<typeof NotebookSchema>>>,
   Assert<Equal<NoteDoc, z.infer<typeof NoteDocSchema>>>,
+  Assert<Equal<TrashEntry, z.infer<typeof TrashEntrySchema>>>,
   Assert<Equal<Filter, z.infer<typeof FilterSchema>>>,
   Assert<Equal<WorkCalendar, z.infer<typeof WorkCalendarSchema>>>,
 ]

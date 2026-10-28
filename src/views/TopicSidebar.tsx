@@ -71,11 +71,13 @@ export interface TopicSidebarProps {
   store: VaultStore
   bus: CommandBus
   t: (key: MsgKey, params?: TranslateParams) => string
-  /** 四个底部入口；面板尚未实现（T16/T18/T28），由集成窗口接线。 */
+  /** 底部入口；面板尚未实现（T16/T18/T28/T64），由集成窗口接线。 */
   onOpenMilestones?: () => void
   onOpenFilters?: () => void
   onOpenBackup?: () => void
   onOpenSettings?: () => void
+  /** T64：回收站（任务与笔记）。 */
+  onOpenTrash?: () => void
   style?: CSSProperties
 }
 
@@ -592,6 +594,8 @@ export function TopicSidebar(props: TopicSidebarProps) {
     { id: 'milestones', icon: 'milestone', label: t('sidebar.milestones'), onClick: props.onOpenMilestones },
     { id: 'filters', icon: 'filter', label: t('sidebar.filters'), onClick: props.onOpenFilters },
     { id: 'backup', icon: 'backup', label: t('sidebar.backup'), onClick: props.onOpenBackup },
+    // T64：回收站排在「备份」之后、「设置」之前——它是数据维护类入口，不是主工作区
+    { id: 'trash', icon: 'trash', label: t('sidebar.trash'), onClick: props.onOpenTrash },
     { id: 'settings', icon: 'settings', label: t('sidebar.settings'), onClick: props.onOpenSettings },
   ]
 

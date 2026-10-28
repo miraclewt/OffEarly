@@ -64,6 +64,7 @@ import { TopicSidebar } from './views/TopicSidebar'
 import { BackupPanel } from './views/BackupPanel'
 import type { BackupPanelLabels } from './views/BackupPanel'
 import { SettingsPanel } from './views/SettingsPanel'
+import { TrashPanel } from './views/TrashPanel'
 import { fs, px, sp } from './styles/scale'
 
 const INDIGO = 'var(--oe-accent)'
@@ -580,6 +581,8 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
   const [backupOpen, setBackupOpen] = useState(false)
   // T35 设置面板：受控开合（侧栏「设置」入口拉起，此前是 shell.panelPending 占位）。
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // T64 回收站：受控开合（侧栏「回收站」入口拉起）。
+  const [trashOpen, setTrashOpen] = useState(false)
   /** T59 · 全局搜索浮层；焦点目标用于「搜到文档后直接在那个笔记本里打开它」。 */
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [focusDoc, setFocusDoc] = useState<{ notebookId: string; docId: string; nonce: number } | null>(null)
@@ -1138,6 +1141,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
                 setFilterOpen(true)
               }}
               onOpenBackup={() => setBackupOpen(true)}
+              onOpenTrash={() => setTrashOpen(true)}
               onOpenSettings={() => setSettingsOpen(true)}
               style={{ flex: 1, minHeight: 0 }}
             />
@@ -1303,6 +1307,16 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
               })
               .finally(() => session.autosave.start())
           }}
+        />
+      )}
+      {/* T64 · 回收站：任务与笔记的删除都先落在这里，可恢复、可彻底删除 */}
+      {session === null ? null : (
+        <TrashPanel
+          open={trashOpen}
+          onOpenChange={setTrashOpen}
+          store={session.store}
+          bus={session.bus}
+          t={t}
         />
       )}
       {conflict === null ? null : (

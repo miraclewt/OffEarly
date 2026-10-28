@@ -64,6 +64,8 @@ export const zh = {
     filters: '筛选器',
     backup: '备份',
     settings: '设置',
+    // T64 追加：任务与笔记的回收站
+    trash: '回收站',
     untitled: '未命名话题',
     newTopicPlaceholder: '话题名称',
   },
@@ -215,7 +217,7 @@ export const zh = {
     archiveHint: '归档后不再出现在看板与甘特，筛选里勾「包含已归档」可找回。',
     delete: '删除任务',
     deleteConfirm: '确认删除',
-    deleteHint: '会连同它的依赖关系一起删除，撤销可恢复。',
+    deleteHint: '会连同它的依赖关系一起放进回收站，可随时恢复。',
     fieldStatus: '状态',
     fieldKind: '类别',
     fieldPriority: '优先级',
@@ -523,6 +525,13 @@ export const zh = {
     exporting: '正在导出…',
     exportFailed: '导出失败，请重试',
     exportDone: '已导出 {name}',
+    // T64 追加：按二级标题分页的展示模式（只读浮层）
+    present: '展示模式',
+    presentClose: '退出展示',
+    presentPrev: '上一页',
+    presentNext: '下一页',
+    presentPage: '第 {n} / {total} 页',
+    presentIntro: '导言',
   },
 
   // T52 尾部追加：备份面板文案。
@@ -630,6 +639,30 @@ export const zh = {
     invite: '原始邀请',
     decisions: '决议',
     todos: '待办',
+  },
+  // T64 尾部追加：回收站面板
+  trash: {
+    title: '回收站',
+    count: '共 {n} 项',
+    close: '关闭回收站',
+    emptyTitle: '回收站是空的',
+    emptyHint: '删掉的任务与笔记会先放到这里：任务连同它的依赖、笔记连同整棵子文档，随时可以恢复。',
+    kindTask: '任务',
+    kindDoc: '笔记',
+    untitled: '未命名',
+    withChildren: '含 {n} 篇子文档',
+    noContent: '没有正文',
+    restore: '恢复',
+    restoreHint: '恢复到原来的位置',
+    restoreTopic: '恢复失败：它所属的话题已被删除',
+    restoreNotebook: '恢复失败：它所属的笔记本已被删除',
+    restoreConflict: '恢复失败：同名的对象已经存在',
+    missing: '恢复失败：这条记录已经不在回收站里',
+    restored: '已恢复「{name}」',
+    purge: '彻底删除',
+    purgeConfirm: '再点一次，彻底删除',
+    purgeHint: '彻底删除后无法从回收站恢复（本次会话仍可撤销）',
+    purged: '已彻底删除「{name}」',
   },
 } as const
 

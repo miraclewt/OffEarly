@@ -79,6 +79,7 @@ function vault(mindmaps: MindMap[] = []): Vault {
     mindmaps,
     notebooks: [],
     noteDocs: [],
+    trash: [],
   }
 }
 

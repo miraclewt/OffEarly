@@ -90,6 +90,7 @@ function vaultWith(mindmaps: MindMap[]): Vault {
     mindmaps,
     notebooks: [],
     noteDocs: [],
+    trash: [],
   }
 }
 

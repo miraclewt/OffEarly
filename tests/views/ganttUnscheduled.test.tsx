@@ -82,6 +82,7 @@ function makeVault(tasks: Task[]): Vault {
     mindmaps: [],
     notebooks: [],
     noteDocs: [],
+    trash: [],
   }
 }
 

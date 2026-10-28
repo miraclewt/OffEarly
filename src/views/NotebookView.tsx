@@ -23,7 +23,6 @@ import dayjs from 'dayjs'
 import {
   applyCreateDoc,
   applyCreateNotebook,
-  applyDeleteDoc,
   applyDeleteNotebook,
   applyRenameDoc,
   applyMoveDoc,
@@ -31,6 +30,7 @@ import {
   applySaveDocContent,
 } from '../controllers/notebookActions'
 import type { NotebookActionDeps } from '../controllers/notebookActions'
+import { applyTrashDoc } from '../controllers/trashActions'
 import { collectMeetingKeys, importMeetingNotes } from '../controllers/meetingImport'
 import type { MeetingLabels } from '../controllers/meetingImport'
 import type { IcsEvent } from '../domain/ics'
@@ -50,6 +50,7 @@ import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
 import { NoteEditor } from './NoteEditor'
 import type { NoteAssetsPort, NoteLinkTarget } from './NoteEditor'
+import { NotePresenter } from './NotePresenter'
 import { MeetingImportPanel } from './MeetingImportPanel'
 import {
   buildExportHtml,
@@ -186,6 +187,11 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
   const [notice, setNotice] = useState<string | null>(null)
   /** T62 · 会议导入浮层：纯 UI 态，不落盘（与导出菜单同口径）。 */
   const [importOpen, setImportOpen] = useState(false)
+  /** T64 · 展示模式：打开那一刻**定格**正文（之后在后台改字不该让正在看的页跳来跳去）。 */
+  const [presentPages, setPresentPages] = useState<{ open: boolean; markdown: string }>({
+    open: false,
+    markdown: '',
+  })
   /**
    * 当前编辑器的实例：导出要取「用户刚打完、还在 400ms debounce 里」的内容。
    * 只读 vault.noteDocs 会导出上一版——这正是过去所有"导出的和屏幕上不一样"的根因。
@@ -465,7 +471,8 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
   }
 
   function deleteDoc(doc: NoteDoc): void {
-    applyDeleteDoc(bus, vault, doc.id)
+    // T64：整棵子树进回收站（一篇一张条目），恢复时子树与顺序一起回来
+    applyTrashDoc(bus, vault, doc.id, deps)
     if (docId === doc.id || activeDoc?.id === doc.id) setDocId(null)
   }
 
@@ -830,6 +837,19 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
               >
                 <Icon name="outline" size={12} />
               </button>
+              {/* T64 · 展示模式：按二级标题一页一页地看（只读浮层，不写库） */}
+              <button
+                type="button"
+                data-testid="notebook-present"
+                aria-label={t('notebook.present')}
+                title={t('notebook.present')}
+                onClick={() => {
+                  setPresentPages({ open: true, markdown: liveMarkdown(activeDoc) })
+                }}
+                style={EXPORT_BUTTON}
+              >
+                <Icon name="present" size={12} />
+              </button>
               <span style={{ position: 'relative', display: 'flex', flex: '0 0 auto' }}>
                 <button
                   type="button"
@@ -998,6 +1018,24 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
           </div>
         </aside>
       ) : null}
+
+      {/* T64 · 展示模式：一页一个二级标题，只读渲染 */}
+      {activeDoc === undefined ? null : (
+        <NotePresenter
+          open={presentPages.open}
+          title={activeDoc.title}
+          markdown={presentPages.markdown}
+          assets={props.assets}
+          fontSize={vault.settings.noteFontSize}
+          linkTargets={linkTargets}
+          onNavigate={(title, matches) => {
+            setPresentPages({ open: false, markdown: '' })
+            handleLinkNavigate(title, matches)
+          }}
+          onClose={() => setPresentPages({ open: false, markdown: '' })}
+          t={t}
+        />
+      )}
 
       {/* T62 · 会议导入：选 .ics → 勾会议 → 落成笔记 */}
       <MeetingImportPanel

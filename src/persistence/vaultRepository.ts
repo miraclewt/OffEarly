@@ -169,6 +169,9 @@ export function createNewVault(now: Date = new Date()): Vault {
     mindmaps: [],
     notebooks: [],
     noteDocs: [],
+    // T64：回收站。显式给空数组而不是靠 schema 默认值——
+    // createNewVault 是「新库长什么样」的事实源，字段应当自己说出来。
+    trash: [],
   })
 }
 

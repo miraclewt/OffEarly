@@ -55,6 +55,7 @@ function baseVault(): Vault {
     mindmaps: [],
     notebooks: [],
     noteDocs: [],
+    trash: [],
   }
 }
 

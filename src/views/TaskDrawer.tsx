@@ -37,9 +37,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import { useStore } from 'zustand'
 
-import { deleteTaskCommand, patchTaskCommand } from '../domain/commandBus'
+import { patchTaskCommand } from '../domain/commandBus'
 import type { CommandBus, TaskPatch } from '../domain/commandBus'
 import { patchNoteFontSize } from '../controllers/settingsActions'
+import { applyTrashTask } from '../controllers/trashActions'
 import { duration } from '../domain/scheduleEngine'
 import type { VaultStore } from '../domain/store'
 import { createTopicTree } from '../domain/topicTree'
@@ -760,7 +761,8 @@ export function TaskDrawer(props: TaskDrawerProps) {
                   return
                 }
                 if (task === undefined) return
-                bus.apply(deleteTaskCommand(store.getVault(), task.id))
+                // T64：删除先进回收站（任务体 + 依赖都冻结在条目里），可恢复
+                applyTrashTask(bus, store.getVault(), task.id)
                 requestClose()
               }}
               style={

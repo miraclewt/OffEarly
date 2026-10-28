@@ -194,6 +194,9 @@ tests/**                         与 src 镜像
 - [x] **T62** 从 Outlook 导入会议：`.ics` 解析（折行 / 转义 / Windows 时区名 / 全天 / 取消态 / RRULE 只取单场）+ 导入面板（拖入或选择文件、逐场勾选、已导入不重复）→ 按模板生成**会议笔记**（`NoteDoc` 而非 `Task`），令牌 `ics:<uid>@<date>` 去重 → done
 - [x] **T63** 表格行列工具条：光标在表格内浮出「上/下插行、左/右插列、删行/删列、表头、合并/拆分、删表」；顺带修掉 `th/td` 没有定位导致框选单元格时整页蒙色的 bug → done
 - [x] **T64** 标签页图标独立可辨：favicon 从 mono 黑线稿换成 `brand/favicon.svg`（不透明品牌底 + 白色表盘，即 logo-mark 的 16px 简化版）；产物校验加一条「不得依赖 `currentColor`」，真 Chromium 用例按 16px 位图数像素钉住可辨识度 → done
+- [x] **T65** 标准 Markdown 链接可用：StarterKit 的 Link 打开 `markdownLinks`（手打 `[文本](URL)` 敲完右括号即成链、粘贴文本里的每条都成链）；编辑态点击落光标、展示态可点 → done
+- [x] **T66** 笔记展示模式：按二级标题分页（首个 H2 前的内容为导言页），只读浮层 + 幻灯片式翻页（←/→、Home/End、Esc），打开时定格正文 → done
+- [x] **T67** 任务与笔记回收站：删除改为「内容出库 + 条目进 `vault.trash`」（任务带依赖、笔记带整棵子树），面板可预览、恢复回原位、两段彻底删除；撤销新建仍是物理删除 → done
 
 ---
 
@@ -1524,3 +1527,31 @@ tests/**                         与 src 镜像
 ⑤**这条只能在真 Chromium 里收尾**：jsdom 不渲染图片、没有 canvas。e2e 把 href 画进 16×16 canvas 数像素，钉住四条——实心底 >85%（实测 99.2%，改造前 31.3%）、品牌底色 >35%（52%）、浅色前景 >5%（8.2%，21 个像素）、前景与底色亮度差 >150（178）。前两条正好把「纯黑线稿」这个老形态关在门外。阈值按实测留了余量（首版写成 >50 / >8，贴线必抖）。
  | 遗留: ①**文件系统层面做不到**：资源管理器/桌面上 `.html` 的图标由 Windows 按扩展名决定，HTML 内容改不了它；要单独图标得附带 `.ico` + 快捷方式（IconFile）或打包成 exe，那会打破「单个 html 就是全部」的交付形态，本轮不做、也未经用户确认这个方向。②只做了 SVG 一种，没有 16/32 PNG 兜底——目标环境是 Chrome/Edge 113+，SVG favicon 均支持；将来要兼容旧浏览器需补 PNG 并对两份都加字节校验。③标签页文字仍是 `OffEarly - 早下班`，没做「文件名 + 应用名」的组合区分。
  | 全量验证: `tsc` 0 / `npm test` **1257 passed (70 files)**（与 T63 持平，本批无新增单测：图标是静态资源，断言落在产物校验与 e2e）/ `npm run e2e` **59 passed + 1 skipped**（+2）/ `npm run build` **11/11**（产物 **6428979 字节**，上限 8388608）
+
+- [2026-10-28] T65 | agent: workbuddy:sess-1028a | commit: "T65-T67: markdown links, H2 presentation mode, and a trash for deleted tasks and notes" | 验收: 用户口径「当前无法实现 md 显示文本 link，[]() 这种格式」→ 真 Chromium 手打 `[官网](https://example.com)` 成链、落盘仍是标准 Markdown、展示态可点 | 备注:
+①**根因是「只读不写」**：官方 Link 扩展早就有 `markdownLinks` 选项，默认 false；我们只吃到 `parseMarkdown`（读文件时认得 `[]()`），于是手打或粘贴进来的链接停在纯文字。打开它以后，官方自带的**输入规则**（敲完 `)` 立即成链）与**粘贴规则**（粘贴文本里每一条都成链）同时生效，围栏 / 转义 / 代码跨度这些边界由官方判据负责，不用再写一套正则。
+②**`openOnClick` 必须编/读分开**：编辑态要让点击落光标（否则改不了链接里的错字），只有只读展示态才该跳走。为此 `createNoteExtensions` 加了第 5 个参数，默认 false，仅 `NoteEditor` 的 `readOnly` 传 true。
+③粘贴那条规则顺手覆盖了「从别处复制一段带链接的 md」——同一件事的另一半，单测与 e2e 两条都钉住了。
+ | 越界改动: 仅 `NoteEditor.tsx`（扩展配置 + 参数化）与两份文案表；零新依赖。
+ | 全量验证: 见 T67 末尾（三项同一批交付，共用一次全量验证）
+
+- [2026-10-28] T66 | agent: workbuddy:sess-1028a | commit: "T65-T67: markdown links, H2 presentation mode, and a trash for deleted tasks and notes" | 验收: 用户口径「支持一个笔记展示模式，按照二级标题分页，这个如何实现展示模式，需要你自己探索」→ 真 Chromium 翻完 5 页（含表格页），并断言翻页期间 `vault.json` 逐字节不变 | 备注:
+①**切分判据必须与主解析器同源**：正则切 Markdown 会立刻撞上围栏里的 `##`、Setext 标题（`标题` + `---`）、转义、列表缩进四类边界，迟早和 `@tiptap/markdown` 产生两套口径。改成「先解析成文档树 → 按**顶层** `heading(2)` 切节点 → 再让同一个序列化器把每页写回 Markdown」（`src/views/notePages.ts`）。围栏、Setext、引用块里的 H2 因此自动正确，单测把这四类边界直接钉死。
+②**分页口径**：首个 H2 之前的非空内容是「导言页」（全是空段落则不成页）；每个顶层 H2 开一页；全文没有 H2 或空文档只给一页——展示模式永不出现空白页。
+③**只读是真的只读**：`editable: false` 而不是「把按钮藏起来」，ProseMirror 不再派发可编辑事务，撤销栈也就不会被「看了一遍」污染；e2e 用「翻页前后 vault.json 字节相等」钉死。只读实例的 testid 换成 `note-editor-readonly`（同屏还挂着编辑实例，撞 testid 会让定位歧义）。
+④**只读下要收的控件**：工具栏、底栏（源码开关 / 字号）、图片缩放把手与预设条（判据是 `editor.isEditable`，不是 props 透传）。第一次拍图时工具栏还在——jsdom 里 `editorReady` 这一拍还没置位，断言「工具栏不存在」是**虚假通过**，真浏览器里它明晃晃挂着。已改成先等编辑器就绪再断言，并给工具栏的挂载条件补上 `!readOnly`。
+⑤**展示时定格正文**：打开那一刻取 `liveMarkdown()`（编辑器当前内容，含还在 debounce 里的字），之后后台改字不会让正在看的页跳动。
+⑥**交互与层极**：←/→、PageUp/PageDown、Home/End 翻页，Esc 或点遮罩关闭；z-45（压过任务弹窗 25、低于灯箱 60），`createPortal` 到 body（外壳 backdrop-filter 会造包含块）。成品图：`docs/t64-present-intro-1440.png` / `t64-present-table-1440.png` / `t64-present-1024.png` / `t64-present-768.png`（脚本名沿用了打包时的 t64 前缀）。
+ | 越界改动: 新增 `src/views/notePages.ts`（纯函数）与 `src/views/NotePresenter.tsx`；`NoteEditor` 增 `readOnly`；`IconSprite` 增 `present` 图标；`NotebookView` 页眉加「展示」按钮。零新依赖。
+ | 全量验证: 见 T67 末尾
+
+- [2026-10-28] T67 | agent: workbuddy:sess-1028a | commit: "T65-T67: markdown links, H2 presentation mode, and a trash for deleted tasks and notes" | 验收: 用户口径「新增笔记和任务回收站，能看到删除的笔记」→ 真 Chromium 全链路：删（带子文档的笔记 + 一个任务）→ 重开仍在 → 恢复回原位 → 再删 → 彻底删除 → 重开为空 | 备注:
+①**软删除字段 vs 独立数组，选了后者**：全库有十几处读路径（看板 / 甘特 / 搜索 / 文档树 / 导入去重 / 引用扫描），给 `Task`/`NoteDoc` 加 `deletedAt` 要求每一处都记得过滤，漏一处已删内容就会「复活」；独立 `vault.trash` 只有一个读路径（面板），删除就是删除。代价是条目要**冻结**内容——任务条目存完整 Task + 当时被连带摘掉的依赖，文档条目存整棵子树，各带原下标。
+②**四个 mutation 两两成对**：`trash.add`（内容出库、条目进站）↔ `trash.restore`（条目出站、内容回库）、`trash.purge`（条目出站）↔ `trash.reinsert`（条目回站、不碰内容）。`trash.restore` 的**正逆元用同一条目**——第一版只给逆元做了「根文档外部父级降级」，结果正向恢复出来的文档仍指着已不存在的父级，测试立刻抓到。
+③**物理删除保留给「新建」的逆元**：`task.delete` / `doc.delete` 原样不动，否则每建一篇再撤销一次，回收站里就多一条垃圾条目（单测两条钉死）。
+④**恢复的三条闸 + 一条降级**：话题没了 / 笔记本没了 / 同 id 已存在 → 拒绝且不入栈（面板给具体原因，不是「失败了」）；根文档的外部父级没了 → 降为顶层，子树内部关系不动。依赖只在**两个端点都还在**时才插回，避免甘特图指向空节点。
+⑤**附件 GC 把回收站正文算进引用**：否则「删掉的笔记 → 清理孤儿附件」会把还能恢复的配图真删掉，不可逆。
+⑥**删除时刻按本地时间格式化**（dayjs）——`deletedAt` 是 UTC ISO，直接截字符串会比用户的钟早 8 小时，截图里一眼看出来。
+ | 遗留: ①没有「清空回收站」批量操作与保留期自动清理；②删除**笔记本**仍是物理删除（连同其下文档），不进回收站；③条目预览是原始 Markdown 去标签的纯文本，不是富文本 / 分页渲染；④回收站没有搜索与类型筛选；⑤彻底删除只在本次会话内可撤销，重开后不可恢复（设计如此）。
+ | 越界改动: `types.ts` / `schema.ts`（新增 `trash`，`.default([])`，schemaVersion 仍为 1）、`commandBus.ts`（4 个 mutation + 3 个命令工厂）、新增 `controllers/trashActions.ts` 与 `views/TrashPanel.tsx`、`assetStore.ts`（引用扫描）、`vaultRepository.ts`（新库显式 `trash: []`）、`TaskDrawer` / `NotebookView` 删除入口、`TopicSidebar` / `App`（入口与挂载）、27 份手写夹具补 `trash: []`。零新依赖。
+ | 全量验证: `tsc` 0 / `npm test` **1306 passed (74 files)**（基线 1257/70 + 49：回收站领域 15 + 分页 9 + 回收站面板 12 + 链接与展示 13）/ `npm run e2e` **62 passed + 1 skipped**（+3：回收站全链路 / 翻页不写库 / 手打链接）/ `npm run build` **11/11**（产物 **6450438 字节**，上限 8388608，余量 1.94MB）

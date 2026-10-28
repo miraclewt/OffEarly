@@ -630,6 +630,8 @@ export function widthPercentFromPixels(pixels: number, contentWidth: number): nu
  */
 function NoteImageView(props: NodeViewProps) {
   const { node, extension, editor, selected, updateAttributes } = props
+  /** 只读（展示模式）下不出现缩放把手与预设条：它们改属性，而后台没有写入口。 */
+  const editable = editor.isEditable
   const src = typeof node.attrs.src === 'string' ? node.attrs.src : ''
   const alt = typeof node.attrs.alt === 'string' ? node.attrs.alt : ''
   const storage = extension.storage as NoteImageStorage
@@ -842,14 +844,14 @@ function NoteImageView(props: NodeViewProps) {
             )
             commitWidth(next)
           }}
-          style={IMAGE_HANDLE}
+          style={editable ? IMAGE_HANDLE : { ...IMAGE_HANDLE, display: 'none' }}
         />
-        {preview === null && !(hovering || selected) ? null : (
+        {!editable || (preview === null && !(hovering || selected)) ? null : (
           <span data-testid="note-image-width-badge" style={IMAGE_WIDTH_BADGE}>
             {preview === null ? badgeText : `${preview}%`}
           </span>
         )}
-        {selected || hovering ? (
+        {editable && (selected || hovering) ? (
           <span data-testid="note-image-tools" contentEditable={false} style={IMAGE_TOOLS}>
             {NOTE_IMAGE_WIDTH_PRESETS.map((preset) => (
               <button
@@ -1008,19 +1010,28 @@ const FALLBACK_IMAGE_LABELS: NoteImageLabels = {
 /**
  * 笔记编辑器的扩展集（导出供单测复用，保证测试与产品走同一套 schema）。
  * `labels` 只影响图片节点视图上的可访问名，不影响 markdown 往返。
+ * `linkOpenOnClick`：编辑态 false（点链接是放光标，不是跳走），只读展示态 true。
  */
 export function createNoteExtensions(
   port?: NoteImagePort,
   labels?: NoteImageLabels,
   placeholder = '',
   mermaidLabels?: MermaidPreviewLabels,
+  linkOpenOnClick = false,
 ) {
   return [
     StarterKit.configure({
       // 换成自补的 SafeCodeBlock（见其注释）
       codeBlock: false,
       // StarterKit 3.32 已含 Link：只改默认行为，不再单独装 @tiptap/extension-link
-      link: { openOnClick: false, autolink: false },
+      link: {
+        openOnClick: linkOpenOnClick,
+        autolink: false,
+        // T64：`[文本](URL)` 此前只有**读**（parseMarkdown）没有**写**——
+        // 手打或粘贴进来的标准 Markdown 链接会被当普通文字。这个开关装上官方自带的
+        // 输入规则（打完 `)` 立即成链）与粘贴规则（粘贴文本里的每一条都成链）。
+        markdownLinks: true,
+      },
       // heading 保持默认 1–6 级：工具栏只暴露 H2/H3（spec 6.4），但 schema 必须容得下 H1——
       // 快捷语法 `# `（Obsidian 习惯）与既有笔记里的 `# 标题` 都要能原样往返，收窄 levels 会直接丢内容。
     }),
@@ -1116,6 +1127,14 @@ export interface NoteEditorProps {
   fontSize?: number
   /** 点 A- / A+ 时外送目标字号；不传则不显示字号控件（纯展示场景）。 */
   onFontSizeChange?: (next: number) => void
+  /**
+   * T64 · 只读展示（知识库的「分页展示」用它渲染单页）。
+   *
+   * 只读的是**编辑器实例**（`editable: false`），不是「把按钮藏起来」：ProseMirror 不再
+   * 派发可编辑事务，于是 onUpdate 不会触发、撤销栈不会被展示模式污染。同时
+   * `openOnClick` 打开——展示时点链接应该跳走，而不是把光标放进字里。
+   */
+  readOnly?: boolean
   t?: (key: MsgKey, params?: TranslateParams) => string
   style?: CSSProperties
 }
@@ -1313,6 +1332,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   }
   const minHeight = props.minHeight ?? 200
   const grow = props.grow ?? false
+  const readOnly = props.readOnly ?? false
   const fontSize = props.fontSize ?? NOTE_FONT_SIZE_DEFAULT
   const canShrink = fontSize > NOTE_FONT_SIZE_MIN
   const canGrow = fontSize < NOTE_FONT_SIZE_MAX
@@ -1390,15 +1410,20 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
       imageLabels,
       placeholderRef.current,
       mermaidLabelsRef.current ?? FALLBACK_MERMAID_LABELS,
+      readOnly,
     ),
     content: props.value,
     contentType: 'markdown',
+    // 只读来自 props 且只在挂载时生效：展示模式的每一页都是**新建**的实例（key 随页变），
+    // 所以不需要在运行中切 editable——那会牵扯到事务与撤销栈。
+    editable: !readOnly,
     // TipTap v3 默认「事务后不重渲染」；工具栏的 aria-pressed / 高亮要跟着选区与标记即时刷新，
     // 这里显式打开（笔记编辑器体量小，重渲染代价可忽略）。
     shouldRerenderOnTransaction: true,
     editorProps: {
       attributes: {
-        'data-testid': 'note-editor-content',
+        // 展示模式下同一屏还会挂着**编辑**用的那个实例，testid 不能撞（测试与定位都按它找）
+        'data-testid': readOnly ? 'note-editor-readonly' : 'note-editor-content',
         'aria-label': t('noteEditor.content'),
         // 占位提示走装饰节点的 data-placeholder（见 NotePlaceholder），这里不再重复
       },
@@ -1696,7 +1721,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
         ...props.style,
       }}
     >
-      {editorReady && mode === 'rich' ? (
+      {editorReady && !readOnly && mode === 'rich' ? (
         <div data-testid="note-toolbar" role="toolbar" aria-label={t('noteEditor.toolbar')} style={TOOLBAR}>
           {tools.map((tool) => {
             const instance = editorRef.current
@@ -1830,7 +1855,9 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
         </div>
       )}
 
-      <div data-testid="note-statusbar" style={STATUSBAR}>
+      {/* 只读展示不挂底栏：源码开关与字号是「编辑这件东西」的控件，展示态一个都不该出现 */}
+      {readOnly ? null : (
+        <div data-testid="note-statusbar" style={STATUSBAR}>
         <span style={STATUS_LEFT}>
           <button
             type="button"
@@ -1880,7 +1907,8 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
             {t('noteEditor.charCount', { n: charCount })}
           </span>
         )}
-      </div>
+        </div>
+      )}
 
       {linkQuery !== null ? (
         <div data-testid="note-link-menu" role="listbox" aria-label={t('noteEditor.linkSearch')} style={LINK_MENU}>

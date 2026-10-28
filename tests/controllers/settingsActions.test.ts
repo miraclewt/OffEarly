@@ -51,6 +51,7 @@ function vault(overrides: Partial<Vault> = {}): Vault {
     mindmaps: [],
     notebooks: [],
     noteDocs: [],
+    trash: [],
     ...overrides,
   }
 }

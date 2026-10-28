@@ -63,6 +63,7 @@ function makeVault(): Vault {
     mindmaps: [],
     notebooks: [],
     noteDocs: [],
+    trash: [],
   }
 }
 

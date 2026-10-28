@@ -60,6 +60,7 @@ function emptyVault(): Vault {
     mindmaps: [],
     notebooks: [],
     noteDocs: [],
+    trash: [],
   }
 }
 

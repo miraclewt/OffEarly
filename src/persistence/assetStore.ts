@@ -197,9 +197,10 @@ export function assetRefsIn(markdown: string): string[] {
 }
 
 /**
- * 纯函数：扫描整个 vault 所有 note（任务 + 里程碑 + T49 知识库文档）得到被引用附件 id 集合。
- * 里程碑也带 note（T24），只扫 task.note 会漏掉「只被里程碑引用」的图、回收时误删——
- * 知识库文档同理；回收是破坏性操作，安全侧宁可多认一个引用。
+ * 纯函数：扫描整个 vault 所有 note（任务 + 里程碑 + T49 知识库文档 + T64 回收站）得到被引用
+ * 附件 id 集合。里程碑也带 note（T24），只扫 task.note 会漏掉「只被里程碑引用」的图、回收时
+ * 误删——知识库文档同理；回收站同理：一条已删的笔记随时可能被恢复，它里面的图不能当孤儿删掉。
+ * 回收是破坏性操作，安全侧宁可多认一个引用。
  */
 export function referencedAssetIds(vault: Vault): Set<string> {
   const ids = new Set<string>()
@@ -207,6 +208,9 @@ export function referencedAssetIds(vault: Vault): Set<string> {
     ...vault.tasks.map((task) => task.note),
     ...vault.milestones.map((milestone) => milestone.note),
     ...vault.noteDocs.map((doc) => doc.content),
+    ...vault.trash.flatMap((entry) =>
+      entry.kind === 'task' ? [entry.task.note] : entry.docs.map((item) => item.doc.content),
+    ),
   ]
   for (const note of notes) {
     if (typeof note !== 'string' || note === '') continue

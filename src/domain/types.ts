@@ -125,6 +125,39 @@ export interface Asset {
   createdAt: string
 }
 
+/**
+ * T64 · 回收站条目。
+ *
+ * 为什么是独立数组而不是在 Task / NoteDoc 上加 `deletedAt`：全库有十几处读路径（看板、
+ * 甘特、搜索、文档树、导入去重、引用扫描…），软删除要求每一处都过滤，漏一处已删内容就会
+ * 「复活」；而独立数组只有一个读路径（回收站面板），删除就是删除。
+ *
+ * 条目自带 id 与 deletedAt，并**冻结删除那一刻的全部内容**：任务条目带完整 Task 与当时被
+ * 连带摘掉的依赖，文档条目带整棵子树。恢复因此不需要任何外部快照，也不依赖「删除时还剩什么」。
+ */
+export interface TrashTaskEntry {
+  id: string
+  kind: 'task'
+  deletedAt: string
+  /** 删除时在 vault.tasks 里的下标（恢复时尽量回到原位；越界则夹到末尾）。 */
+  index: number
+  task: Task
+  /** 删除任务时被连带摘掉的依赖，各带原下标（与 task.restore 同口径）。 */
+  links: { link: Dependency; index: number }[]
+}
+
+export interface TrashDocEntry {
+  id: string
+  kind: 'doc'
+  deletedAt: string
+  /** 被删的那一篇（子树的根）；恢复后定位与提示都用它。 */
+  rootId: string
+  /** 整棵子树，各带原下标（升序插回即可精确复原顺序）。 */
+  docs: { doc: NoteDoc; index: number }[]
+}
+
+export type TrashEntry = TrashTaskEntry | TrashDocEntry
+
 export interface FilterDateRange {
   from?: string
   to?: string
@@ -185,4 +218,9 @@ export interface Vault {
   /** T49：知识库。旧库缺键由 schema 补空数组，schemaVersion 不升、不注册迁移。 */
   notebooks: Notebook[]
   noteDocs: NoteDoc[]
+  /**
+   * T64：回收站。同样「旧库缺键补空数组」——磁盘上的旧 vault.json 原样能打开。
+   * 键序排在 noteDocs 之后，save 的键序约定不变。
+   */
+  trash: TrashEntry[]
 }
