@@ -20,7 +20,7 @@ function board(nodes: WhiteboardNode[]): Whiteboard {
 }
 
 function markup(nodes: WhiteboardNode[]): string {
-  return buildWhiteboardSvgMarkup(board(nodes), { range: 'all' }).markup
+  return buildWhiteboardSvgMarkup(board(nodes), { range: 'full' }).markup
 }
 
 describe('白板导出的配色', () => {
