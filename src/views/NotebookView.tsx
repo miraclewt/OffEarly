@@ -61,7 +61,9 @@ import {
 } from './notebookExport'
 import { triggerDownload } from './GanttExporter'
 import type { ExportDocInput } from './notebookExport'
+import { resolveNotebookPaneWidths } from './notebookLayout'
 import { fs, px, sp } from '../styles/scale'
+import { useUiScale } from '../styles/useUiScale'
 
 type Translate = (key: MsgKey, params?: TranslateParams) => string
 
@@ -78,8 +80,6 @@ const DANGER = 'var(--oe-overdue)'
 
 /** 两段确认的复位时长：够第二下点，也够意识到「点错了」。 */
 const ARM_MS = 3000
-const NOTEBOOK_PANE_WIDTH = 176
-const TREE_PANE_WIDTH = 248
 
 const fallbackI18n = createI18n({ getLocale: () => 'zh', subscribe: () => () => {} })
 
@@ -171,6 +171,12 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
    */
   const [booksOpen, setBooksOpen] = useState(true)
   const [treeOpen, setTreeOpen] = useState(true)
+  /**
+   * T68 · 两栏宽度跟着界面尺度走（宽屏富余的横向空间分给列表，而不是全留给正文两侧的空白）。
+   * 只在跨档时变一次，因此不会在拖窗口时每帧重排。
+   */
+  const uiScale = useUiScale()
+  const panes = useMemo(() => resolveNotebookPaneWidths(uiScale), [uiScale])
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<Editing | null>(null)
   const [hover, setHover] = useState<string | null>(null)
@@ -545,7 +551,7 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
     <div data-testid="notebook" style={ROOT}>
       {/* ① 笔记本：可收起（T51）——收起后留竖轨，正文能多吃 176px 宽 */}
       {booksOpen ? (
-        <aside data-testid="notebook-books-pane" style={PANE_NOTEBOOKS}>
+        <aside data-testid="notebook-books-pane" style={{ ...PANE_NOTEBOOKS, ...paneWidth(panes.books) }}>
           <div style={PANE_HEAD}>
             <span style={PANE_TITLE}>{t('notebook.title')}</span>
             <button
@@ -588,6 +594,7 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
                       tabIndex={0}
                       data-testid={`notebook-row-${notebook.id}`}
                       aria-current={active ? 'true' : undefined}
+                      title={notebook.name}
                       onMouseEnter={() => setHover(rowId)}
                       onMouseLeave={() => setHover((current) => (current === rowId ? null : current))}
                       onClick={() => {
@@ -669,7 +676,7 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
 
       {/* ② 文档树：同样可收起 */}
       {treeOpen ? (
-        <aside data-testid="notebook-tree-pane" style={PANE_TREE}>
+        <aside data-testid="notebook-tree-pane" style={{ ...PANE_TREE, ...paneWidth(panes.tree) }}>
           <div style={PANE_HEAD}>
             <span style={{ ...PANE_TITLE, ...ELLIPSIS }}>{activeNotebook?.name ?? ''}</span>
             <span style={COUNT}>{notebookDocs.length}</span>
@@ -1111,6 +1118,11 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
         data-testid={`doc-row-${doc.id}`}
         data-doc-id={doc.id}
         data-drop-hint={hint ?? undefined}
+        /**
+         * T68：两栏再宽也架不住超长标题，截断时至少要让鼠标停在行上能读全。
+         * 只在这一行能看见的按钮（选中/悬停）之后仍可能挤掉字符，所以挂在整行上。
+         */
+        title={doc.title}
         onMouseEnter={() => setHover(rowKey)}
         onMouseLeave={() => setHover((current) => (current === rowKey ? null : current))}
         onClick={() => {
@@ -1347,9 +1359,8 @@ const ROOT: CSSProperties = {
   color: TEXT,
 }
 
+/** T68：宽度由 `resolveNotebookPaneWidths` 现算，这里只放与宽度无关的那部分。 */
 const PANE_NOTEBOOKS: CSSProperties = {
-  width: sp(NOTEBOOK_PANE_WIDTH),
-  flex: `0 0 ${sp(NOTEBOOK_PANE_WIDTH)}`,
   display: 'flex',
   flexDirection: 'column',
   minHeight: 0,
@@ -1358,13 +1369,16 @@ const PANE_NOTEBOOKS: CSSProperties = {
 }
 
 const PANE_TREE: CSSProperties = {
-  width: sp(TREE_PANE_WIDTH),
-  flex: `0 0 ${sp(TREE_PANE_WIDTH)}`,
   display: 'flex',
   flexDirection: 'column',
   minHeight: 0,
   borderRight: `1px solid ${SEPARATOR}`,
   background: SURFACE,
+}
+
+/** 两栏的定宽：`flex-basis` 与 `width` 同值，避免 flex 上下文里被压扁。 */
+function paneWidth(width: number): CSSProperties {
+  return { width, flex: `0 0 ${width}px` }
 }
 
 /** T51 · 收起后的竖轨宽度：与甘特任务表（T39）的 30px 竖轨同宽，两处收起看起来是一套语言。 */
