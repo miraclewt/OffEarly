@@ -94,6 +94,7 @@ function baseVault(): Vault {
     notebooks: [notebook('nb1')],
     noteDocs: [],
     trash: [],
+    whiteboards: [],
   }
 }
 

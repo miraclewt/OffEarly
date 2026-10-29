@@ -106,6 +106,7 @@ function makeVault(): Vault {
     notebooks: [],
     noteDocs: [],
     trash: [],
+    whiteboards: [],
   }
 }
 

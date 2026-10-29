@@ -12,6 +12,12 @@
 // 撤销栈与 dirty 因此天然对齐，不存在「改了但没标脏」的野写路径。
 
 import type {
+  Whiteboard,
+  WhiteboardEdge,
+  WhiteboardEdgePatch,
+  WhiteboardNode,
+  WhiteboardNodePatch,
+  WhiteboardPatch,
   Dependency,
   MindMap,
   MindNode,
@@ -108,6 +114,30 @@ export interface MutationPayloads {
   'trash.restore': { entry: TrashEntry }
   'trash.purge': { entry: TrashEntry; index: number }
   'trash.reinsert': { entry: TrashEntry; index: number }
+  /**
+   * T69 · 白板。节点与边**成批**进出：白板的一次动作往往是「一整个图元」
+   * （模板插入 = 十几个框加箭头、删一个框 = 它加上所有挂在它身上的线），
+   * 逐条进栈会让一次 Ctrl+Z 只撤掉其中一个框，看起来像没反应。
+   * graphic.add 与 graphic.delete 的形状**完全相同**，因此互为逆元、无需另造 payload。
+   * `index` 是各自数组里的原始下标，回插后数组序与删除前一致（渲染序与导出序都靠它稳定）。
+   */
+  'whiteboard.create': { whiteboard: Whiteboard; index: number | null }
+  'whiteboard.delete': { id: string }
+  'whiteboard.patch': { id: string; patch: WhiteboardPatch }
+  'whiteboard.graphic.add': { whiteboardId: string; nodes: WhiteboardNodeEntry[]; edges: WhiteboardEdgeEntry[] }
+  'whiteboard.graphic.delete': { whiteboardId: string; nodes: WhiteboardNodeEntry[]; edges: WhiteboardEdgeEntry[] }
+  'whiteboard.nodes.patch': { whiteboardId: string; patches: { id: string; patch: WhiteboardNodePatch }[] }
+  'whiteboard.edges.patch': { whiteboardId: string; patches: { id: string; patch: WhiteboardEdgePatch }[] }
+}
+
+/** 白板图元带原始下标的一对（批量进出与还原共用）。 */
+export interface WhiteboardNodeEntry {
+  node: WhiteboardNode
+  index: number
+}
+export interface WhiteboardEdgeEntry {
+  edge: WhiteboardEdge
+  index: number
 }
 
 export type MutationType = keyof MutationPayloads
@@ -295,6 +325,50 @@ function insertNoteDocs(vault: Vault, entries: readonly { doc: NoteDoc; index: n
     noteDocs.splice(Math.min(entry.index, noteDocs.length), 0, entry.doc)
   }
   return { ...vault, noteDocs }
+}
+
+// ── T69 · 白板：定位、批量进出、字段级逆 patch ──
+
+function findWhiteboard(vault: Vault, id: string): Whiteboard {
+  const whiteboard = vault.whiteboards.find((candidate) => candidate.id === id)
+  if (whiteboard === undefined) throw new Error(`commandBus: 白板不存在（${id}）`)
+  return whiteboard
+}
+
+function mapWhiteboard(vault: Vault, id: string, recipe: (whiteboard: Whiteboard) => Whiteboard): Vault {
+  findWhiteboard(vault, id)
+  return {
+    ...vault,
+    whiteboards: vault.whiteboards.map((whiteboard) => (whiteboard.id === id ? recipe(whiteboard) : whiteboard)),
+  }
+}
+
+/**
+ * 批量插回：按原始下标**升序**插入（降序会把顺序翻过来，与 task.restore 的链接回插同一坑）。
+ * 下标越界一律夹到末尾——数组序只是渲染序与导出序的稳定器，不值得为此抛错。
+ */
+function insertGraphic(
+  whiteboard: Whiteboard,
+  nodes: readonly WhiteboardNodeEntry[],
+  edges: readonly WhiteboardEdgeEntry[],
+): Whiteboard {
+  const nextNodes = [...whiteboard.nodes]
+  for (const entry of [...nodes].sort((a, b) => a.index - b.index)) {
+    nextNodes.splice(Math.min(entry.index, nextNodes.length), 0, entry.node)
+  }
+  const nextEdges = [...whiteboard.edges]
+  for (const entry of [...edges].sort((a, b) => a.index - b.index)) {
+    nextEdges.splice(Math.min(entry.index, nextEdges.length), 0, entry.edge)
+  }
+  return { ...whiteboard, nodes: nextNodes, edges: nextEdges }
+}
+
+/** 字段级逆 patch：只把这次真的改过的键还原成原值（与 invertNoteDocPatch 同一手法）。 */
+function invertFields<T extends object>(source: T, patch: Partial<T>): Partial<T> {
+  const from = source as unknown as Record<string, unknown>
+  const inverse: Record<string, unknown> = {}
+  for (const key of Object.keys(patch)) inverse[key] = from[key]
+  return inverse as Partial<T>
 }
 
 /** 纯函数：命令（或逆命令）作用在 vault 上的结果。不合法输入直接抛错，不静默兜底。 */
@@ -523,6 +597,84 @@ export function reduce(vault: Vault, mutation: Mutation): Vault {
       const trash = [...vault.trash]
       trash.splice(Math.min(index, trash.length), 0, entry)
       return { ...vault, trash }
+    }
+    case 'whiteboard.create': {
+      const { whiteboard, index } = mutation.payload
+      const whiteboards = [...vault.whiteboards]
+      whiteboards.splice(index ?? whiteboards.length, 0, whiteboard)
+      return { ...vault, whiteboards }
+    }
+    case 'whiteboard.delete': {
+      const { id } = mutation.payload
+      findWhiteboard(vault, id)
+      return { ...vault, whiteboards: vault.whiteboards.filter((whiteboard) => whiteboard.id !== id) }
+    }
+    case 'whiteboard.patch': {
+      const { id, patch } = mutation.payload
+      return mapWhiteboard(vault, id, (whiteboard) => ({ ...whiteboard, ...patch }))
+    }
+    case 'whiteboard.graphic.add': {
+      const { whiteboardId, nodes, edges } = mutation.payload
+      return mapWhiteboard(vault, whiteboardId, (whiteboard) => insertGraphic(whiteboard, nodes, edges))
+    }
+    case 'whiteboard.graphic.delete': {
+      const { whiteboardId, nodes, edges } = mutation.payload
+      return mapWhiteboard(vault, whiteboardId, (whiteboard) => {
+        // 先验存在性：批量删除里有一条对不上就整体抛错，绝不半删
+        for (const entry of nodes) {
+          if (!whiteboard.nodes.some((candidate) => candidate.id === entry.node.id)) {
+            throw new Error(`commandBus: 白板节点不存在（${entry.node.id}）`)
+          }
+        }
+        for (const entry of edges) {
+          if (!whiteboard.edges.some((candidate) => candidate.id === entry.edge.id)) {
+            throw new Error(`commandBus: 白板连线不存在（${entry.edge.id}）`)
+          }
+        }
+        const goneNodes = new Set(nodes.map((entry) => entry.node.id))
+        const goneEdges = new Set(edges.map((entry) => entry.edge.id))
+        return {
+          ...whiteboard,
+          nodes: whiteboard.nodes.filter((candidate) => !goneNodes.has(candidate.id)),
+          edges: whiteboard.edges.filter((candidate) => !goneEdges.has(candidate.id)),
+        }
+      })
+    }
+    case 'whiteboard.nodes.patch': {
+      const { whiteboardId, patches } = mutation.payload
+      return mapWhiteboard(vault, whiteboardId, (whiteboard) => {
+        for (const item of patches) {
+          if (!whiteboard.nodes.some((candidate) => candidate.id === item.id)) {
+            throw new Error(`commandBus: 白板节点不存在（${item.id}）`)
+          }
+        }
+        const byId = new Map(patches.map((item) => [item.id, item.patch]))
+        return {
+          ...whiteboard,
+          nodes: whiteboard.nodes.map((node) => {
+            const patch = byId.get(node.id)
+            return patch === undefined ? node : { ...node, ...patch }
+          }),
+        }
+      })
+    }
+    case 'whiteboard.edges.patch': {
+      const { whiteboardId, patches } = mutation.payload
+      return mapWhiteboard(vault, whiteboardId, (whiteboard) => {
+        for (const item of patches) {
+          if (!whiteboard.edges.some((candidate) => candidate.id === item.id)) {
+            throw new Error(`commandBus: 白板连线不存在（${item.id}）`)
+          }
+        }
+        const byId = new Map(patches.map((item) => [item.id, item.patch]))
+        return {
+          ...whiteboard,
+          edges: whiteboard.edges.map((edge) => {
+            const patch = byId.get(edge.id)
+            return patch === undefined ? edge : { ...edge, ...patch }
+          }),
+        }
+      })
     }
   }
 }
@@ -986,6 +1138,144 @@ export function purgeTrashCommand(vault: Vault, entryId: string): Command {
     type: 'trash.purge',
     payload: { entry, index },
     inverse: { type: 'trash.reinsert', payload: { entry, index } },
+  }
+}
+
+// ── T69 · 白板命令（画布写入口；节点与边成批进出，一次动作一条撤销项） ────────────
+
+/** 新建白板（追加到列表尾部）；逆元按 id 删。 */
+export function createWhiteboardCommand(whiteboard: Whiteboard): Command {
+  return {
+    type: 'whiteboard.create',
+    payload: { whiteboard, index: null },
+    inverse: { type: 'whiteboard.delete', payload: { id: whiteboard.id } },
+  }
+}
+
+/** 删除白板；逆元带完整板体与原下标，undo 后连列表位置一起还原。 */
+export function deleteWhiteboardCommand(vault: Vault, id: string): Command {
+  const whiteboard = findWhiteboard(vault, id)
+  const index = vault.whiteboards.findIndex((candidate) => candidate.id === id)
+  return {
+    type: 'whiteboard.delete',
+    payload: { id },
+    inverse: { type: 'whiteboard.create', payload: { whiteboard, index } },
+  }
+}
+
+/** 改板名 / 排序；逆元走字段级还原。 */
+export function patchWhiteboardCommand(vault: Vault, id: string, patch: WhiteboardPatch): Command {
+  const whiteboard = findWhiteboard(vault, id)
+  if (Object.keys(patch).length === 0) throw new Error('commandBus: 空 patch 不构成变更')
+  return {
+    type: 'whiteboard.patch',
+    payload: { id, patch },
+    inverse: { type: 'whiteboard.patch', payload: { id, patch: invertFields(whiteboard, patch) } },
+  }
+}
+
+/**
+ * 批量加图元（单个图元、模板、粘贴走的都是这条）；逆元按 id 批量删。
+ * 下标由调用方给——同一批里的下标都是**插入前**数组里的位置，reducer 按升序落位。
+ */
+export function addGraphicCommand(
+  whiteboardId: string,
+  nodes: readonly WhiteboardNodeEntry[],
+  edges: readonly WhiteboardEdgeEntry[] = [],
+): Command {
+  const payload = { whiteboardId, nodes: [...nodes], edges: [...edges] }
+  return {
+    type: 'whiteboard.graphic.add',
+    payload,
+    inverse: { type: 'whiteboard.graphic.delete', payload },
+  }
+}
+
+/**
+ * 批量删图元；逆元是同形 payload 的 graphic.add，undo 后连原下标一起回到原位。
+ *
+ * **挂在被删节点上的连线会被自动收进这一批**：留着它们就是悬空边，渲染时找不到端点会被
+ * 静默跳过，而用户看不出「这条线为什么没回来」——真正的危险是它还在数据里、导出时又出现。
+ */
+export function deleteGraphicCommand(
+  vault: Vault,
+  whiteboardId: string,
+  nodeIds: readonly string[],
+  edgeIds: readonly string[] = [],
+): Command {
+  const whiteboard = findWhiteboard(vault, whiteboardId)
+  const goneNodes = new Set(nodeIds)
+  if (goneNodes.size === 0 && edgeIds.length === 0) {
+    throw new Error('commandBus: 没有要删除的图元')
+  }
+  for (const id of goneNodes) {
+    if (!whiteboard.nodes.some((candidate) => candidate.id === id)) {
+      throw new Error(`commandBus: 白板节点不存在（${id}）`)
+    }
+  }
+  const goneEdges = new Set(edgeIds)
+  for (const id of goneEdges) {
+    if (!whiteboard.edges.some((candidate) => candidate.id === id)) {
+      throw new Error(`commandBus: 白板连线不存在（${id}）`)
+    }
+  }
+  const nodes: WhiteboardNodeEntry[] = []
+  whiteboard.nodes.forEach((node, index) => {
+    if (goneNodes.has(node.id)) nodes.push({ node, index })
+  })
+  const edges: WhiteboardEdgeEntry[] = []
+  whiteboard.edges.forEach((edge, index) => {
+    if (goneEdges.has(edge.id) || goneNodes.has(edge.from) || goneNodes.has(edge.to)) {
+      edges.push({ edge, index })
+    }
+  })
+  const payload = { whiteboardId, nodes, edges }
+  return {
+    type: 'whiteboard.graphic.delete',
+    payload,
+    inverse: { type: 'whiteboard.graphic.add', payload },
+  }
+}
+
+/** 批量改节点（拖动、改尺寸、改文本、多选对齐都是一条）；逆元按同一批 id 还原旧值。 */
+export function patchWhiteboardNodesCommand(
+  vault: Vault,
+  whiteboardId: string,
+  patches: readonly { id: string; patch: WhiteboardNodePatch }[],
+): Command {
+  const whiteboard = findWhiteboard(vault, whiteboardId)
+  const live = patches.filter((item) => Object.keys(item.patch).length > 0)
+  if (live.length === 0) throw new Error('commandBus: 空 patch 不构成变更')
+  const inverse = live.map((item) => {
+    const node = whiteboard.nodes.find((candidate) => candidate.id === item.id)
+    if (node === undefined) throw new Error(`commandBus: 白板节点不存在（${item.id}）`)
+    return { id: item.id, patch: invertFields(node, item.patch) }
+  })
+  return {
+    type: 'whiteboard.nodes.patch',
+    payload: { whiteboardId, patches: [...live] },
+    inverse: { type: 'whiteboard.nodes.patch', payload: { whiteboardId, patches: inverse } },
+  }
+}
+
+/** 批量改连线（锚点 / 走线 / 箭头 / 虚线 / 标签）。 */
+export function patchWhiteboardEdgesCommand(
+  vault: Vault,
+  whiteboardId: string,
+  patches: readonly { id: string; patch: WhiteboardEdgePatch }[],
+): Command {
+  const whiteboard = findWhiteboard(vault, whiteboardId)
+  const live = patches.filter((item) => Object.keys(item.patch).length > 0)
+  if (live.length === 0) throw new Error('commandBus: 空 patch 不构成变更')
+  const inverse = live.map((item) => {
+    const edge = whiteboard.edges.find((candidate) => candidate.id === item.id)
+    if (edge === undefined) throw new Error(`commandBus: 白板连线不存在（${item.id}）`)
+    return { id: item.id, patch: invertFields(edge, item.patch) }
+  })
+  return {
+    type: 'whiteboard.edges.patch',
+    payload: { whiteboardId, patches: [...live] },
+    inverse: { type: 'whiteboard.edges.patch', payload: { whiteboardId, patches: inverse } },
   }
 }
 

@@ -38,12 +38,14 @@ import type {
 } from './persistence/vaultRepository'
 import { VaultValidationError } from './domain/schema'
 import { CommandPalette } from './views/CommandPalette'
+import type { PaletteView } from './views/CommandPalette'
 import { ConflictDialog } from './views/ConflictDialog'
 import type { ConflictLabels } from './views/ConflictDialog'
 import { BoardView } from './views/BoardView'
 import { GanttView } from './views/GanttView'
 import { MindMapView } from './views/MindMapView'
 import { NotebookView } from './views/NotebookView'
+import { WhiteboardView } from './views/WhiteboardView'
 import { FilterBar } from './views/FilterBar'
 import { MilestonePanel } from './views/MilestonePanel'
 import { createAssetStore } from './persistence/assetStore'
@@ -382,6 +384,16 @@ function StartupScreen(props: {
  * 而 hooks 不能写在 `session === null` 的条件里。拆一个只订阅 vault 的小组件，
  * 既保住了 hooks 规则，也让浮层永远拿到最新一份任务与文档。
  */
+/** 视图顺序与标签：顶栏分段控件与命令面板共用同一套语汇，加视图只改这两张表。 */
+const VIEW_ORDER: PaletteView[] = ['board', 'gantt', 'mindmap', 'whiteboard', 'notebook']
+const VIEW_LABEL: Record<PaletteView, MsgKey> = {
+  board: 'shell.viewBoard',
+  gantt: 'shell.viewGantt',
+  mindmap: 'shell.viewMindmap',
+  whiteboard: 'shell.viewWhiteboard',
+  notebook: 'shell.viewNotebook',
+}
+
 function PaletteMount(props: {
   store: VaultStore
   open: boolean
@@ -389,7 +401,7 @@ function PaletteMount(props: {
   t: (key: MsgKey, params?: TranslateParams) => string
   onOpenTask: (id: string) => void
   onOpenDoc: (notebookId: string, docId: string) => void
-  onSelectView: (view: 'board' | 'gantt' | 'mindmap' | 'notebook') => void
+  onSelectView: (view: PaletteView) => void
   onOpenSettings: () => void
   onOpenBackup: () => void
 }) {
@@ -449,7 +461,7 @@ function UndoRedo(props: { bus: CommandBus; t: (key: MsgKey, params?: TranslateP
  */
 function Workspace(props: {
   store: VaultStore
-  view: 'board' | 'gantt' | 'mindmap' | 'notebook'
+  view: PaletteView
   t: (key: MsgKey, params?: TranslateParams) => string
   /** 写入口（T10 CommandBus，可能包了 T29 只读闸门）；BoardView 改列/换序经它落盘。 */
   bus: CommandBus
@@ -519,6 +531,9 @@ function Workspace(props: {
           // T45：导图自带 onClick（节点选中留在视图本地 state），不经上面的事件委托；
           // 空态「新建」经 Workspace 的 bus（可能包了 T29 只读闸门）落盘。
           <MindMapView vault={vault} bus={bus} t={t} />
+        ) : view === 'whiteboard' ? (
+          // T69：白板（自由画布）。与看板同名不同物——`board` 是 Kanban，这里是 Miro 式画布。
+          <WhiteboardView vault={vault} bus={bus} t={t} />
         ) : view === 'notebook' ? (
           // T49：知识库。选中态留在视图本地；文档里的 [[任务]] / [[里程碑]] 经回调拉起既有面板。
           <NotebookView
@@ -565,7 +580,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
   // 反复 setPhase 形成渲染死循环，用户点击推进的相位会被立刻覆盖回 need-dir。
   const ports = useMemo(() => props.ports ?? startupPorts(), [props.ports])
   const [phase, setPhase] = useState<Phase>({ kind: 'booting' })
-  const [view, setView] = useState<'board' | 'gantt' | 'mindmap' | 'notebook'>('board')
+  const [view, setView] = useState<PaletteView>('board')
   const [conflict, setConflict] = useState<ConflictReport | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   // 里程碑面板（T18）：受控开合 + 选中态。侧栏入口与甘特菱形点击共用同一面板。
@@ -1167,7 +1182,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
             {/* 视图切换与顶栏提示；撤销/重做（T52）挂在视图切换右侧 */}
             {session === null ? null : (
               <div role="group" className="oe-seg" style={{ marginRight: 'auto' }}>
-                {(['board', 'gantt', 'mindmap', 'notebook'] as const).map((mode) => (
+                {VIEW_ORDER.map((mode) => (
                   <button
                     key={mode}
                     type="button"
@@ -1177,13 +1192,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
                       setView(mode)
                     }}
                   >
-                    {mode === 'board'
-                      ? t('shell.viewBoard')
-                      : mode === 'gantt'
-                        ? t('shell.viewGantt')
-                        : mode === 'mindmap'
-                          ? t('shell.viewMindmap')
-                          : t('shell.viewNotebook')}
+                    {t(VIEW_LABEL[mode])}
                   </button>
                 ))}
               </div>

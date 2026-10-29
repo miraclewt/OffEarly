@@ -8,6 +8,9 @@ import {
 } from './types'
 import type {
   Asset,
+  Whiteboard,
+  WhiteboardEdge,
+  WhiteboardNode,
   Dependency,
   Filter,
   Milestone,
@@ -161,6 +164,41 @@ export const TrashEntrySchema: z.ZodType<TrashEntry> = z.discriminatedUnion('kin
   TrashDocEntrySchema,
 ])
 
+// T69 · 白板。坐标是用户摆的，所以必须落盘；数值一律 finite（NaN/Infinity 会让 SVG 整层消失，
+// 且序列化后是 null，再打开必然崩）——宽高为正是渲染与命中检测的共同前提。
+export const WhiteboardNodeSchema = z.object({
+  id,
+  shape: z.enum(['rect', 'round', 'ellipse', 'diamond', 'note', 'text', 'frame']),
+  x: z.number().finite(),
+  y: z.number().finite(),
+  width: z.number().positive(),
+  height: z.number().positive(),
+  text: z.string(),
+  tone: z.enum(['plain', 'accent', 'ok', 'warn', 'danger', 'muted']),
+})
+
+export const WhiteboardEdgeSchema = z.object({
+  id,
+  from: id,
+  to: id,
+  fromAnchor: z.enum(['auto', 'top', 'right', 'bottom', 'left']),
+  toAnchor: z.enum(['auto', 'top', 'right', 'bottom', 'left']),
+  route: z.enum(['ortho', 'straight']),
+  arrow: z.enum(['end', 'both', 'none']),
+  dashed: z.boolean(),
+  label: z.string(),
+})
+
+export const WhiteboardSchema = z.object({
+  id,
+  name: z.string(),
+  order: z.string(),
+  nodes: z.array(WhiteboardNodeSchema),
+  edges: z.array(WhiteboardEdgeSchema),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+})
+
 export const FilterSchema = z.object({
   topicIds: z.array(id),
   includeDescendants: z.boolean(),
@@ -236,6 +274,8 @@ export const VaultSchema = z.object({
   noteDocs: z.array(NoteDocSchema).default([]),
   // T64：旧库缺 trash 键 → 补空数组（与上面两个键同一先例），schemaVersion 保持 1
   trash: z.array(TrashEntrySchema).default([]),
+  // T69：旧库缺 whiteboards 键 → 补空数组（与上面几个键同一先例），schemaVersion 保持 1
+  whiteboards: z.array(WhiteboardSchema).default([]),
 })
 
 // 编译期防漂移：schema 推导出的类型必须与 types.ts 完全一致，
@@ -256,6 +296,9 @@ export type SchemaAlignment = [
   Assert<Equal<Notebook, z.infer<typeof NotebookSchema>>>,
   Assert<Equal<NoteDoc, z.infer<typeof NoteDocSchema>>>,
   Assert<Equal<TrashEntry, z.infer<typeof TrashEntrySchema>>>,
+  Assert<Equal<Whiteboard, z.infer<typeof WhiteboardSchema>>>,
+  Assert<Equal<WhiteboardNode, z.infer<typeof WhiteboardNodeSchema>>>,
+  Assert<Equal<WhiteboardEdge, z.infer<typeof WhiteboardEdgeSchema>>>,
   Assert<Equal<Filter, z.infer<typeof FilterSchema>>>,
   Assert<Equal<WorkCalendar, z.infer<typeof WorkCalendarSchema>>>,
 ]

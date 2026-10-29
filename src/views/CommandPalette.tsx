@@ -18,7 +18,7 @@ import type { NoteDoc, Task, Vault } from '../domain/types'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { fs, px, sp } from '../styles/scale'
 
-export type PaletteView = 'board' | 'gantt' | 'mindmap' | 'notebook'
+export type PaletteView = 'board' | 'gantt' | 'mindmap' | 'whiteboard' | 'notebook'
 
 export interface CommandPaletteProps {
   open: boolean
@@ -89,6 +89,7 @@ export function CommandPalette(props: CommandPaletteProps): ReactElement | null 
     { key: 'board', label: t('palette.cmdBoard'), run: () => props.onSelectView('board') },
     { key: 'gantt', label: t('palette.cmdGantt'), run: () => props.onSelectView('gantt') },
     { key: 'mindmap', label: t('palette.cmdMindmap'), run: () => props.onSelectView('mindmap') },
+    { key: 'whiteboard', label: t('palette.cmdWhiteboard'), run: () => props.onSelectView('whiteboard') },
     { key: 'notebook', label: t('palette.cmdNotebook'), run: () => props.onSelectView('notebook') },
     { key: 'settings', label: t('palette.cmdSettings'), run: props.onOpenSettings },
     { key: 'backup', label: t('palette.cmdBackup'), run: props.onOpenBackup },

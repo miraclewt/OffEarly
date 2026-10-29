@@ -86,6 +86,7 @@ function baseVault(patch: Partial<Vault> = {}): Vault {
     notebooks: [notebook()],
     noteDocs: [],
     trash: [],
+    whiteboards: [],
     ...patch,
   }
 }

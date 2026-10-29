@@ -59,6 +59,7 @@ function emptyVault(): Vault {
     notebooks: [],
     noteDocs: [],
     trash: [],
+    whiteboards: [],
   }
 }
 

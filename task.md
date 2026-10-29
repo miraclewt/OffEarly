@@ -198,6 +198,7 @@ tests/**                         与 src 镜像
 - [x] **T66** 笔记展示模式：按二级标题分页（首个 H2 前的内容为导言页），只读浮层 + 幻灯片式翻页（←/→、Home/End、Esc），打开时定格正文 → done
 - [x] **T67** 任务与笔记回收站：删除改为「内容出库 + 条目进 `vault.trash`」（任务带依赖、笔记带整棵子树），面板可预览、恢复回原位、两段彻底删除；撤销新建仍是物理删除 → done
 - [x] **T68** 知识库两栏宽度随屏幕变宽：书籍列 176 / 文档树 248 在尺度档之上再乘富余系数（1.05→1.2、1.3→1.35、1.65→1.4），27" 2K 下两栏 553→745px、文档树标题不再被省略号剪断；行上补 `title` 让超长标题悬停可读 → done
+- [x] **T69** 白板（第五个视图）：Miro / FigJam 式自由画布，七种图元（矩形 / 圆角 / 椭圆 / 判断 / 便签 / 文本 / 分组框）+ 正交与直线箭头 + 四套典型模板（架构分层 / 流程图 / 四象限 / 放射框架），坐标落盘 `vault.whiteboards`、一次动作一条撤销项、SVG / PNG 导出 → done
 
 ---
 
@@ -1566,3 +1567,15 @@ tests/**                         与 src 镜像
  | 遗留: ①两栏仍是定宽，用户不能手动拖动分隔条（若后续有诉求，需要新的交互与持久化口径，别顺手塞进 settings——进 settings 就进撤销栈）；②正文阅读宽度仍守 `NOTE_READING_WIDTH = 760`（×尺度），27" 上 986px 行宽已是舒适上限，没有跟着放宽；③`site/` 落地页截图未更新。
  | 越界改动: 新增 `src/views/notebookLayout.ts`（纯函数 + 档表）与 `tests/views/notebookLayout.test.ts`（8 例）；`NotebookView.tsx`（两栏宽度改现算、`PANE_*` 拆出 `paneWidth()`、两处行加 `title`）；新增 `capture/t70-width-probe.spec.ts`（三档几何探针 + 成品图 `docs/t68-notebook-{2560,1920,1440}.png`）。零新依赖、零 schema 改动。
  | 全量验证: `tsc` 0 / `npm test` **1314 passed (75 files)**（基线 1306/74 + 8：两栏宽度档位）/ `npx playwright test` **62 passed + 1 skipped** / `npm run build` **11/11**（产物 **6450790 字节**，较 v0.5.0 的 6450438 多 352）
+
+- [2026-10-29] T69 | agent:workbuddy:sess-1030c | commit: "T69: a whiteboard for architecture sketches and framework maps" | 验收: 用户口径「我想增加一栏，用于实现miro的效果，用于架构、思路整理，框架梳理。支持典型的图」→ 真 Chromium 全链路：新建白板 → 贴架构模板（11 框 + 6 线落进 `vault.json`）→ 重开原样还在；拖动改坐标后 `Ctrl+Z` 回原位；删一个带线的框，挂它的 6 条边同时消失、撤销后连着原下标一起回来；四套模板各出一张成品图（`docs/t69-whiteboard-{empty,architecture,selected,flow,quadrant,radial,2560}.png`）逐张人眼核对 | 备注:
+①**新的这一栏必须叫 `whiteboard`，不能叫 `board`**：`board` 在本项目里已经是「看板（Kanban）」的既有标识符（`BoardView` / `BoardColumn` / `settings.boardColumns` / `controllers/boardDnd`）。第一次直接照着 Miro 起名 `Board*` 就和 282 行的看板视图撞了名——全部改成 `Whiteboard*` / `whiteboard*` / `vault.whiteboards`，零重叠。
+②**图元走枚举，不走自由笔迹**：`rect | round | ellipse | diamond | note | text | frame` 七种 + `tone` 五档语义色。自由路径在导出、键盘操作、各缩放档清晰度三件事上都会崩；而用户要的是「架构 / 思路 / 框架」这三类**有结构的图**，枚举刚好够。
+③**渲染分两层：图元是 HTML `div`，连线是 SVG `path`**：多行文字、自动换行、光标与中文输入法这些能力 HTML 免费给，SVG 的 `<text>` 一个都没有（导出时只能自己按字宽折行）。两层共享同一个 `translate(pan) scale(zoom)` 世界层，所以缩放时永远严丝合缝。
+④**一次用户动作 = 一条撤销项**：贴模板（11 框 + 6 线）、拖十个框、六框对齐，都各自只占一条 `Ctrl+Z`。靠的是批量 mutation（`whiteboard.graphic.add` / `whiteboard.nodes.patch`），并且 `graphic.add` 与 `graphic.delete` 形状完全相同、互为逆元——不用另造 payload。逆元一律 `invertFields(source, patch)` 字段级还原，只回滚这次真改过的键。
+⑤**删节点必须连带收走挂它上面的边**，否则留下悬空边；撤销时按**原下标升序**插回（降序会把顺序翻过来）。同理，批量加图元时连线端点校验要把「同一批刚加进来的节点」也计入 id 集合，不然贴模板永远失败。
+⑥**真 bug（单测与 e2e 都测不出）**：空态时 surface 根本不在 DOM 里（`surfaceRef.current === null`），量尺寸与挂滚轮的两个 effect 在挂载那一次全部早退，而依赖里没有「surface 出现了」→ 之后再也不跑。后果是视口宽度恒为默认 960×600：**模板贴出来偏左**（2560 下左侧留白 120 / 右侧 1433），**滚轮平移与缩放完全没反应**（监听压根没挂上）。补依赖后 776 / 777 居中，滚轮恢复。已补 e2e 钉死（显式断言两侧留白差 < 32px + 滚轮后 world transform 变化）。
+⑦**三处只能靠截图发现的视觉缺陷**：图元整块不可见（`<main>` 是 flex 项不是 flex 容器，根节点 `flex:1` 得 0 高、被 `overflow:hidden` 裁掉 → 改 `height:'100%'`）；菱形出现「矩形套菱形」（外层 div 还留着底色与描边 → 菱形一律 `transparent` + `border:none`，底与边只由内嵌 `<polygon>` 画）；放射模板六条分支全用 `auto` 锚点，只落在左右两个中点、三条线叠成一条（→ 逐条指定 `fromAnchor`）。另：e2e 里 `.click()` 打的是**几何中心**，frame 的中心常被内部框盖住，改点 `[data-whiteboard-shape="rect"]`。
+ | 遗留: ①没有自由笔迹与自由连线拐点拖动（连线路径由锚点 + 走线规则算出来）；②没有图片、链接、代码块类图元；③没有对齐参考线（smart guides）与吸附到其他图元边缘，只有 8px 网格吸附；④「框内归属」靠中心点即时判定、不落盘，所以拖动分组框时带哪些图元是按当下几何算的；⑤导出 SVG 的换行是 `wrapText` 估算（SVG 无排版引擎），与屏幕上不保证逐字一致；⑥多张白板只有「顺序新增 + 下拉切换」，没有重命名排序以外的管理（拖拽重排 / 归档）；⑦没有协同与分享，仍是单机单文件。
+ | 越界改动: `types.ts` / `schema.ts`（新增 `Whiteboard*` 八种类型与 `Vault.whiteboards`，`.default([])`、`schemaVersion` 仍为 1、不注册迁移）、`commandBus.ts`（7 个 mutation + 7 个命令工厂 + `insertGraphic` / `invertFields`）、新增 `domain/whiteboardModel.ts`（纯几何，~400 行）/ `domain/whiteboardTemplates.ts`（四套模板）/ `controllers/whiteboardActions.ts`（构造层）/ `views/WhiteboardView.tsx` / `views/WhiteboardCanvas.tsx` / `views/WhiteboardExporter.ts`、`App.tsx`（顶栏分段控件改表驱动 `VIEW_ORDER` / `VIEW_LABEL`）、`CommandPalette.tsx`、`locales/{zh,en}.ts`（`whiteboard.*` 约 63 键）、`theme.css`（三个白板底色令牌）、`vaultRepository.ts`（新库显式 `whiteboards: []`）、29 份手写夹具补 `whiteboards: []`。零新依赖。
+ | 全量验证: `tsc` 0 / `npm test` **1350 passed (77 files)**（基线 1314/75 + 36：几何 20 + 命令 16）/ `npx playwright test` **66 passed + 1 skipped**（基线 62+1，+4：落盘重开 / 拖动撤销 / 删框连带线 + 导出 / 居中与滚轮）/ `npm run build` **11/11**（产物 **6499012 字节**，上限 8388608，余量 1.8MB）

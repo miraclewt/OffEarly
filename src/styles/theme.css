@@ -70,6 +70,12 @@
   /* 完成（绿）：仅用于「已完成」的确认态，不用于话题分类 */
   --oe-done: #34c759;
 
+  /* ── T69 白板图元底色：语义色的浅底，与上面的描边色成对使用 ──
+     卡片底色必须够淡才能压住正文；直接拿 --oe-done / --oe-overdue 当底会把黑字吃掉。 */
+  --oe-whiteboard-ok-bg: rgba(52, 199, 89, 0.13);
+  --oe-whiteboard-warn-bg: rgba(255, 149, 0, 0.15);
+  --oe-whiteboard-danger-bg: rgba(255, 59, 48, 0.12);
+
   /* ── 圆角：三档 ───────────────────────────────────────── */
   --oe-radius-control: 8px;
   --oe-radius-card: 12px;

@@ -74,6 +74,7 @@ function vaultWith(parts: Partial<Vault> = {}): Vault {
     notebooks: [],
     noteDocs: [],
     trash: [],
+    whiteboards: [],
     ...parts,
   }
 }

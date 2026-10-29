@@ -91,6 +91,75 @@ export interface MindMap {
 }
 
 /**
+ * T69 · 白板：自由画布（架构图 / 流程图 / 框架梳理）。
+ *
+ * 与思维导图的区别是「谁决定位置」：导图的坐标由 domain/mindmapModel 算出来，数据里只有树；
+ * 白板的坐标是**用户摆的**，必须原样存进数据。所以节点带 x/y/width/height，边带两端 id 与锚点。
+ *
+ * 形状是枚举而不是任意 path：白板要能被导出、能被键盘操作、能在不同缩放档下保持清晰，
+ * 自由笔迹会把这三件事一起拖垮。用户需要「典型的图」，枚举比画笔更贴合。
+ */
+export type WhiteboardShape = 'rect' | 'round' | 'ellipse' | 'diamond' | 'note' | 'text' | 'frame'
+
+/**
+ * 色调走令牌名而不是 hex：主题一变，画布跟着变（与 T45「零新增 hex」同一条红线）。
+ * `plain` 是中性白底；`muted` 用于渐隐的辅助说明；其余四档对应语义色。
+ */
+export type WhiteboardTone = 'plain' | 'accent' | 'ok' | 'warn' | 'danger' | 'muted'
+
+/** 连线端点：`auto` 按两端中心的相对方位选最近的边中点，其余四值钉死在指定边。 */
+export type WhiteboardAnchor = 'auto' | 'top' | 'right' | 'bottom' | 'left'
+
+/** 走线：正交折线（架构图/流程图）或直线（关系图）。 */
+export type WhiteboardRoute = 'ortho' | 'straight'
+
+/** 箭头位置：末端 / 双向 / 无。 */
+export type WhiteboardArrow = 'end' | 'both' | 'none'
+
+export interface WhiteboardNode {
+  id: string
+  shape: WhiteboardShape
+  /** 内容坐标，左上角；frame 与 note 也是左上角 */
+  x: number
+  y: number
+  width: number
+  height: number
+  text: string
+  tone: WhiteboardTone
+}
+
+export interface WhiteboardEdge {
+  id: string
+  from: string
+  to: string
+  fromAnchor: WhiteboardAnchor
+  toAnchor: WhiteboardAnchor
+  route: WhiteboardRoute
+  arrow: WhiteboardArrow
+  dashed: boolean
+  /** 线上标签；空串表示不画 */
+  label: string
+}
+
+export interface Whiteboard {
+  id: string
+  name: string
+  /** 多张白板之间的排序键，复用 domain/lexorank.mid */
+  order: string
+  nodes: WhiteboardNode[]
+  edges: WhiteboardEdge[]
+  createdAt: string
+  updatedAt: string
+}
+
+/** 白板自身的可改字段（标题 / 排序 / 刷新时间戳）；节点与边各有自己的 patch。 */
+export type WhiteboardPatch = Partial<Pick<Whiteboard, 'name' | 'order' | 'updatedAt'>>
+export type WhiteboardNodePatch = Partial<Pick<WhiteboardNode, 'x' | 'y' | 'width' | 'height' | 'text' | 'shape' | 'tone'>>
+export type WhiteboardEdgePatch = Partial<
+  Pick<WhiteboardEdge, 'fromAnchor' | 'toAnchor' | 'route' | 'arrow' | 'dashed' | 'label'>
+>
+
+/**
  * T49 · 笔记本（知识库）：一个库里可以有多个笔记本，每个笔记本下是一棵文档树。
  * 与思维导图同属「用户内容」，但仍住在 vault.json 里——备份、冲突保护、导出都天然覆盖。
  */
@@ -223,4 +292,8 @@ export interface Vault {
    * 键序排在 noteDocs 之后，save 的键序约定不变。
    */
   trash: TrashEntry[]
+  /**
+   * T69：白板。同样是「旧库缺键补空数组」——键序排在 trash 之后，save 的键序约定不变。
+   */
+  whiteboards: Whiteboard[]
 }
