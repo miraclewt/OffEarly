@@ -280,3 +280,57 @@ describe('撤销栈与重新加回来', () => {
     expect(store.getVault().whiteboards[0]!.nodes.map((item) => item.id)).toEqual(['n1'])
   })
 })
+
+describe('自定义色（T70）', () => {
+  it('上一次色只进一条撤销项，undo 之后键真的消失（不留 null）', () => {
+    const { store, bus } = mount({ ...baseVault(), whiteboards: [whiteboard('b1', [node('n1')])] })
+    expect(applyPatchNodes(bus, store.getVault(), 'b1', [{ id: 'n1', patch: { fill: '#FEF3C7' } }])).toBe(true)
+    expect(store.getVault().whiteboards[0]!.nodes[0]!.fill).toBe('#FEF3C7')
+
+    bus.undo()
+    const restored = store.getVault().whiteboards[0]!.nodes[0]!
+    expect(restored.fill).toBeUndefined()
+    // 关键：不是留一个 fill: null 的键（那会在下次 parse 时整库报错）
+    expect('fill' in restored).toBe(false)
+  })
+
+  it('清除自定义色（fill: null）后撤销能把原色还回来', () => {
+    const { store, bus } = mount({ ...baseVault(), whiteboards: [whiteboard('b1', [node('n1', { fill: '#3B82F6' })])] })
+    expect(applyPatchNodes(bus, store.getVault(), 'b1', [{ id: 'n1', patch: { tone: 'ok', fill: null } }])).toBe(true)
+    expect(store.getVault().whiteboards[0]!.nodes[0]!.fill).toBeUndefined()
+
+    bus.undo()
+    expect(store.getVault().whiteboards[0]!.nodes[0]!.fill).toBe('#3B82F6')
+  })
+
+  it('多选上色是一条撤销项（两个框一起回去）', () => {
+    const { store, bus } = mount({
+      ...baseVault(),
+      whiteboards: [whiteboard('b1', [node('n1'), node('n2'), node('n3')])],
+    })
+    const patches = ['n1', 'n2'].map((id) => ({ id, patch: { fill: '#E3F7E8' } }))
+    expect(applyPatchNodes(bus, store.getVault(), 'b1', patches)).toBe(true)
+    expect(store.getVault().whiteboards[0]!.nodes.map((item) => item.fill)).toEqual([
+      '#E3F7E8',
+      '#E3F7E8',
+      undefined,
+    ])
+
+    bus.undo()
+    expect(store.getVault().whiteboards[0]!.nodes.map((item) => item.fill)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ])
+    // 没参与的第三个框不该被写出一条 patch
+    expect(store.getVault().whiteboards[0]!.nodes[2]!.fill).toBeUndefined()
+  })
+
+  it('换色之后再 undo 只回到上一个颜色，不是一路清空', () => {
+    const { store, bus } = mount({ ...baseVault(), whiteboards: [whiteboard('b1', [node('n1', { fill: '#FEF3C7' })])] })
+    applyPatchNodes(bus, store.getVault(), 'b1', [{ id: 'n1', patch: { fill: '#EF4444' } }])
+    expect(store.getVault().whiteboards[0]!.nodes[0]!.fill).toBe('#EF4444')
+    bus.undo()
+    expect(store.getVault().whiteboards[0]!.nodes[0]!.fill).toBe('#FEF3C7')
+  })
+})

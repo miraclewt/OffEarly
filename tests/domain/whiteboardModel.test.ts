@@ -7,15 +7,23 @@ import { describe, expect, it } from 'vitest'
 
 import {
   WHITEBOARD_ARROW_LENGTH,
+  WHITEBOARD_SWATCHES,
   anchorPoint,
   arrowPoints,
   whiteboardBounds,
   whiteboardRenderOrder,
   buildEdgeView,
+  hexLuminance,
+  hexToCss,
   measureText,
+  mixHex,
+  normalizeHex,
+  readableInk,
   rectContains,
   rectsIntersect,
   resolveAnchor,
+  resolveNodePaint,
+  shadeHex,
   snapToGrid,
   wrapText,
 } from '../../src/domain/whiteboardModel'
@@ -199,5 +207,77 @@ describe('命中检测', () => {
     expect(rectContains(left, { x: 101, y: 10 })).toBe(false)
     expect(rectsIntersect(left, { x: 90, y: 50, width: 40, height: 40 })).toBe(true)
     expect(rectsIntersect(left, { x: 200, y: 0, width: 10, height: 10 })).toBe(false)
+  })
+})
+
+describe('自定义色（T70）', () => {
+  it('收颜色：三种写法都归一成小写 #rrggbb，收不了就 null', () => {
+    expect(normalizeHex('#AABBCC')).toBe('#aabbcc')
+    expect(normalizeHex('aabbcc')).toBe('#aabbcc')
+    expect(normalizeHex('  #ABC ')).toBe('#aabbcc')
+    expect(normalizeHex('#12345')).toBeNull()
+    expect(normalizeHex('rgb(1,2,3)')).toBeNull()
+    expect(normalizeHex('')).toBeNull()
+  })
+
+  it('预设色板里每一格都是合法颜色（手写常量防打错）', () => {
+    expect(WHITEBOARD_SWATCHES.length).toBeGreaterThanOrEqual(12)
+    for (const hex of WHITEBOARD_SWATCHES) expect(normalizeHex(hex)).toBe(hex)
+  })
+
+  it('字色按底色算：浅底近黑、深底纯白', () => {
+    expect(readableInk('#FFFFFF')).toBe('#1D1D1F')
+    expect(readableInk('#FEF3C7')).toBe('#1D1D1F')
+    expect(readableInk('#1D1D1F')).toBe('#FFFFFF')
+    expect(readableInk('#3B82F6')).toBe('#FFFFFF')
+    // 亮度是 WCAG 相对亮度，不是简单平均：纯绿比纯蓝亮得多
+    expect(hexLuminance('#10B981')).toBeGreaterThan(hexLuminance('#3B82F6'))
+  })
+
+  it('shade 往黑/往白推，混合取中间值', () => {
+    expect(shadeHex('#808080', -0.5)).toBe('#404040')
+    expect(shadeHex('#808080', 0.5)).toBe('#c0c0c0')
+    expect(shadeHex('#FFFFFF', -1)).toBe('#000000')
+    expect(mixHex('#000000', '#FFFFFF', 0.5)).toBe('#808080')
+    expect(mixHex('#000000', '#FFFFFF', 0)).toBe('#000000')
+  })
+
+  it('alpha 为 1 时给 hex，其余给 rgba', () => {
+    expect(hexToCss('#3b82f6', 1)).toBe('#3b82f6')
+    expect(hexToCss('#3b82f6', 0.14)).toBe('rgba(59, 130, 246, 0.140)')
+  })
+
+  it('没有 fill 就不接管配色（回落到语义色）', () => {
+    expect(resolveNodePaint({ shape: 'rect' })).toBeNull()
+  })
+
+  it('矩形：实底 + 推出来的深一档描边 + 对比字色', () => {
+    const paint = resolveNodePaint({ shape: 'rect', fill: '#FEF3C7' })!
+    expect(paint.fill).toBe('#FEF3C7')
+    expect(paint.fillOpacity).toBe(1)
+    expect(paint.ink).toBe('#1D1D1F')
+    // 浅底 → 描边压深
+    expect(hexLuminance(paint.stroke)).toBeLessThan(hexLuminance('#FEF3C7'))
+    expect(paint.dashed).toBe(false)
+  })
+
+  it('深底：描边反而提亮，字换白', () => {
+    const paint = resolveNodePaint({ shape: 'note', fill: '#1D1D1F' })!
+    expect(paint.ink).toBe('#FFFFFF')
+    expect(hexLuminance(paint.stroke)).toBeGreaterThan(hexLuminance('#1D1D1F'))
+  })
+
+  it('文本图元：自定义色就是字色，不铺底也不描边', () => {
+    const paint = resolveNodePaint({ shape: 'text', fill: '#EF4444' })!
+    expect(paint.ink).toBe('#EF4444')
+    expect(paint.fill).toBe('none')
+    expect(paint.stroke).toBe('none')
+  })
+
+  it('分组框：底色压低透明度（不糊住里面的框），虚线，字色按混出来的底算', () => {
+    const paint = resolveNodePaint({ shape: 'frame', fill: '#3B82F6' })!
+    expect(paint.fillOpacity).toBeLessThan(0.3)
+    expect(paint.dashed).toBe(true)
+    expect(paint.ink).toBe('#1D1D1F')
   })
 })

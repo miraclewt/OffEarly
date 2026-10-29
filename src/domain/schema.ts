@@ -175,6 +175,12 @@ export const WhiteboardNodeSchema = z.object({
   height: z.number().positive(),
   text: z.string(),
   tone: z.enum(['plain', 'accent', 'ok', 'warn', 'danger', 'muted']),
+  // 自定义色：`#rrggbb`。缺省 = 用 tone；不给 .default 是为了让老库逐字节不变。
+  // 大小写都放行（手改过的 vault.json 不至于整库被拒），写入侧一律归一成小写。
+  fill: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional(),
 })
 
 export const WhiteboardEdgeSchema = z.object({

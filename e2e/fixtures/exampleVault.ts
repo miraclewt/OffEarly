@@ -16,12 +16,19 @@ import { join } from 'node:path'
 import { ROOT } from '../../playwright.config'
 import type { FakeFsState } from './fakeFs'
 
-/** 覆写进夹具的 UI 相位：与 playwright.config 钉的 zh-CN / 浅色主题一致。 */
-const PINNED_SETTINGS = {
-  locale: 'zh',
-  theme: 'light',
-  ganttScale: 'day',
-  lastFilter: null,
+/**
+ * 覆写进夹具的 UI 相位：与 playwright.config 钉的 zh-CN / 浅色主题一致。
+ * `whiteboards` 同理（T70）：白板用例一律假设「库里还没有白板」，从空态开始建；
+ * 而活文件里漂着上一次跑测试留下的板，会让 `whiteboard-empty` 直接找不到。
+ */
+const PINNED_VAULT_PATCH = {
+  settings: {
+    locale: 'zh',
+    theme: 'light',
+    ganttScale: 'day',
+    lastFilter: null,
+  },
+  whiteboards: [],
 } as const
 
 export function loadExampleVaultFs(): FakeFsState {
@@ -29,7 +36,11 @@ export function loadExampleVaultFs(): FakeFsState {
   const raw = JSON.parse(readFileSync(join(dir, 'vault.json'), 'utf8')) as {
     settings?: Record<string, unknown>
   }
-  const vault = { ...raw, settings: { ...raw.settings, ...PINNED_SETTINGS } }
+  const vault = {
+    ...raw,
+    settings: { ...raw.settings, ...PINNED_VAULT_PATCH.settings },
+    whiteboards: [...PINNED_VAULT_PATCH.whiteboards],
+  }
 
   const files: Record<string, string> = {
     'vault.json': Buffer.from(JSON.stringify(vault), 'utf8').toString('base64'),

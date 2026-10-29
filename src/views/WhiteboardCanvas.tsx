@@ -8,7 +8,8 @@
 // 与 MindMapCanvas 同一条红线：这里**不排版**。位置与尺寸全部来自数据（用户摆的），
 // 连线几何来自 domain/whiteboardModel。本文件只决定「怎么画」。
 //
-// 颜色一律走 theme.css 令牌（零新增 hex），方形图元的圆角 / 边框 / 阴影与全站控件同一套 token；
+// 颜色默认走 theme.css 令牌（语义色跟着主题走）；**用户自己挑的自定义色**是数据，
+// 必须是字面量 hex，不能跟着主题变——所以图元的 paint 先问 resolveNodePaint。
 // tone 只在四档语义色里换底色，不引入第二套配色语言。
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
@@ -17,11 +18,15 @@ import {
   WHITEBOARD_FONT_SIZE,
   WHITEBOARD_NOTE_FONT_SIZE,
   buildEdgeView,
+  hexToCss,
+  resolveNodePaint,
   whiteboardRenderOrder,
   nodeTextWidth,
 } from '../domain/whiteboardModel'
 import type { WhiteboardEdgeView, WhiteboardPoint, WhiteboardRect } from '../domain/whiteboardModel'
-import type { Whiteboard, WhiteboardNode, WhiteboardShape, WhiteboardTone } from '../domain/types'
+import type { Whiteboard, WhiteboardNode, WhiteboardShape } from '../domain/types'
+import { tonePaint } from './whiteboardPaint'
+import type { WhiteboardTonePaint } from './whiteboardPaint'
 
 /** 四角把手的边长与四边锚点的半径（屏幕像素，随 uiScale 走）。 */
 const HANDLE = 9
@@ -64,20 +69,17 @@ export interface WhiteboardCanvasProps {
 }
 
 /** tone → 底色 / 描边 / 文字。四档语义色全部映射到既有令牌，未定义令牌会静默失效。 */
-function tonePaint(tone: WhiteboardTone): { background: string; border: string; color: string } {
-  switch (tone) {
-    case 'accent':
-      return { background: 'var(--oe-accent-tint)', border: 'var(--oe-accent)', color: 'var(--oe-accent-deep)' }
-    case 'ok':
-      return { background: 'var(--oe-whiteboard-ok-bg)', border: 'var(--oe-done)', color: 'var(--oe-text)' }
-    case 'warn':
-      return { background: 'var(--oe-whiteboard-warn-bg)', border: 'var(--oe-blocked-border)', color: 'var(--oe-blocked)' }
-    case 'danger':
-      return { background: 'var(--oe-whiteboard-danger-bg)', border: 'var(--oe-overdue)', color: 'var(--oe-overdue)' }
-    case 'muted':
-      return { background: 'var(--oe-fill-subtle)', border: 'var(--oe-border)', color: 'var(--oe-text-muted)' }
-    default:
-      return { background: 'var(--oe-surface)', border: 'var(--oe-border)', color: 'var(--oe-text)' }
+/**
+ * 图元当前的绘制信息：自定义色优先，没有自定义色才回落到语义色。
+ * 屏幕与导出必须走同一个判断，否则会出现「屏幕上自定义、导出里语义」。
+ */
+function nodePaint(node: WhiteboardNode): WhiteboardTonePaint {
+  const custom = resolveNodePaint(node)
+  if (custom === null) return tonePaint(node.tone)
+  return {
+    background: custom.fill === 'none' ? 'transparent' : hexToCss(custom.fill, custom.fillOpacity),
+    border: custom.stroke === 'none' ? 'transparent' : hexToCss(custom.stroke, custom.strokeOpacity),
+    color: custom.ink,
   }
 }
 
@@ -233,7 +235,10 @@ export function WhiteboardCanvas(props: WhiteboardCanvasProps) {
       {/* 图元层 */}
       {ordered.map((node) => {
         const rect = displayRect(node, props)
-        const paint = tonePaint(node.tone)
+        // 自定义色优先：有 fill 就只认它（与导出同一个 resolveNodePaint），
+        // 没有才回落到语义色（语义色走 CSS 令牌，好跟着深浅主题走）
+        const custom = resolveNodePaint(node)
+        const paint = nodePaint(node)
         const isSelected = selected.has(node.id)
         const isFrame = node.shape === 'frame'
         const isEditing = editingId === node.id
@@ -251,7 +256,9 @@ export function WhiteboardCanvas(props: WhiteboardCanvasProps) {
           height: rect.height,
           boxSizing: 'border-box',
           background: isFrame
-            ? 'var(--oe-fill-subtle)'
+            ? custom === null
+              ? 'var(--oe-fill-subtle)'
+              : hexToCss(custom.fill, custom.fillOpacity)
             : isText || isDiamond
               ? 'transparent'
               : paint.background,

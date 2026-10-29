@@ -371,6 +371,34 @@ function invertFields<T extends object>(source: T, patch: Partial<T>): Partial<T
   return inverse as Partial<T>
 }
 
+/**
+ * 把节点 patch 落到节点上。唯一特殊处是 `fill`：`null` 与 `undefined` 都是**删键**
+ * （回到 tone 的语义色），而不是留一个值为 null 的字段——schema 里 `fill` 是可选字符串，
+ * 留 null 会在下次 parse 时整库报错。
+ */
+function applyNodePatch(node: WhiteboardNode, patch: WhiteboardNodePatch): WhiteboardNode {
+  const { fill, ...rest } = patch
+  const next: WhiteboardNode = { ...node, ...rest }
+  if ('fill' in patch) {
+    if (fill === null || fill === undefined) delete next.fill
+    else next.fill = fill
+  }
+  return next
+}
+
+/**
+ * 节点 patch 的逆元。`fill` 特殊：原来「没有自定义色」时逆元必须写成 `null`（明确的删除），
+ * 不能留 `undefined`——`Object.keys` 是逆元的依据，缺键就丢字段。
+ */
+function invertNodeFields(node: WhiteboardNode, patch: WhiteboardNodePatch): WhiteboardNodePatch {
+  const source = node as unknown as Record<string, unknown>
+  const inverse: Record<string, unknown> = {}
+  for (const key of Object.keys(patch)) {
+    inverse[key] = key === 'fill' ? (node.fill ?? null) : source[key]
+  }
+  return inverse as WhiteboardNodePatch
+}
+
 /** 纯函数：命令（或逆命令）作用在 vault 上的结果。不合法输入直接抛错，不静默兜底。 */
 export function reduce(vault: Vault, mutation: Mutation): Vault {
   switch (mutation.type) {
@@ -653,7 +681,7 @@ export function reduce(vault: Vault, mutation: Mutation): Vault {
           ...whiteboard,
           nodes: whiteboard.nodes.map((node) => {
             const patch = byId.get(node.id)
-            return patch === undefined ? node : { ...node, ...patch }
+            return patch === undefined ? node : applyNodePatch(node, patch)
           }),
         }
       })
@@ -1249,7 +1277,7 @@ export function patchWhiteboardNodesCommand(
   const inverse = live.map((item) => {
     const node = whiteboard.nodes.find((candidate) => candidate.id === item.id)
     if (node === undefined) throw new Error(`commandBus: 白板节点不存在（${item.id}）`)
-    return { id: item.id, patch: invertFields(node, item.patch) }
+    return { id: item.id, patch: invertNodeFields(node, item.patch) }
   })
   return {
     type: 'whiteboard.nodes.patch',

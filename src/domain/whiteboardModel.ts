@@ -48,8 +48,163 @@ export interface WhiteboardPoint {
   x: number
   y: number
 }
+// ---------------------------------------------------------------------------
+// 自定义色（T70）
+//
+// 语义色（tone）给的是「这一格是干什么的」，自定义色给的是「我就要这个颜色」。
+// 两者在数据上并存：`tone` 永远有值（模板与新建都用它），`fill` 是可选的覆盖。
+// 覆盖一旦存在，屏幕上与导出里都**只认 fill**——否则会出现「屏幕上是自定义色、
+// 导出里是语义色」的两套口径。
+//
+// 三条口径：
+//   ① 字色由底色**算**出来，不另存字段。存了就会出现「底改了、字没改」的脏组合，
+//      而这类组合用户没法自己发现（白底白字）。
+//   ② 描边由底色**推**出来（浅底压深、深底提亮）。用户只挑一个颜色，不是三个。
+//   ③ 自定义色一律**字面量 hex**，不走主题令牌：用户挑的是颜色本身，深浅主题下
+//      都该是那个颜色（语义色才需要跟着主题走）。
+// ---------------------------------------------------------------------------
+
+/**
+ * 自定义色板：浅底六格（便签/分组常用）+ 中间调五格 + 黑白两格，两行摆开。
+ * 一律小写——存进 vault 的就是这些字面量，大写会让「当前选中的是不是这一格」比较不上。
+ */
+export const WHITEBOARD_SWATCHES: readonly string[] = [
+  '#fdecec',
+  '#fef3c7',
+  '#e3f7e8',
+  '#dceefe',
+  '#ede9fe',
+  '#fce7f3',
+  '#f1f5f9',
+  '#f59e0b',
+  '#10b981',
+  '#3b82f6',
+  '#8b5cf6',
+  '#ef4444',
+  '#1d1d1f',
+  '#ffffff',
+]
+
+/** 深底用纯白（半透明白会让小字发灰），浅底用与 `--oe-text` 同族的近黑。 */
+const INK_DARK = '#1D1D1F'
+const INK_LIGHT = '#FFFFFF'
+
+/**
+ * 收一个用户输入的颜色：接受 `#aabbcc` / `aabbcc` / `#abc` / `abc`（大小写不论），
+ * 一律归成小写 `#aabbcc`。收不了就返回 null——**不猜、不兜底**，由调用方决定提示。
+ */
+export function normalizeHex(input: string): string | null {
+  const raw = input.trim().replace(/^#/, '').toLowerCase()
+  if (/^[0-9a-f]{3}$/.test(raw)) return `#${raw[0]}${raw[0]}${raw[1]}${raw[1]}${raw[2]}${raw[2]}`
+  if (/^[0-9a-f]{6}$/.test(raw)) return `#${raw}`
+  return null
+}
+
+function channels(hex: string): { r: number; g: number; b: number } {
+  const normalized = normalizeHex(hex) ?? '#000000'
+  return {
+    r: parseInt(normalized.slice(1, 3), 16),
+    g: parseInt(normalized.slice(3, 5), 16),
+    b: parseInt(normalized.slice(5, 7), 16),
+  }
+}
+
+function clampChannel(value: number): number {
+  return Math.max(0, Math.min(255, Math.round(value)))
+}
+
+/** 0..1，WCAG 相对亮度（sRGB 先线性化，再加权）。判断「浅底 / 深底」只用它。 */
+export function hexLuminance(hex: string): number {
+  const { r, g, b } = channels(hex)
+  const linear = (value: number): number => {
+    const c = value / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+}
+
+/** 底色上放什么字：浅底给近黑，深底给纯白。 */
+export function readableInk(hex: string): string {
+  return hexLuminance(hex) > 0.42 ? INK_DARK : INK_LIGHT
+}
+
+/** 把一个颜色往黑（amount < 0）或往白（amount > 0）推，amount ∈ [-1, 1]。 */
+export function shadeHex(hex: string, amount: number): string {
+  const { r, g, b } = channels(hex)
+  const target = amount < 0 ? 0 : 255
+  const t = Math.min(1, Math.abs(amount))
+  const to = (value: number): string => clampChannel(value + (target - value) * t).toString(16).padStart(2, '0')
+  return `#${to(r)}${to(g)}${to(b)}`
+}
+
+/** 两色按比例混（t = 0 取 a，t = 1 取 b）。分组框的淡底就是「底色混进背景色」。 */
+export function mixHex(a: string, b: string, t: number): string {
+  const ca = channels(a)
+  const cb = channels(b)
+  const ratio = Math.max(0, Math.min(1, t))
+  const to = (from: number, target: number): string =>
+    clampChannel(from + (target - from) * ratio)
+      .toString(16)
+      .padStart(2, '0')
+  return `#${to(ca.r, cb.r)}${to(ca.g, cb.g)}${to(ca.b, cb.b)}`
+}
+
+/** 画到 CSS 用的 `rgba()`；alpha = 1 时仍给 hex，读起来短一点。 */
+export function hexToCss(hex: string, alpha: number): string {
+  const normalized = normalizeHex(hex) ?? '#000000'
+  if (alpha >= 1) return normalized
+  const { r, g, b } = channels(normalized)
+  return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, alpha)).toFixed(3)})`
+}
+
+/** 一个图元最终怎么上色（屏幕与导出共用，杜绝「两套口径」）。 */
+export interface WhiteboardNodePaint {
+  fill: string
+  fillOpacity: number
+  stroke: string
+  strokeOpacity: number
+  /** 字色 */
+  ink: string
+  /** 描边是否虚线（分组框） */
+  dashed: boolean
+}
+
+/**
+ * 自定义色的投影。没有 `fill` 时返回 null —— 调用方回落到语义色（屏幕上还要吃主题令牌，
+ * 所以不能在这里把语义色也实体化）。
+ */
+export function resolveNodePaint(
+  node: Pick<WhiteboardNode, 'shape' | 'fill'>,
+): WhiteboardNodePaint | null {
+  const fill = node.fill
+  if (fill === undefined) return null
+  if (node.shape === 'text') {
+    // 文本图元没有底，「自定义色」就是字色本身——不做亮度换算，用户挑什么就是什么
+    return { fill: 'none', fillOpacity: 1, stroke: 'none', strokeOpacity: 1, ink: fill, dashed: false }
+  }
+  if (node.shape === 'frame') {
+    // 分组框面积大，实底会把里面的东西全糊掉：底色按低不透明度铺，字色按混出来的底算
+    return {
+      fill,
+      fillOpacity: 0.14,
+      stroke: fill,
+      strokeOpacity: 0.7,
+      ink: readableInk(mixHex(fill, '#FFFFFF', 0.86)),
+      dashed: true,
+    }
+  }
+  return {
+    fill,
+    fillOpacity: 1,
+    stroke: shadeHex(fill, hexLuminance(fill) > 0.42 ? -0.22 : 0.24),
+    strokeOpacity: 1,
+    ink: readableInk(fill),
+    dashed: false,
+  }
+}
 
 export interface WhiteboardRect {
+
   x: number
   y: number
   width: number

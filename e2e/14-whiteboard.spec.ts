@@ -21,6 +21,8 @@ interface StoredNode {
   y: number
   width: number
   height: number
+  /** 自定义色（T70），缺省表示用语义色 */
+  fill?: string
 }
 
 interface StoredWhiteboard {
@@ -200,4 +202,75 @@ test('模板落在视口正中，滚轮能推动画布', async ({ page }) => {
   await expect
     .poll(async () => page.evaluate(() => (document.querySelector('[data-testid="whiteboard-world"]') as HTMLElement).style.transform))
     .not.toBe('translate(0px, 0px) scale(1)')
+})
+
+/**
+ * 自定义色块（T70）。钉三件事：
+ *  1. 用户挑的颜色**落盘**成 `#rrggbb`，重开还在；
+ *  2. 字色是**算**出来的——深底必须换浅字（白底白字这种脏组合不能出现）；
+ *  3. 自定义色一旦存在就**覆盖**语义色（不是两套配色并存）。
+ */
+test('自定义色块：选色落盘、字色跟着底色走、重开还在', async ({ page }) => {
+  await openAppWith(page, loadExampleVaultFs())
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-whiteboard').click()
+  await page.getByTestId('whiteboard-create').click()
+  await openWhiteboard(page)
+  await page.getByTestId('whiteboard-add-rect').click()
+  await expect(page.locator('[data-testid^="whiteboard-node-"]')).toHaveCount(1)
+  await waitSaved(page)
+
+  const id = parseVault(await readFakeFs(page)).whiteboards?.[0]?.nodes[0]?.id ?? ''
+  expect(id).not.toBe('')
+
+  await page.locator('[data-whiteboard-shape="rect"]').first().click()
+  await page.getByTestId('whiteboard-color').click()
+  await expect(page.getByTestId('whiteboard-color-panel')).toBeVisible()
+
+  // 深底：字必须换白，否则整块字看不见
+  await page.getByTestId('whiteboard-swatch-1d1d1f').click()
+  await expect
+    .poll(async () => parseVault(await readFakeFs(page)).whiteboards?.[0]?.nodes[0]?.fill ?? '', { timeout: 15_000 })
+    .toBe('#1d1d1f')
+  const dark = await page.evaluate((nodeId) => {
+    const node = document.querySelector(`[data-testid="whiteboard-node-${nodeId}"]`) as HTMLElement
+    const label = node.querySelector('span') as HTMLElement | null
+    return {
+      bg: getComputedStyle(node).backgroundColor,
+      ink: label === null ? '' : getComputedStyle(label).color,
+    }
+  }, id)
+  expect(dark.bg).toBe('rgb(29, 29, 31)')
+  expect(dark.ink).toBe('rgb(255, 255, 255)')
+
+  // 浅底：字换回近黑
+  await page.getByTestId('whiteboard-swatch-fef3c7').click()
+  await expect
+    .poll(async () => parseVault(await readFakeFs(page)).whiteboards?.[0]?.nodes[0]?.fill ?? '', { timeout: 15_000 })
+    .toBe('#fef3c7')
+  const lightInk = await page.evaluate((nodeId) => {
+    const node = document.querySelector(`[data-testid="whiteboard-node-${nodeId}"]`) as HTMLElement
+    const label = node.querySelector('span') as HTMLElement | null
+    return label === null ? '' : getComputedStyle(label).color
+  }, id)
+  expect(lightInk).toBe('rgb(29, 29, 31)')
+
+  // 撤销回到上一个颜色（不是一路清空）
+  await page.getByTestId('undo-button').click()
+  await expect
+    .poll(async () => parseVault(await readFakeFs(page)).whiteboards?.[0]?.nodes[0]?.fill ?? '', { timeout: 15_000 })
+    .toBe('#1d1d1f')
+
+  // 重开：颜色从磁盘回来
+  const snapshot = await readFakeFs(page)
+  await seedFakeFs(page, snapshot)
+  await page.reload()
+  await connectWorkspace(page, { create: false })
+  await openWhiteboard(page)
+  await expect(page.locator('[data-testid^="whiteboard-node-"]')).toHaveCount(1)
+  const reopened = await page.evaluate((nodeId) => {
+    const node = document.querySelector(`[data-testid="whiteboard-node-${nodeId}"]`) as HTMLElement
+    return getComputedStyle(node).backgroundColor
+  }, id)
+  expect(reopened).toBe('rgb(29, 29, 31)')
 })

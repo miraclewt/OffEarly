@@ -199,6 +199,7 @@ tests/**                         与 src 镜像
 - [x] **T67** 任务与笔记回收站：删除改为「内容出库 + 条目进 `vault.trash`」（任务带依赖、笔记带整棵子树），面板可预览、恢复回原位、两段彻底删除；撤销新建仍是物理删除 → done
 - [x] **T68** 知识库两栏宽度随屏幕变宽：书籍列 176 / 文档树 248 在尺度档之上再乘富余系数（1.05→1.2、1.3→1.35、1.65→1.4），27" 2K 下两栏 553→745px、文档树标题不再被省略号剪断；行上补 `title` 让超长标题悬停可读 → done
 - [x] **T69** 白板（第五个视图）：Miro / FigJam 式自由画布，七种图元（矩形 / 圆角 / 椭圆 / 判断 / 便签 / 文本 / 分组框）+ 正交与直线箭头 + 四套典型模板（架构分层 / 流程图 / 四象限 / 放射框架），坐标落盘 `vault.whiteboards`、一次动作一条撤销项、SVG / PNG 导出 → done
+- [x] **T70** 白板自定义色块：选中图元后从工具栏取色——6 档语义色 + 14 格预设 + 手填 `#RRGGBB`，落盘 `node.fill`；字色与描边由底色算出来（深底自动换白字，杜绝白底白字），导出与屏幕同一套判断 → done
 
 ---
 
@@ -1579,3 +1580,15 @@ tests/**                         与 src 镜像
  | 遗留: ①没有自由笔迹与自由连线拐点拖动（连线路径由锚点 + 走线规则算出来）；②没有图片、链接、代码块类图元；③没有对齐参考线（smart guides）与吸附到其他图元边缘，只有 8px 网格吸附；④「框内归属」靠中心点即时判定、不落盘，所以拖动分组框时带哪些图元是按当下几何算的；⑤导出 SVG 的换行是 `wrapText` 估算（SVG 无排版引擎），与屏幕上不保证逐字一致；⑥多张白板只有「顺序新增 + 下拉切换」，没有重命名排序以外的管理（拖拽重排 / 归档）；⑦没有协同与分享，仍是单机单文件。
  | 越界改动: `types.ts` / `schema.ts`（新增 `Whiteboard*` 八种类型与 `Vault.whiteboards`，`.default([])`、`schemaVersion` 仍为 1、不注册迁移）、`commandBus.ts`（7 个 mutation + 7 个命令工厂 + `insertGraphic` / `invertFields`）、新增 `domain/whiteboardModel.ts`（纯几何，~400 行）/ `domain/whiteboardTemplates.ts`（四套模板）/ `controllers/whiteboardActions.ts`（构造层）/ `views/WhiteboardView.tsx` / `views/WhiteboardCanvas.tsx` / `views/WhiteboardExporter.ts`、`App.tsx`（顶栏分段控件改表驱动 `VIEW_ORDER` / `VIEW_LABEL`）、`CommandPalette.tsx`、`locales/{zh,en}.ts`（`whiteboard.*` 约 63 键）、`theme.css`（三个白板底色令牌）、`vaultRepository.ts`（新库显式 `whiteboards: []`）、29 份手写夹具补 `whiteboards: []`。零新依赖。
  | 全量验证: `tsc` 0 / `npm test` **1350 passed (77 files)**（基线 1314/75 + 36：几何 20 + 命令 16）/ `npx playwright test` **66 passed + 1 skipped**（基线 62+1，+4：落盘重开 / 拖动撤销 / 删框连带线 + 导出 / 居中与滚轮）/ `npm run build` **11/11**（产物 **6499012 字节**，上限 8388608，余量 1.8MB）
+
+- [2026-10-29] T70 | agent:workbuddy:sess-1030c | commit: "T70: custom color blocks on the whiteboard" | 验收: 用户口径「支持自定义色块」→ 真 Chromium：选中图元 → 工具栏「色块」弹出面板（6 档语义色 + 14 格预设 + 手填 hex）→ 点深蓝 `#1d1d1f` 底色后字**自动翻白**（`rgb(255,255,255)`）、换浅黄 `#fef3c7` 字回近黑；`vault.json` 落成 `"fill": "#1d1d1f"`，重开后底色与字色都还在；`Ctrl+Z` 回到上一个颜色（不是一路清空）；多选两个框上色只占一条撤销项；成品图 `docs/t70-color-panel.png` / `docs/t70-color-canvas.png` | 备注:
+①**两层并存，不是把 tone 换掉**：`tone` 表达「这一格是干什么的」（语义色，走 CSS 令牌、跟着深浅主题走，模板与新建都用它），`fill` 表达「我就要这个颜色」（用户数据，落盘成 `#rrggbb` 字面量，主题不参与）。有 `fill` 就**只认它**——屏幕与导出同一个 `resolveNodePaint`，不会出现两套口径。`fill` 是可选字段、不给 `.default`，老库逐字节不变、schemaVersion 仍为 1。
+②**字色不许用户挑，只能算**：WCAG 相对亮度 > 0.42 给近黑 `#1D1D1F`，否则给纯白。让用户同时挑底与字，必然造出「白底白字」，而这种错误用户自己看不见。同理描边也不给：浅底压深 22%、深底提亮 24%，用户只挑一个颜色。
+③**分组框的底必须压低透明度**（14%）：分组框面积大，实底会把框里的图元全糊掉；它的字色按「底色混进背景 86%」之后再算，所以永远是近黑。
+④**文本图元的 `fill` 就是字色**（不铺底、不描边）——这是唯一一处 fill 的语义不是「底色」，写在类型注释里。
+⑤**`fill: null` 是明确的「清除」**：schema 里 `fill` 是可选字符串，留一个值为 null 的键会在下次 parse 时整库报错，所以 reducer 见到 `null`/`undefined` 就 `delete` 键；逆元里原来没有自定义色时写 `null`（不是 `undefined`），否则「选了色 → 清除」这一对无法表达。
+⑥**面板必须 portal 到 body**：工具栏是 `overflow-x: auto` 的滚动容器，挂在里面会被裁成一条（DateField 的日历浮层踩过同一个坑）。另外 React 的 portal 事件仍沿 **React 树**冒泡——面板上的 `Delete` 会一路冒到视图的全局快捷键把图元删掉，所以面板自己在 keydown 里把它吃掉。
+⑦**顺手修掉一个夹具污染**：`example.vault/vault.json` 是活文件，上一次失败的白板用例会把「未命名白板」写进去，之后所有白板用例都在 `whiteboard-empty` 上找不到元素而全线报红。`loadExampleVaultFs()` 现在连 `whiteboards: []` 一起覆写（与 settings 四个相位同口径），测试不再依赖活文件里没有残留。
+ | 遗留: ①连线颜色仍固定（`--oe-text-faint`），没有跟着图元配色走；②没有屏幕上取色（吸管）；③没有「最近使用」与自定义色板收藏，14 格是写死的常量；④没有透明度 / 渐变调节，色板只有纯色；⑤分组框的 14% 比例不可调；⑥深浅主题只影响语义色，自定义色按设计不随主题变。
+ | 越界改动: `types.ts`（`WhiteboardNode.fill?` + `WhiteboardNodePatch.fill?: string \| null`）、`schema.ts`（`fill` 正则可选）、`commandBus.ts`（`applyNodePatch` 删键语义 + `invertNodeFields` 专门给节点 patch 出逆元）、`whiteboardModel.ts`（`normalizeHex` / `hexLuminance` / `readableInk` / `shadeHex` / `mixHex` / `hexToCss` / `WHITEBOARD_SWATCHES` / `resolveNodePaint`）、新增 `views/whiteboardPaint.ts`（语义色表，画布与调色板共用）与 `views/WhiteboardColorPanel.tsx`、`WhiteboardCanvas` / `WhiteboardExporter`（都改读 `resolveNodePaint`）、`WhiteboardView`（选中时挂面板 + `commitSelectionPatch`）、`locales/{zh,en}`（13 个键）、`e2e/fixtures/exampleVault.ts`（覆写 `whiteboards`）、新增 `capture/t70-colors.spec.ts` 与 3 个测试文件。零新依赖。
+ | 全量验证: `tsc` 0 / `npm test` **1374 passed (79 files)**（基线 1350/77 + 24：配色几何 10 + 色块命令 4 + 色块面板 5 + 导出配色 5）/ `npx playwright test` **67 passed + 1 skipped**（+1：自定义色落盘 / 字色翻转 / 撤销 / 重开）/ `npm run build` **11/11**（产物 **6507276 字节**，上限 8388608，余量 1.8MB）

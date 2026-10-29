@@ -17,11 +17,12 @@ import {
   WHITEBOARD_NOTE_FONT_SIZE,
   WHITEBOARD_NODE_PADDING,
   buildEdgeView,
+  resolveNodePaint,
   whiteboardBounds,
   whiteboardRenderOrder,
   wrapText,
 } from '../domain/whiteboardModel'
-import type { WhiteboardTone, Whiteboard, WhiteboardShape } from '../domain/types'
+import type { WhiteboardTone, Whiteboard, WhiteboardNode, WhiteboardShape } from '../domain/types'
 import { GANTT_EXPORT_FONT_STACK, svgToPngBlob, triggerDownload } from './GanttExporter'
 
 export type WhiteboardExportFormat = 'png' | 'svg'
@@ -49,7 +50,6 @@ const TONE_PAINT: Record<
 const EDGE_STROKE = '#98989D'
 const LABEL_FILL = '#6E6E73'
 const SURFACE = '#FFFFFF'
-const TEXT_FILL = '#1D1D1F'
 
 export interface WhiteboardExportViewport {
   panX: number
@@ -99,6 +99,23 @@ function textEl(
   const node = el('text', attrs) as SVGTextElement
   node.textContent = content
   return node
+}
+
+/**
+ * 导出用的绘制信息：有自定义色就按 `resolveNodePaint`（与屏幕同一个函数）算，
+ * 否则回落到语义色的字面量表。**两处口径必须来自同一处判断**，不然会出现
+ * 「屏幕上是自定义色、导出里还是语义色」。
+ */
+function resolveExportPaint(node: WhiteboardNode): (typeof TONE_PAINT)[WhiteboardTone] {
+  const custom = resolveNodePaint(node)
+  if (custom === null) return TONE_PAINT[node.tone]
+  return {
+    fill: custom.fill,
+    fillOpacity: custom.fillOpacity,
+    stroke: custom.stroke,
+    strokeOpacity: custom.strokeOpacity,
+    text: custom.ink,
+  }
 }
 
 /** 出图窗口（内容坐标）与像素尺寸。 */
@@ -240,7 +257,7 @@ function appendLabel(
     'data-whiteboard-label': node.id,
     'font-size': fontSize,
     'text-anchor': 'middle',
-    fill: node.shape === 'text' ? TEXT_FILL : paint.text,
+    fill: paint.text,
     'font-weight': node.shape === 'frame' ? 600 : undefined,
   }) as SVGTextElement
   lines.forEach((line, index) => {
@@ -315,7 +332,7 @@ export function buildWhiteboardSvgMarkup(
   const nodeLayer = el('g', { 'data-whiteboard-layer': 'nodes' })
   for (const node of whiteboardRenderOrder(whiteboard.nodes)) {
     const group = el('g', { 'data-whiteboard-node': node.id, 'data-shape': node.shape })
-    const paint = TONE_PAINT[node.tone]
+    const paint = resolveExportPaint(node)
     group.appendChild(shapeElement(node.shape, node, paint))
     appendLabel(group, node, paint)
     nodeLayer.appendChild(group)

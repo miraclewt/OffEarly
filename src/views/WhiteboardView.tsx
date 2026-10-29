@@ -48,6 +48,7 @@ import type { Vault, Whiteboard, WhiteboardNodePatch, WhiteboardShape, Whiteboar
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { WhiteboardCanvas } from './WhiteboardCanvas'
 import type { WhiteboardCorner, WhiteboardSide } from './WhiteboardCanvas'
+import { WhiteboardColorPanel } from './WhiteboardColorPanel'
 import { exportWhiteboard } from './WhiteboardExporter'
 import { fs, px, sp } from '../styles/scale'
 
@@ -286,6 +287,21 @@ export function WhiteboardView(props: WhiteboardViewProps) {
       applyPatchNodes(bus, vault, whiteboard.id, patches)
     },
     [whiteboard, bus, vault],
+  )
+
+  /** 选中的图元对象（色块面板要读它们的 tone / fill 来判断「当前是什么颜色」）。 */
+  const selectedNodes = useMemo(
+    () => (whiteboard === undefined ? [] : whiteboard.nodes.filter((node) => selectedSet.has(node.id))),
+    [whiteboard, selectedSet],
+  )
+
+  /** 把同一条 patch 落到全部选中图元上——批量也只进一条撤销项。 */
+  const commitSelectionPatch = useCallback(
+    (patch: WhiteboardNodePatch) => {
+      if (selectedIds.length === 0) return
+      commitNodes(selectedIds.map((id) => ({ id, patch })))
+    },
+    [selectedIds, commitNodes],
   )
 
   /** 拖动时被一起带走的节点：选中集合 + 若含 frame，则框内的其它图元。 */
@@ -882,23 +898,28 @@ export function WhiteboardView(props: WhiteboardViewProps) {
           ))}
         </select>
 
-        {selectedIds.length > 1 ? (
+        {selectedIds.length > 0 ? (
           <>
             <Divider />
-            <ToolButton testId="whiteboard-align-left" label={t('whiteboard.alignLeft')} onClick={() => align('left')} />
-            <ToolButton testId="whiteboard-align-center" label={t('whiteboard.alignCenter')} onClick={() => align('center')} />
-            <ToolButton testId="whiteboard-align-right" label={t('whiteboard.alignRight')} onClick={() => align('right')} />
-            <ToolButton testId="whiteboard-align-top" label={t('whiteboard.alignTop')} onClick={() => align('top')} />
-            <ToolButton
-              testId="whiteboard-align-middle"
-              label={t('whiteboard.alignMiddle')}
-              onClick={() => align('middle')}
-            />
-            <ToolButton
-              testId="whiteboard-align-bottom"
-              label={t('whiteboard.alignBottom')}
-              onClick={() => align('bottom')}
-            />
+            <WhiteboardColorPanel nodes={selectedNodes} onPatch={commitSelectionPatch} t={t} />
+            {selectedIds.length > 1 ? (
+              <>
+                <ToolButton testId="whiteboard-align-left" label={t('whiteboard.alignLeft')} onClick={() => align('left')} />
+                <ToolButton testId="whiteboard-align-center" label={t('whiteboard.alignCenter')} onClick={() => align('center')} />
+                <ToolButton testId="whiteboard-align-right" label={t('whiteboard.alignRight')} onClick={() => align('right')} />
+                <ToolButton testId="whiteboard-align-top" label={t('whiteboard.alignTop')} onClick={() => align('top')} />
+                <ToolButton
+                  testId="whiteboard-align-middle"
+                  label={t('whiteboard.alignMiddle')}
+                  onClick={() => align('middle')}
+                />
+                <ToolButton
+                  testId="whiteboard-align-bottom"
+                  label={t('whiteboard.alignBottom')}
+                  onClick={() => align('bottom')}
+                />
+              </>
+            ) : null}
           </>
         ) : null}
 

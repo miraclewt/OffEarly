@@ -126,6 +126,11 @@ export interface WhiteboardNode {
   height: number
   text: string
   tone: WhiteboardTone
+  /**
+   * 自定义填充色（小写 `#rrggbb`）。缺省表示「用 tone 的语义色」。
+   * 有值时**覆盖** tone：屏幕与导出都只认它。文本图元上它是字色。
+   */
+  fill?: string
 }
 
 export interface WhiteboardEdge {
@@ -154,7 +159,15 @@ export interface Whiteboard {
 
 /** 白板自身的可改字段（标题 / 排序 / 刷新时间戳）；节点与边各有自己的 patch。 */
 export type WhiteboardPatch = Partial<Pick<Whiteboard, 'name' | 'order' | 'updatedAt'>>
-export type WhiteboardNodePatch = Partial<Pick<WhiteboardNode, 'x' | 'y' | 'width' | 'height' | 'text' | 'shape' | 'tone'>>
+export type WhiteboardNodePatch = Partial<
+  Pick<WhiteboardNode, 'x' | 'y' | 'width' | 'height' | 'text' | 'shape' | 'tone'>
+> & {
+  /**
+   * 自定义色。`null` 是**明确的「清除」**（回到 tone），不是 `undefined`：
+   * 撤销栈要让「选了色 → 清除」与「本来就没色」两个状态可区分，否则逆元无法表达清除。
+   */
+  fill?: string | null
+}
 export type WhiteboardEdgePatch = Partial<
   Pick<WhiteboardEdge, 'fromAnchor' | 'toAnchor' | 'route' | 'arrow' | 'dashed' | 'label'>
 >
