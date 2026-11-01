@@ -12,11 +12,10 @@
 // （与 MindMapExporter 的 MINDMAP_EXPORT_* 同一约定）。
 
 import {
-  WHITEBOARD_FONT_SIZE,
   WHITEBOARD_LINE_HEIGHT,
-  WHITEBOARD_NOTE_FONT_SIZE,
   WHITEBOARD_NODE_PADDING,
   buildEdgeView,
+  resolveNodeFontSize,
   resolveNodePaint,
   whiteboardBounds,
   whiteboardRenderOrder,
@@ -50,6 +49,9 @@ const TONE_PAINT: Record<
 const EDGE_STROKE = '#98989D'
 const LABEL_FILL = '#6E6E73'
 const SURFACE = '#FFFFFF'
+/** 图片没读出来时的占位底（--oe-fill-subtle 的字面量）。 */
+const IMAGE_PLACEHOLDER = '#F2F2F7'
+const XLINK_NS = 'http://www.w3.org/1999/xlink'
 
 export interface WhiteboardExportViewport {
   panX: number
@@ -64,6 +66,14 @@ export interface WhiteboardSvgOptions {
   /** 「仅可见区」需要；缺省时退化为全图（不静默出空图）。 */
   viewport?: WhiteboardExportViewport
   background?: string
+  /**
+   * T74：`assets/<id>.<ext>` → dataURL（由调用方预先读好）。
+   *
+   * 为什么必须内嵌：单文件产物是 `file://` 打开的，导出的 SVG 里写 `assets/x.png`
+   * 在别的机器（甚至同一台机器的下载目录里）都是死链。导出物的定义是**自包含**。
+   * 缺了这个键就画灰底占位——宁可看到「图没带上」，也不出一个指向空处的 `<image>`。
+   */
+  images?: ReadonlyMap<string, string>
 }
 
 export interface WhiteboardExportRequest extends WhiteboardSvgOptions {
@@ -224,6 +234,17 @@ function shapeElement(
         fill: 'none',
         stroke: 'none',
       })
+    case 'image':
+      // 图片底下垫一层浅灰：图没读出来（或导出时缺 dataURL）时是灰块，不是透明洞
+      return el('rect', {
+        x: round1(rect.x),
+        y: round1(rect.y),
+        width: round1(rect.width),
+        height: round1(rect.height),
+        rx: 8,
+        fill: IMAGE_PLACEHOLDER,
+        stroke: 'none',
+      })
     default:
       return el('rect', {
         x: round1(rect.x),
@@ -243,7 +264,9 @@ function appendLabel(
   paint: (typeof TONE_PAINT)[WhiteboardTone],
 ): void {
   if (node.text === '') return
-  const fontSize = node.shape === 'note' ? WHITEBOARD_NOTE_FONT_SIZE : WHITEBOARD_FONT_SIZE
+  // T75：字号是节点数据，与画布读同一个 resolveNodeFontSize——否则用户调到 32 号，
+  // 导出却还是 13 号，产出的图和屏幕上看到的完全是两回事
+  const fontSize = resolveNodeFontSize(node)
   const lineHeight = fontSize * WHITEBOARD_LINE_HEIGHT
   const available = Math.max(16, node.width - WHITEBOARD_NODE_PADDING * 2)
   const lines = wrapText(node.text, available, fontSize)
@@ -258,7 +281,9 @@ function appendLabel(
     'font-size': fontSize,
     'text-anchor': 'middle',
     fill: paint.text,
-    'font-weight': node.shape === 'frame' ? 600 : undefined,
+    // T77：分组框标题本来就有 600 的强调；显式加粗时抬到 700（用户点过 B 就该更粗）
+    'font-weight': node.bold === true ? 700 : node.shape === 'frame' ? 600 : undefined,
+    'font-style': node.italic === true ? 'italic' : undefined,
   }) as SVGTextElement
   lines.forEach((line, index) => {
     const tspan = el('tspan', {
@@ -269,6 +294,37 @@ function appendLabel(
     text.appendChild(tspan)
   })
   group.appendChild(text)
+}
+
+/**
+ * 图片元素：`href` 与 `xlink:href` 同时给——旧软件只认后者，现代浏览器认前者。
+ *
+ * T77：`cover`（等比铺满）用 `slice`；slice 会把图放大到盖住整个框，超出部分按规范
+ * 由 `<image>` 自己的 viewport 裁掉，但不少渲染器（含部分 PDF / Office 转换链）并不裁，
+ * 于是图会糊到隔壁图元上。这里显式给一层 clipPath：屏幕上是 `object-fit: cover`，
+ * 导出里是「slice + 裁到节点矩形」，两边看到的是同一块画面。
+ */
+function imageElement(node: WhiteboardNode, dataUrl: string): SVGElement {
+  const cover = node.imageFit === 'cover'
+  const image = el('image', {
+    x: round1(node.x),
+    y: round1(node.y),
+    width: round1(node.width),
+    height: round1(node.height),
+    preserveAspectRatio: cover ? 'xMidYMid slice' : 'xMidYMid meet',
+    href: dataUrl,
+  })
+  image.setAttributeNS(XLINK_NS, 'xlink:href', dataUrl)
+  if (!cover) return image
+
+  const clipId = `wb-clip-${node.id.replace(/[^A-Za-z0-9_-]/g, '')}`
+  const group = el('g', {})
+  const clip = el('clipPath', { id: clipId })
+  clip.appendChild(el('rect', { x: round1(node.x), y: round1(node.y), width: round1(node.width), height: round1(node.height) }))
+  image.setAttribute('clip-path', `url(#${clipId})`)
+  group.appendChild(clip)
+  group.appendChild(image)
+  return group
 }
 
 /**
@@ -286,6 +342,9 @@ export function buildWhiteboardSvgMarkup(
     viewBox: `${win.x} ${win.y} ${win.width} ${win.height}`,
     'font-family': GANTT_EXPORT_FONT_STACK,
   }) as SVGSVGElement
+  // 显式声明 xlink 前缀：否则 XMLSerializer 会自己编一个（ns1:href），
+  // 老软件读到未知前缀的图片属性等于没给。声明一次，序列化就会用回 xlink。
+  root.setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:xlink', XLINK_NS)
   root.appendChild(el('rect', { x: win.x, y: win.y, width: win.width, height: win.height, fill: background }))
 
   // 连线层：path 来自模型（与屏幕同一条），箭头是手画三角（marker 在导出/克隆里不可靠）
@@ -334,7 +393,13 @@ export function buildWhiteboardSvgMarkup(
     const group = el('g', { 'data-whiteboard-node': node.id, 'data-shape': node.shape })
     const paint = resolveExportPaint(node)
     group.appendChild(shapeElement(node.shape, node, paint))
-    appendLabel(group, node, paint)
+    if (node.shape === 'image') {
+      const dataUrl = node.image === undefined ? undefined : options.images?.get(node.image)
+      // 只写出「真的拿到了字节」的图：写一个 src 指向不存在的 assets/ 等于给用户一张死图
+      if (dataUrl !== undefined) group.appendChild(imageElement(node, dataUrl))
+    } else {
+      appendLabel(group, node, paint)
+    }
     nodeLayer.appendChild(group)
   }
   root.appendChild(nodeLayer)
@@ -343,8 +408,37 @@ export function buildWhiteboardSvgMarkup(
   return { markup, width: win.pixelWidth, height: win.pixelHeight }
 }
 
-/** 文件名收敛（Windows / POSIX 都不能用的字符换 "-"）。 */
-export function sanitizeWhiteboardFileName(name: string): string {
+/**
+ * T74：blob URL → dataURL。导出时图片必须是**内嵌字节**，否则下载到别的目录就是死链。
+ *
+ * 为什么经 canvas 而不是 `fetch(url).then(r=>r.blob()).then(FileReader)`：
+ * `file://` 页面的 origin 是 "null"，对 blob: 资源发 fetch 在部分 Electron / Edge 版本上
+ * 会被 CORS 拦下；而 `<img>` + canvas 这条路是浏览器自己解码的，同源判定只有一次
+ * （blob URL 与创建它的页面同源），笔记图片的灯箱也是这么显示的。
+ *
+ * 读取失败（图被删、格式浏览器不认）返回 null，调用方按「没带上图」处理。
+ */
+export async function blobUrlToDataUrl(url: string): Promise<string | null> {
+  try {
+    const image = new Image()
+    image.src = url
+    await image.decode()
+    const width = image.naturalWidth
+    const height = image.naturalHeight
+    if (!(width > 0) || !(height > 0)) return null
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const context = canvas.getContext('2d')
+    if (context === null) return null
+    context.drawImage(image, 0, 0)
+    return canvas.toDataURL('image/png')
+  } catch {
+    return null
+  }
+}
+
+/** 文件名收敛（Windows / POSIX 都不能用的字符换 "-"）。 */export function sanitizeWhiteboardFileName(name: string): string {
   const cleaned = name.replace(/[/\\:*?"<>|]/g, '-').trim()
   return cleaned === '' ? 'offearly-whiteboard' : cleaned
 }
@@ -356,6 +450,7 @@ export async function exportWhiteboard(request: WhiteboardExportRequest): Promis
     range: request.range,
     viewport: request.viewport,
     background: request.background,
+    images: request.images,
   })
 
   if (request.format === 'svg') {

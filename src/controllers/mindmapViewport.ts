@@ -69,8 +69,12 @@ export interface MindMapViewportController {
   setViewportSize(input: { width?: number; height?: number }): void
   /** 以视口坐标 anchor 为不动点缩放 deltaSteps 档；顶格/触底时整体无变化。 */
   zoomAt(anchorX: number, anchorY: number, deltaSteps: number): void
-  /** 选最大可容纳档位并把内容中心摆到视口中心。 */
-  fitToContent(bounds: MindMapViewBounds, padding?: number): void
+  /**
+   * 选最大可容纳档位并把内容中心摆到视口中心。
+   * `maxZoomIndex` 收住「最多放大到几档」：白板里一张 120×60 的小框 fit 会算到 3 倍，
+   * 一进板就是一整屏巨框，所以白板传 100%（index 4）。缺省仍是放开到档表顶端。
+   */
+  fitToContent(bounds: MindMapViewBounds, padding?: number, maxZoomIndex?: number): void
   /** Ctrl+滚轮 → 以视口中心为锚缩放一档；普通滚轮 → 平移。返回是否真的变了。 */
   applyWheel(input: MindMapWheelInput): boolean
 }
@@ -175,14 +179,15 @@ export function createMindmapViewport(options: MindMapViewportOptions = {}): Min
       patch({ width, height })
     },
     zoomAt,
-    fitToContent(bounds, padding = MINDMAP_FIT_PADDING) {
+    fitToContent(bounds, padding = MINDMAP_FIT_PADDING, maxZoomIndex = MINDMAP_MAX_ZOOM_INDEX) {
       const contentW = Math.max(0, bounds.maxX - bounds.minX)
       const contentH = Math.max(0, bounds.maxY - bounds.minY)
       const availW = state.width - padding * 2
       const availH = state.height - padding * 2
       // 档表从大到小找第一个两维都放得下的档；全放不下 → 最小档（零尺寸内容不会除出 Infinity）。
+      const ceiling = clampMindmapZoomIndex(maxZoomIndex)
       let next = MINDMAP_MIN_ZOOM_INDEX
-      for (let i = MINDMAP_MAX_ZOOM_INDEX; i >= MINDMAP_MIN_ZOOM_INDEX; i -= 1) {
+      for (let i = ceiling; i >= MINDMAP_MIN_ZOOM_INDEX; i -= 1) {
         const z = MINDMAP_ZOOM_STEPS[i]!
         if (contentW * z <= availW + 1e-9 && contentH * z <= availH + 1e-9) {
           next = i

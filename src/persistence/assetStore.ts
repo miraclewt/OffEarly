@@ -219,6 +219,15 @@ export function referencedAssetIds(vault: Vault): Set<string> {
       if (id !== null) ids.add(id)
     }
   }
+  // T74：白板图片不是 markdown 引用，走的是 node.image 的**直接路径**，必须单独扫一遍。
+  // 漏掉这一条，回收就会把「贴进画布的截图」当孤儿删掉——用户只能看到一片灰底。
+  for (const whiteboard of vault.whiteboards) {
+    for (const node of whiteboard.nodes) {
+      if (typeof node.image !== 'string') continue
+      const id = assetIdOf(node.image)
+      if (id !== null) ids.add(id)
+    }
+  }
   return ids
 }
 

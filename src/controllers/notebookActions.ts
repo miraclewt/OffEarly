@@ -162,9 +162,78 @@ export function applyDeleteDoc(bus: CommandBus, vault: Vault, id: string): boole
   return true
 }
 
+// ── T73 · 文档属性：标签与关联任务 ─────────────────────────────────────────
+// 两个都是 NoteDoc 的**可选**字段（老库没有它们），所以写入时一律：
+//  · 规格化之后与现值相同就零写入（不进撤销栈）；
+//  · 结果为空就把键置成 undefined —— 序列化时这个键直接消失，库文件回到老形状。
+
+/** 标签数量与长度上限：再多就不叫标签了，叫正文。 */
+export const NOTE_TAG_LIMIT = 8
+export const NOTE_TAG_MAX_LENGTH = 16
+
+/** 规格化标签：去首尾空白、丢弃空串、按大小写不敏感去重、截断超长、限量。顺序保留。 */
+export function normalizeNoteTags(input: readonly string[]): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const raw of input) {
+    const tag = raw.trim().slice(0, NOTE_TAG_MAX_LENGTH).trim()
+    if (tag === '') continue
+    const key = tag.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(tag)
+    if (out.length >= NOTE_TAG_LIMIT) break
+  }
+  return out
+}
+
+/** 写整组标签（属性行里的增删都走这里，一次动作 = 一条命令 = 一条撤销项）。 */
+export function applySetDocTags(
+  bus: CommandBus,
+  vault: Vault,
+  id: string,
+  tags: readonly string[],
+  deps: NotebookActionDeps = {},
+): boolean {
+  const doc = vault.noteDocs.find((candidate) => candidate.id === id)
+  if (doc === undefined) return false
+  const next = normalizeNoteTags(tags)
+  const current = doc.tags ?? []
+  if (next.length === current.length && next.every((tag, index) => tag === current[index])) return false
+  bus.apply(
+    patchNoteDocCommand(vault, id, {
+      tags: next.length === 0 ? undefined : next,
+      updatedAt: stamp(deps),
+    }),
+  )
+  return true
+}
+
+/** 关联 / 取消关联一个任务（同一个入口来回切，与标签的「点 × 删除」同口径）。 */
+export function applyToggleDocTask(
+  bus: CommandBus,
+  vault: Vault,
+  id: string,
+  taskId: string,
+  deps: NotebookActionDeps = {},
+): boolean {
+  const doc = vault.noteDocs.find((candidate) => candidate.id === id)
+  if (doc === undefined) return false
+  if (!vault.tasks.some((task) => task.id === taskId)) return false
+  const current = doc.taskIds ?? []
+  const linked = current.includes(taskId)
+  const next = linked ? current.filter((candidate) => candidate !== taskId) : [...current, taskId]
+  bus.apply(
+    patchNoteDocCommand(vault, id, {
+      taskIds: next.length === 0 ? undefined : next,
+      updatedAt: stamp(deps),
+    }),
+  )
+  return true
+}
+
 /**
- * T56 · 移动 / 换序：把 `id` 放到 `parentId` 下、紧挨 `beforeId` 之前（null = 末尾）。
- *
+ * T56 · 移动 / 换序：把 `id` 放到 `parentId` 下、紧挨 `beforeId` 之前（null = 末尾）。 *
  * 三个前置判断都在入栈之前做完，非法落点静默返回 false 而不是抛错——拖拽是高频动作，
  * 抛错会变成控制台噪音；而 patchNoteDocCommand 的构造期校验是最后一道闸。
  */

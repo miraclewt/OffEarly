@@ -73,6 +73,8 @@ function vaultWith(parts: {
   taskNotes?: string[]
   milestoneNotes?: string[]
   docContents?: string[]
+  /** T74：白板上的图片引用（`node.image`，不走 markdown） */
+  whiteboardImages?: string[]
 }): Vault {
   return {
     ...emptyVault(),
@@ -96,6 +98,30 @@ function vaultWith(parts: {
       createdAt: '2026-10-22T09:00:00.000Z',
       updatedAt: '2026-10-22T09:00:00.000Z',
     })),
+    whiteboards:
+      parts.whiteboardImages === undefined
+        ? []
+        : [
+            {
+              id: 'w1',
+              name: '板',
+              order: 'U',
+              nodes: parts.whiteboardImages.map((image, i) => ({
+                id: `n${i}`,
+                shape: 'image' as const,
+                x: 0,
+                y: 0,
+                width: 320,
+                height: 200,
+                text: '',
+                tone: 'plain' as const,
+                image,
+              })),
+              edges: [],
+              createdAt: '2026-10-28T09:00:00.000Z',
+              updatedAt: '2026-10-28T09:00:00.000Z',
+            },
+          ],
   }
 }
 
@@ -144,6 +170,23 @@ describe('T26-1 · 引用集合（assetRefsIn / referencedAssetIds）', () => {
   it('空 note / 无图片的 note 不产生引用', () => {
     const vault = vaultWith({ taskNotes: ['', '# 纯文本，没有图'] })
     expect(referencedAssetIds(vault).size).toBe(0)
+  })
+
+  // T74：白板图片不走 markdown，必须单独扫 node.image —— 漏了它，回收会把贴进画布的截图删掉
+  it('白板上的图片算被引用（否则 gc 会删掉画布里的图）', () => {
+    const vault = vaultWith({ whiteboardImages: ['assets/wb1.png', 'assets/wb2.jpg'] })
+    expect([...referencedAssetIds(vault)].sort()).toEqual(['wb1', 'wb2'])
+  })
+
+  it('只被白板引用、不在 assets 表里的图不会被算进可回收清单', () => {
+    const vault = vaultWith({
+      assets: [asset('wb1', 100), asset('orphan', 200)],
+      whiteboardImages: ['assets/wb1.png'],
+    })
+    const { store } = setup()
+    const preview = store.gcPreview(vault)
+    expect(preview.unreferenced.map((item) => item.id)).toEqual(['orphan'])
+    expect(preview.referencedCount).toBe(1)
   })
 
   // T49：可缩放的图片存成 <img src width>，只认 Markdown 语法会导致回收误删

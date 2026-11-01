@@ -138,6 +138,9 @@ export const NoteDocSchema = z.object({
   order: z.string(),
   createdAt: timestamp,
   updatedAt: timestamp,
+  // T73 · 可选：老库没有这两个键，不给 `.default` 才能保持「打开再保存逐字节不变」
+  tags: z.array(z.string()).optional(),
+  taskIds: z.array(id).optional(),
 })
 
 // T64 · 回收站：任务条目与文档条目是两个形状，用 discriminated union（kind 区分）。
@@ -168,7 +171,7 @@ export const TrashEntrySchema: z.ZodType<TrashEntry> = z.discriminatedUnion('kin
 // 且序列化后是 null，再打开必然崩）——宽高为正是渲染与命中检测的共同前提。
 export const WhiteboardNodeSchema = z.object({
   id,
-  shape: z.enum(['rect', 'round', 'ellipse', 'diamond', 'note', 'text', 'frame']),
+  shape: z.enum(['rect', 'round', 'ellipse', 'diamond', 'note', 'text', 'frame', 'image']),
   x: z.number().finite(),
   y: z.number().finite(),
   width: z.number().positive(),
@@ -181,6 +184,21 @@ export const WhiteboardNodeSchema = z.object({
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
     .optional(),
+  // T74 · 图片图元的 sidecar 引用（`assets/<id>.<ext>`）。与 fill 同理：可选、**不给 .default**，
+  // 老库打开再保存逐字节不变。只放行 assets 根目录下的文件名，子目录 / 外链一律拒。
+  image: z
+    .string()
+    .regex(/^assets\/[^/\\]+$/)
+    .optional(),
+  // T75 · 字号。可选、**不给 .default**（老库逐字节不变）。范围比档位表宽一点（8..96）：
+  // 手改过库的人写 17 该照原样画出来，档位表只在用户点 A−/A+ 时起作用。小数一律拒——
+  // 半像素字号会让同一批图元看起来「莫名不一致」。
+  fontSize: z.number().int().min(8).max(96).optional(),
+  // T77 · 加粗 / 斜体。可选、不给 .default：缺省即「不生效」，与旧图元完全一致。
+  bold: z.boolean().optional(),
+  italic: z.boolean().optional(),
+  // T77 · 图片贴合方式。可选、不给 .default（缺省 = contain，由渲染层兜底）。
+  imageFit: z.enum(['contain', 'cover']).optional(),
 })
 
 export const WhiteboardEdgeSchema = z.object({

@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createCommandBus } from '../../src/domain/commandBus'
 import { createVaultStore } from '../../src/domain/store'
-import type { NoteDoc, Notebook, Vault } from '../../src/domain/types'
+import type { NoteDoc, Notebook, Task, Vault } from '../../src/domain/types'
 import { createI18n } from '../../src/locales/i18n'
 import { NotebookView } from '../../src/views/NotebookView'
 
@@ -210,6 +210,8 @@ describe('T49-7 · 新建 / 改名 / 删除（都可撤销）', () => {
       notebooks: [notebook('nb1', '手册')],
       noteDocs: [doc('d1', 'nb1', null, 'U', '文档')],
     })
+    // T72：笔记本降级成切换器里的菜单项，先展开菜单
+    fireEvent.click(screen.getByTestId('notebook-switcher'))
     const remove = screen.getByTestId('notebook-delete-nb1')
     fireEvent.click(remove)
     expect(store.getVault().notebooks).toHaveLength(1)
@@ -287,66 +289,73 @@ describe('T50 · 导出与正文字号', () => {
   })
 })
 
-// T51 · 左两栏（笔记本 / 文档树）可折叠：收起只留竖轨，竖轨自己就是展开入口
-describe('T51 · 面板折叠', () => {
+// T72 · 左栏只剩文档树（可折叠）；笔记本降级成树头部的切换器，不再单占一列
+describe('T72 · 左栏与笔记本切换器', () => {
   const seed = {
     notebooks: [notebook('nb1', '研发手册'), notebook('nb2', '随笔', 'V')],
-    noteDocs: [doc('d1', 'nb1', null, 'U', '发布流程', '# 发布流程\n\n正文一段。')],
+    noteDocs: [
+      doc('d1', 'nb1', null, 'U', '发布流程', '# 发布流程\n\n正文一段。'),
+      doc('d2', 'nb2', null, 'U', '随想', '另一本里的文档'),
+    ],
   }
 
-  it('收起笔记本栏：只留竖轨，文档树与正文照旧', () => {
+  it('笔记本不再单占一列：头部是切换器，弹层未展开时看不到笔记本行', () => {
     setup(seed)
-    const collapse = screen.getByTestId('notebook-books-collapse')
-    expect(collapse.getAttribute('aria-expanded')).toBe('true')
-    expect(collapse.getAttribute('aria-label')).toBe('收起笔记本栏')
-
-    fireEvent.click(collapse)
     expect(screen.queryByTestId('notebook-books-pane')).toBeNull()
-    // 头部按钮跟着面板一起消失（所以展开入口必须在竖轨上）
-    expect(screen.queryByTestId('notebook-add')).toBeNull()
-
-    const rail = screen.getByTestId('notebook-books-rail')
-    expect(rail.getAttribute('aria-expanded')).toBe('false')
-    expect(rail.getAttribute('aria-label')).toBe('展开笔记本栏')
-    // 另外两栏不受影响：树还在、正文还在
-    expect(screen.getByTestId('notebook-tree')).toBeTruthy()
-    expect(screen.getByTestId('note-editor-content')).toBeTruthy()
-
-    fireEvent.click(rail)
-    expect(screen.getByTestId('notebook-books-pane')).toBeTruthy()
-    expect(screen.getByTestId('notebook-row-nb2')).toBeTruthy()
-    expect(screen.queryByTestId('notebook-books-rail')).toBeNull()
+    const switcher = screen.getByTestId('notebook-switcher')
+    expect(switcher.getAttribute('aria-expanded')).toBe('false')
+    expect(switcher.getAttribute('aria-label')).toBe('切换笔记本')
+    expect(switcher.textContent).toContain('研发手册')
+    expect(screen.queryByTestId('notebook-switcher-menu')).toBeNull()
+    expect(screen.queryByTestId('notebook-row-nb2')).toBeNull()
   })
 
-  it('收起文档树：搜索框与树一起收，正文仍然可读', () => {
+  it('展开切换器能看到全部笔记本，选中后菜单收起、文档树跟着换', () => {
+    setup(seed)
+    fireEvent.click(screen.getByTestId('notebook-switcher'))
+    expect(screen.getByTestId('notebook-switcher').getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByTestId('notebook-row-nb1').getAttribute('aria-current')).toBe('true')
+
+    fireEvent.click(screen.getByTestId('notebook-row-nb2'))
+    expect(screen.queryByTestId('notebook-switcher-menu')).toBeNull()
+    expect(screen.getByTestId('doc-row-d2')).toBeTruthy()
+    expect(screen.queryByTestId('doc-row-d1')).toBeNull()
+  })
+
+  it('新建笔记本入口在菜单里，提交后菜单收起并切到新本', async () => {
+    const { store, rerender } = setup(seed)
+    fireEvent.click(screen.getByTestId('notebook-switcher'))
+    fireEvent.click(screen.getByTestId('notebook-add'))
+    const input = await screen.findByTestId('notebook-name-input')
+    fireEvent.change(input, { target: { value: '复盘' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    rerender()
+
+    expect(store.getVault().notebooks.map((item) => item.name)).toEqual(['研发手册', '随笔', '复盘'])
+    expect(screen.queryByTestId('notebook-switcher-menu')).toBeNull()
+    expect(screen.getByTestId('notebook-switcher').textContent).toContain('复盘')
+  })
+
+  it('收起文档树：搜索框与切换器一起收，正文仍可读；竖轨自己就是展开入口', () => {
     setup(seed)
     fireEvent.click(screen.getByTestId('notebook-tree-collapse'))
-
     expect(screen.queryByTestId('notebook-tree-pane')).toBeNull()
     expect(screen.queryByTestId('notebook-tree')).toBeNull()
     expect(screen.queryByTestId('notebook-search')).toBeNull()
+    expect(screen.queryByTestId('notebook-switcher')).toBeNull()
     expect(screen.getByTestId('notebook-tree-rail').getAttribute('aria-label')).toBe('展开文档树')
-    // 正文没有被一起收走：当前文档仍然渲染着
     expect(screen.getByTestId('note-editor-content').textContent).toContain('正文一段')
 
     fireEvent.click(screen.getByTestId('notebook-tree-rail'))
     expect(screen.getByTestId('doc-row-d1')).toBeTruthy()
   })
 
-  it('两栏同时收起仍然能读能写，且折叠是纯 UI 态（不写库、不进撤销栈）', () => {
+  it('折叠是纯 UI 态：vault 一个字节不动，撤销栈也不多一条', () => {
     const { store, bus } = setup(seed)
     const before = JSON.stringify(store.getVault())
-
-    fireEvent.click(screen.getByTestId('notebook-books-collapse'))
     fireEvent.click(screen.getByTestId('notebook-tree-collapse'))
-
-    expect(screen.getByTestId('notebook-books-rail')).toBeTruthy()
     expect(screen.getByTestId('notebook-tree-rail')).toBeTruthy()
-    // 编辑区还在唯一的 main 里，标题输入框也还在
     expect(screen.getByTestId('notebook-title-input')).toBeTruthy()
-    expect(screen.getByTestId('note-editor-content')).toBeTruthy()
-
-    // 纯 UI 态：vault 一个字节都不该动，撤销栈也不该多一条「收起面板」
     expect(JSON.stringify(store.getVault())).toBe(before)
     expect(bus.undoDepth()).toBe(0)
   })
@@ -419,5 +428,195 @@ describe('T62 · 从 .ics 导入会议', () => {
     await waitFor(() => expect(screen.getByTestId('meeting-import-badge')).toBeTruthy())
     expect((screen.getByTestId('meeting-import-confirm') as HTMLButtonElement).disabled).toBe(true)
     expect(store.getVault().noteDocs).toHaveLength(1)
+  })
+})
+
+describe('T73 · 大纲栏：计数徽标 + 宽屏自动展开', () => {
+  const seed = {
+    notebooks: [notebook('nb1', '研发手册')],
+    noteDocs: [
+      doc(
+        'd1',
+        'nb1',
+        null,
+        'U',
+        '支付重构周会纪要',
+        '# 结论\n\n先做对账。\n\n## 待办\n\n- [ ] 对账\n\n## 依赖\n\n无。\n\n## 链路\n\n见下。',
+      ),
+      doc('d2', 'nb1', null, 'V', '另一篇', '只有正文，没有标题。'),
+    ],
+  }
+
+  /** jsdom 的 innerWidth 是只读的，自动展开按它判断，所以这里临时替换一次。 */
+  function withViewportWidth(width: number, run: () => void): void {
+    const original = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { value: width, configurable: true })
+    try {
+      run()
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { value: original, configurable: true })
+    }
+  }
+
+  it('收起态也看得见「这篇有几个标题」，点一下展开右栏', () => {
+    const { view } = setup(seed)
+    // 默认窄屏（jsdom 1024）→ 不自动展开
+    expect(view.queryByTestId('notebook-outline-panel')).toBeNull()
+    expect(view.getByTestId('notebook-outline-count').textContent).toBe('4')
+
+    fireEvent.click(view.getByTestId('notebook-outline-toggle'))
+    expect(view.getByTestId('notebook-outline-panel')).toBeTruthy()
+    expect(view.getByTestId('notebook-outline-toggle').getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('没有标题的文档不显示徽标（0 没有信息量）', () => {
+    const { view } = setup(seed)
+    fireEvent.click(view.getByTestId('doc-row-d2'))
+    expect(view.queryByTestId('notebook-outline-count')).toBeNull()
+  })
+
+  it('宽屏 + 标题够多时自动展开；用户关掉之后不再自动弹回来', async () => {
+    await new Promise<void>((resolve) => {
+      withViewportWidth(1680, () => {
+        const { view } = setup(seed)
+        expect(view.queryByTestId('notebook-outline-panel')).toBeTruthy()
+
+        // 用户明确关掉：切到另一篇再切回来，不该又自己展开
+        fireEvent.click(view.getByTestId('notebook-outline-toggle'))
+        expect(view.queryByTestId('notebook-outline-panel')).toBeNull()
+        fireEvent.click(view.getByTestId('doc-row-d2'))
+        expect(view.queryByTestId('notebook-outline-panel')).toBeNull()
+        fireEvent.click(view.getByTestId('doc-row-d1'))
+        expect(view.queryByTestId('notebook-outline-panel')).toBeNull()
+        resolve()
+      })
+    })
+  })
+
+  it('窄屏即使标题很多也不展开（刚瘦身出来的正文宽度不能再还回去）', () => {
+    withViewportWidth(1080, () => {
+      const { view } = setup(seed)
+      expect(view.queryByTestId('notebook-outline-panel')).toBeNull()
+      expect(view.getByTestId('notebook-outline-count').textContent).toBe('4')
+    })
+  })
+})
+
+describe('T73-2 · 文档属性行：话题 / 关联任务 / 标签', () => {
+  function task(id: string, title: string, status: Task['status'] = 'todo'): Task {
+    return {
+      id,
+      topicId: 't1',
+      title,
+      status,
+      kind: 'feature',
+      priority: 'P2',
+      progress: 0,
+      tags: [],
+      note: '',
+      order: 'U',
+      createdAt: NOW,
+      updatedAt: NOW,
+      archived: false,
+    }
+  }
+
+  const seed = {
+    notebooks: [notebook('nb1', '研发手册')],
+    noteDocs: [doc('d1', 'nb1', null, 'U', '支付重构周会纪要', '# 结论\n\n先做对账。')],
+    tasks: [task('k1', '对账接口', 'doing'), task('k2', '支付回调')],
+  }
+
+  it('话题是只读的所属笔记本；没有标签与关联任务时只留两个「+」入口', () => {
+    const { view } = setup(seed)
+    expect(view.getByTestId('note-prop-topic').textContent).toContain('研发手册')
+    expect(view.queryByTestId('note-prop-task-k1')).toBeNull()
+    expect(view.getByTestId('note-prop-add-task')).toBeTruthy()
+    expect(view.getByTestId('note-prop-add-tag')).toBeTruthy()
+  })
+
+  it('加标签：输入回车落库，chip 出现；点 × 删掉后库里不再有这个键', () => {
+    const { store, view, rerender } = setup(seed)
+    fireEvent.click(view.getByTestId('note-prop-add-tag'))
+    const input = view.getByTestId('note-prop-tag-input')
+    fireEvent.change(input, { target: { value: '  支付 ' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(store.getVault().noteDocs[0]?.tags).toEqual(['支付'])
+    rerender() // 视图读的是 props 快照（App 里由 zustand 订阅负责重渲染）
+    const chip = view.getByTestId('note-prop-tag-支付')
+    expect(chip.textContent).toContain('支付')
+
+    fireEvent.click(view.getByTestId('note-prop-tag-remove-支付'))
+    expect(store.getVault().noteDocs[0]?.tags).toBeUndefined()
+    expect(JSON.stringify(store.getVault().noteDocs[0])).not.toContain('"tags"')
+  })
+
+  it('Esc 取消输入不进库（打了一半不算数）', () => {
+    const { store, view } = setup(seed)
+    fireEvent.click(view.getByTestId('note-prop-add-tag'))
+    const input = view.getByTestId('note-prop-tag-input')
+    fireEvent.change(input, { target: { value: '半截' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(view.queryByTestId('note-prop-tag-input')).toBeNull()
+    expect(store.getVault().noteDocs[0]?.tags).toBeUndefined()
+  })
+
+  it('关联任务：弹层可搜索、点候选项挂上，chip 上的 × 取消关联', async () => {
+    const { store, view, rerender } = setup(seed)
+    fireEvent.click(view.getByTestId('note-prop-add-task'))
+    const menu = await view.findByTestId('note-prop-task-menu')
+    expect(menu).toBeTruthy()
+
+    const search = view.getByTestId('note-prop-task-search')
+    fireEvent.change(search, { target: { value: '回调' } })
+    await waitFor(() => expect(view.queryAllByTestId(/^note-prop-task-option-/)).toHaveLength(1))
+    fireEvent.click(view.getByTestId('note-prop-task-option-0'))
+
+    expect(store.getVault().noteDocs[0]?.taskIds).toEqual(['k2'])
+    rerender()
+    expect(view.getByTestId('note-prop-task-k2').textContent).toContain('支付回调')
+    // 选完自动收起
+    expect(view.queryByTestId('note-prop-task-menu')).toBeNull()
+
+    fireEvent.click(view.getByTestId('note-prop-task-remove-k2'))
+    expect(store.getVault().noteDocs[0]?.taskIds).toBeUndefined()
+  })
+
+  it('候选池不含已关联的任务（避免下拉里点一条没反应）', async () => {
+    const { view } = setup({
+      ...seed,
+      noteDocs: [{ ...doc('d1', 'nb1', null, 'U', '支付重构周会纪要', '# 结论'), taskIds: ['k1'] }],
+    })
+    expect(view.getByTestId('note-prop-task-k1')).toBeTruthy()
+    fireEvent.click(view.getByTestId('note-prop-add-task'))
+    await view.findByTestId('note-prop-task-menu')
+    const labels = view
+      .queryAllByTestId(/^note-prop-task-option-/)
+      .map((node) => node.textContent ?? '')
+    expect(labels.some((text) => text.includes('对账接口'))).toBe(false)
+    expect(labels.some((text) => text.includes('支付回调'))).toBe(true)
+  })
+
+  it('点任务 chip 打开任务详情（复用既有 onOpenTask 通道）', () => {
+    const onOpenTask = vi.fn()
+    const { view } = setup({
+      ...seed,
+      noteDocs: [{ ...doc('d1', 'nb1', null, 'U', '支付重构周会纪要', '# 结论'), taskIds: ['k1'] }],
+    })
+    // setup 里 onOpenTask 是新建的 vi.fn()，这里改用带 spy 的一版渲染
+    view.unmount()
+    const store = createVaultStore(
+      vaultWith({
+        ...seed,
+        noteDocs: [{ ...doc('d1', 'nb1', null, 'U', '支付重构周会纪要', '# 结论'), taskIds: ['k1'] }],
+      }),
+    )
+    const bus = createCommandBus(store)
+    const view2 = render(
+      <NotebookView vault={store.getVault()} bus={bus} t={t()} onOpenTask={onOpenTask} />,
+    )
+    fireEvent.click(view2.getByTestId('note-prop-task-open-k1'))
+    expect(onOpenTask).toHaveBeenCalledWith('k1')
   })
 })

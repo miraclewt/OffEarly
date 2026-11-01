@@ -533,7 +533,8 @@ function Workspace(props: {
           <MindMapView vault={vault} bus={bus} t={t} />
         ) : view === 'whiteboard' ? (
           // T69：白板（自由画布）。与看板同名不同物——`board` 是 Kanban，这里是 Miro 式画布。
-          <WhiteboardView vault={vault} bus={bus} t={t} />
+          // T74：贴图复用笔记的附件端口（同一个 AssetStore / 同一套 blob URL 缓存）。
+          <WhiteboardView vault={vault} bus={bus} t={t} images={noteAssets} />
         ) : view === 'notebook' ? (
           // T49：知识库。选中态留在视图本地；文档里的 [[任务]] / [[里程碑]] 经回调拉起既有面板。
           <NotebookView

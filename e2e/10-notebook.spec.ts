@@ -255,7 +255,7 @@ test('导出本文档为 HTML：浏览器下载一份自包含文件，图已渲
   expect(html).not.toMatch(/<script\b[^>]*src=/i)
 })
 
-test('收起两栏面板（T51/T57）：面板变竖轨，窄屏正文变宽、宽屏停在阅读上限', async ({ page }) => {
+test('收起左栏（T72/T57）：笔记本并进切换器，收起文档树后正文变宽、宽屏停在阅读上限', async ({ page }) => {
   await openAppWith(page, withNotebooks([{ title: '正文', content: '# 正文\n\n收起面板之后这一行还得在。' }]))
   await connectWorkspace(page, { create: false })
   await page.getByTestId('view-notebook').click()
@@ -266,24 +266,28 @@ test('收起两栏面板（T51/T57）：面板变竖轨，窄屏正文变宽、�
     return box?.width ?? 0
   }
 
-  // 窄屏（900）下两栏占掉的三百多像素确实是正文的：收起后要能拿回来
+  // T72：笔记本不再是独立一列，而是文档树头部的一个切换器
+  await expect(page.getByTestId('notebook-books-pane')).toHaveCount(0)
+  await expect(page.getByTestId('notebook-switcher')).toBeVisible()
+  await page.getByTestId('notebook-switcher').click()
+  await expect(page.getByTestId('notebook-switcher-menu')).toBeVisible()
+  await expect(page.getByTestId('notebook-add')).toBeVisible()
+  await page.mouse.click(600, 400)
+  await expect(page.getByTestId('notebook-switcher-menu')).toHaveCount(0)
+  await expect(page.getByTestId('notebook-add')).toHaveCount(0)
+
+  // 窄屏（900）下文档树占掉的两百多像素确实是正文的：收起后要能拿回来
   await page.setViewportSize({ width: 900, height: 800 })
   const start = await width()
   expect(start).toBeGreaterThan(0)
   expect(start).toBeLessThan(760)
 
-  await page.getByTestId('notebook-books-collapse').click()
-  await expect(page.getByTestId('notebook-books-rail')).toBeVisible()
-  await expect(page.getByTestId('notebook-books-pane')).toHaveCount(0)
-  const afterBooks = await width()
-  expect(afterBooks).toBeGreaterThan(start)
-
   await page.getByTestId('notebook-tree-collapse').click()
   await expect(page.getByTestId('notebook-tree-rail')).toBeVisible()
-  const afterBoth = await width()
-  expect(afterBoth).toBeGreaterThanOrEqual(afterBooks - 2)
+  const afterCollapse = await width()
+  expect(afterCollapse).toBeGreaterThan(start)
   // T57 的阅读上限：不再一路铺满整个窗口
-  expect(afterBoth).toBeLessThan(860)
+  expect(afterCollapse).toBeLessThan(860)
 
   // 收起的是面板，不是内容：正文与标题都还在
   await expect(page.getByTestId('note-editor-content')).toContainText('收起面板之后这一行还得在')
@@ -292,8 +296,6 @@ test('收起两栏面板（T51/T57）：面板变竖轨，窄屏正文变宽、�
   // 竖轨自己就是展开入口；展开后宽度回到起点
   await page.getByTestId('notebook-tree-rail').click()
   await expect(page.getByTestId('notebook-tree')).toBeVisible()
-  await page.getByTestId('notebook-books-rail').click()
-  await expect(page.getByTestId('notebook-books-pane')).toBeVisible()
   expect(await width()).toBeCloseTo(start, 0)
 
   // 宽屏（1600）下正文列停在上限：窗口再宽也不会把一行拉到读不完
@@ -406,4 +408,47 @@ test('表格合并：框选两格才可合并，页面上不再出现整页蒙�
 
   await page.getByTestId('table-tool-merge').click()
   await expect(table.locator('td[colspan="2"]')).toHaveCount(1)
+})
+
+test('T73 · `/` 斜杠命令：菜单弹在光标处，Enter 落成真表格并写进 vault.json', async ({ page }) => {
+  await openAppWith(page, withNotebooks([{ title: '周会纪要', content: '# 结论\n\n先做对账。' }]))
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-notebook').click()
+  await page.getByText('周会纪要').first().click()
+
+  const body = page.getByTestId('note-editor-content')
+  await body.click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('/表')
+
+  // 菜单是 portal 到 body 的，位置贴着光标（视口坐标）
+  const menu = page.getByTestId('note-slash-menu')
+  await expect(menu).toBeVisible()
+  const geom = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="note-slash-menu"]') as HTMLElement | null
+    if (el === null) return null
+    const rect = el.getBoundingClientRect()
+    return {
+      left: Math.round(rect.left),
+      right: Math.round(rect.right),
+      viewport: window.innerWidth,
+      first: (document.querySelector('[data-testid^="note-slash-option-"]') as HTMLElement | null)?.dataset.testid,
+    }
+  })
+  // 「表」同时命中「列表」与「表格」，排序后表格必须在第一行
+  expect(geom?.first).toBe('note-slash-option-table')
+  // 没有被右墙裁掉
+  expect(geom?.right ?? 0).toBeLessThanOrEqual(geom?.viewport ?? 0)
+
+  await page.keyboard.press('Enter')
+  await expect(menu).toHaveCount(0)
+  await expect(page.locator('.oe-prose table').first()).toBeVisible()
+  // `/表` 这三个字符不该留在正文里
+  await expect(page.locator('.oe-prose')).not.toContainText('/表')
+
+  await waitSaved(page)
+  await expect
+    .poll(async () => docContents(await readFakeFs(page))[0] ?? '')
+    .toContain('| --- |')
 })

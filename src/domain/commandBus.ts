@@ -372,29 +372,43 @@ function invertFields<T extends object>(source: T, patch: Partial<T>): Partial<T
 }
 
 /**
- * 把节点 patch 落到节点上。唯一特殊处是 `fill`：`null` 与 `undefined` 都是**删键**
- * （回到 tone 的语义色），而不是留一个值为 null 的字段——schema 里 `fill` 是可选字符串，
- * 留 null 会在下次 parse 时整库报错。
+ * 「可以是空的」节点字段：`null` 与 `undefined` 都是**删键**，而不是留一个值为 null 的字段。
+ *
+ * schema 里这几个都是可选项，留 null 会在下次 parse 时整库报错。它们还共享第二条口径：
+ * 逆元里原来「没有这个键」时必须写 `null`（明确的删除），不能留 `undefined`——
+ * `Object.keys` 是逆元的依据，缺键就丢字段。
+ */
+const NULLABLE_NODE_FIELDS = ['fill', 'fontSize', 'bold', 'italic', 'imageFit'] as const
+
+function isNullableNodeField(key: string): boolean {
+  return (NULLABLE_NODE_FIELDS as readonly string[]).includes(key)
+}
+
+/**
+ * 把节点 patch 落到节点上。`fill` / `fontSize` / `bold` / `italic` / `imageFit` 特殊：
+ * 传 `null` 就是「清除」（回到缺省表现），键要真的消失。
  */
 function applyNodePatch(node: WhiteboardNode, patch: WhiteboardNodePatch): WhiteboardNode {
-  const { fill, ...rest } = patch
-  const next: WhiteboardNode = { ...node, ...rest }
-  if ('fill' in patch) {
-    if (fill === null || fill === undefined) delete next.fill
-    else next.fill = fill
+  const next: WhiteboardNode = { ...node }
+  for (const [key, value] of Object.entries(patch)) {
+    const target = next as unknown as Record<string, unknown>
+    if (isNullableNodeField(key)) {
+      if (value === null || value === undefined) delete target[key]
+      else target[key] = value
+    } else if (value !== undefined) {
+      target[key] = value
+    }
   }
   return next
 }
 
-/**
- * 节点 patch 的逆元。`fill` 特殊：原来「没有自定义色」时逆元必须写成 `null`（明确的删除），
- * 不能留 `undefined`——`Object.keys` 是逆元的依据，缺键就丢字段。
- */
+/** 节点 patch 的逆元。可空字段见 `NULLABLE_NODE_FIELDS` 的注释。 */
 function invertNodeFields(node: WhiteboardNode, patch: WhiteboardNodePatch): WhiteboardNodePatch {
   const source = node as unknown as Record<string, unknown>
   const inverse: Record<string, unknown> = {}
   for (const key of Object.keys(patch)) {
-    inverse[key] = key === 'fill' ? (node.fill ?? null) : source[key]
+    const deletable = isNullableNodeField(key)
+    inverse[key] = deletable ? (source[key] ?? null) : source[key]
   }
   return inverse as WhiteboardNodePatch
 }

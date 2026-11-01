@@ -99,7 +99,11 @@ export interface MindMap {
  * 形状是枚举而不是任意 path：白板要能被导出、能被键盘操作、能在不同缩放档下保持清晰，
  * 自由笔迹会把这三件事一起拖垮。用户需要「典型的图」，枚举比画笔更贴合。
  */
-export type WhiteboardShape = 'rect' | 'round' | 'ellipse' | 'diamond' | 'note' | 'text' | 'frame'
+/**
+ * T74 起多了 `image`：截图 / 设计稿可以直接贴进画布。
+ * 它仍是「枚举形状」而不是自由笔迹——图片只是带 `image` 引用的矩形，位置、缩放、连线全都复用既有机制。
+ */
+export type WhiteboardShape = 'rect' | 'round' | 'ellipse' | 'diamond' | 'note' | 'text' | 'frame' | 'image'
 
 /**
  * 色调走令牌名而不是 hex：主题一变，画布跟着变（与 T45「零新增 hex」同一条红线）。
@@ -131,7 +135,36 @@ export interface WhiteboardNode {
    * 有值时**覆盖** tone：屏幕与导出都只认它。文本图元上它是字色。
    */
   fill?: string
+  /**
+   * T74 · 图片图元的附件引用（`assets/<id>.<ext>`）。只有 `shape === 'image'` 时有意义。
+   *
+   * 为什么存 sidecar 引用而不是 dataURL：内嵌会让 vault.json 每次保存都背着几百 KB 的
+   * base64（与笔记图片同一个理由），而且 GC 就再也分不清「这张图还有没有人用」。
+   */
+  image?: string
+  /**
+   * T75 · 标签字号（px）。缺省表示「用形状的默认字号」（便签 14，其余 13）。
+   *
+   * 为什么是可选而不是恒有值：老库里的图元逐字节不变；而且「没调过」与「调成了默认值」
+   * 在撤销栈里要能区分——逆元写成 `null` 就是「回到默认」。
+   */
+  fontSize?: number
+  /**
+   * T77 · 加粗 / 斜体。缺省即「不生效」，**关闭时删键**而不是写 `false`——
+   * 否则每个被点过两次 B 的图元都会留下一个 `bold: false`，与「从没点过」在文件里看不出区别。
+   */
+  bold?: boolean
+  italic?: boolean
+  /**
+   * T77 · 图片的贴合方式：`contain` 等比留白（缺省），`cover` 等比铺满并裁掉溢出部分。
+   *
+   * 只对 `shape === 'image'` 有意义；缺省不落键，老库逐字节不变。
+   */
+  imageFit?: WhiteboardFit
 }
+
+/** 图片贴合方式：留白 / 铺满裁切。 */
+export type WhiteboardFit = 'contain' | 'cover'
 
 export interface WhiteboardEdge {
   id: string
@@ -160,13 +193,20 @@ export interface Whiteboard {
 /** 白板自身的可改字段（标题 / 排序 / 刷新时间戳）；节点与边各有自己的 patch。 */
 export type WhiteboardPatch = Partial<Pick<Whiteboard, 'name' | 'order' | 'updatedAt'>>
 export type WhiteboardNodePatch = Partial<
-  Pick<WhiteboardNode, 'x' | 'y' | 'width' | 'height' | 'text' | 'shape' | 'tone'>
+  Pick<WhiteboardNode, 'x' | 'y' | 'width' | 'height' | 'text' | 'shape' | 'tone' | 'image'>
 > & {
   /**
    * 自定义色。`null` 是**明确的「清除」**（回到 tone），不是 `undefined`：
    * 撤销栈要让「选了色 → 清除」与「本来就没色」两个状态可区分，否则逆元无法表达清除。
    */
   fill?: string | null
+  /** T75 · 字号。`null` 与 `fill` 同义：**明确的「回到默认」**（删键），不是 `undefined`。 */
+  fontSize?: number | null
+  /** T77 · 加粗 / 斜体。`null` 同义：明确的「关掉」（删键），不是 `undefined`。 */
+  bold?: boolean | null
+  italic?: boolean | null
+  /** T77 · 图片贴合方式。`null` 同义：回到缺省的 `contain`（删键）。 */
+  imageFit?: WhiteboardFit | null
 }
 export type WhiteboardEdgePatch = Partial<
   Pick<WhiteboardEdge, 'fromAnchor' | 'toAnchor' | 'route' | 'arrow' | 'dashed' | 'label'>
@@ -198,6 +238,17 @@ export interface NoteDoc {
   order: string
   createdAt: string
   updatedAt: string
+  /**
+   * T73 · 标签。**可选且不给默认值**：老库没有这个键，写 `.default([])` 会让
+   * 「打开再保存」把每个文档都补上一个空数组，老库就不再逐字节不变了。
+   * 读的一侧一律按 `doc.tags ?? []` 处理。
+   */
+  tags?: string[]
+  /**
+   * T73 · 关联任务 id。存 id 不存标题：任务改名后关联仍然有效
+   * ——这正是正文里 `[[标题]]` 一直以来的毛病，元数据不该重复它。
+   */
+  taskIds?: string[]
 }
 
 export interface Asset {

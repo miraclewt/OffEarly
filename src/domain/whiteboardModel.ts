@@ -14,7 +14,7 @@
 //   ③ 正交走线用「出线短段 + 直角折线 + 圆角」，短段沿锚点法线方向 —— 线一定垂直离开矩形边，
 //      不会贴着框边擦过去（Miro/draw.io 的手感都来自这一句）。
 
-import type { WhiteboardAnchor, WhiteboardEdge, WhiteboardNode, WhiteboardShape } from './types'
+import type { WhiteboardAnchor, WhiteboardEdge, WhiteboardNode, WhiteboardNodePatch, WhiteboardShape } from './types'
 
 /** 节点标签字号：视图、导出、分行估算三处共用同一个数字，宽度才复算得回来。 */
 export const WHITEBOARD_FONT_SIZE = 13
@@ -42,6 +42,8 @@ export const WHITEBOARD_DEFAULT_SIZE: Record<WhiteboardShape, { width: number; h
   note: { width: 180, height: 120 },
   text: { width: 168, height: 32 },
   frame: { width: 360, height: 240 },
+  /** 图片：真实尺寸由视图量出来后按宽度自适应覆写，这里只是「量不到」时的兜底。 */
+  image: { width: 320, height: 200 },
 }
 
 export interface WhiteboardPoint {
@@ -464,6 +466,66 @@ export function rectsIntersect(a: WhiteboardRect, b: WhiteboardRect): boolean {
 }
 
 /**
+ * T76/T77 · 新图元的落点：优先视口中心，**被别的图元压住时**按网格一格格挪开。
+ *
+ * 为什么需要：新建的图元现在会自动选中并进入编辑态，连着点两次「文本」时两个空文本
+ * 完全叠在一处——用户看到的是一个占位文字、一个输入框，会以为「只加了一个」。
+ * 完全重叠（交集超过较小面积的 60%）才挪，轻微压边是排布常态，不该被推开。
+ *
+ * 为什么是「网格」而不是「对角线」（T77）：沿对角逐格挪会让连点五次的图元排成一条 45° 斜线，
+ * 每两个之间只错开 24px、仍然大面积互压，看起来像「一个歪掉的堆」。现在按图元自身的
+ * 宽高 + 间距为一格，沿 8 个方向由近及远找位置——第二个落到右边，第三个落到下边，
+ * 第四个落到左边，第五个落到上边，正好是一圈。
+ *
+ * 分组框（frame）不参与避让：把新图元放进框里是最常见的用法，
+ * 按「重叠」把它推出去会让所有图元都落在框外面。
+ */
+export function placeNewNode(
+  nodes: readonly Pick<WhiteboardNode, 'shape' | 'x' | 'y' | 'width' | 'height'>[],
+  center: WhiteboardPoint,
+  size: { width: number; height: number },
+  gap = 24,
+  rings = 3,
+): { x: number; y: number } {
+  const base = { x: snapToGrid(center.x - size.width / 2), y: snapToGrid(center.y - size.height / 2) }
+  const occupied = nodes.filter((node) => node.shape !== 'frame')
+  const collides = (x: number, y: number): boolean => {
+    const rect = { x, y, width: size.width, height: size.height }
+    return occupied.some((node) => {
+      const other = { x: node.x, y: node.y, width: node.width, height: node.height }
+      const overlapWidth = Math.min(rect.x + rect.width, other.x + other.width) - Math.max(rect.x, other.x)
+      const overlapHeight = Math.min(rect.y + rect.height, other.y + other.height) - Math.max(rect.y, other.y)
+      if (overlapWidth <= 0 || overlapHeight <= 0) return false
+      const smaller = Math.min(rect.width * rect.height, other.width * other.height)
+      return smaller > 0 && (overlapWidth * overlapHeight) / smaller > 0.6
+    })
+  }
+  if (!collides(base.x, base.y)) return base
+
+  // 一格 = 自身尺寸 + 间距：相邻两格必然不重叠，连点出来的图元是一圈整齐的邻居而不是一堆斜线
+  const stepX = size.width + gap
+  const stepY = size.height + gap
+  for (let ring = 1; ring <= rings; ring += 1) {
+    const offsets: Array<[number, number]> = [
+      [ring, 0],
+      [0, ring],
+      [-ring, 0],
+      [0, -ring],
+      [ring, ring],
+      [-ring, ring],
+      [-ring, -ring],
+      [ring, -ring],
+    ]
+    for (const [dx, dy] of offsets) {
+      const x = snapToGrid(base.x + dx * stepX)
+      const y = snapToGrid(base.y + dy * stepY)
+      if (!collides(x, y)) return { x, y }
+    }
+  }
+  return base
+}
+
+/**
  * 字符宽度估算：中文/全角 1em，其余 0.55em。与导出器的分行共用，
  * 因此导出的换行位置与屏幕上（CSS 自动换行）**接近但不保证逐字相同**——
  * 导出没有浏览器排版，这是 SVG 文本的固有上限（甘特导出同一处境）。
@@ -514,3 +576,211 @@ export function nodeTextWidth(node: Pick<WhiteboardNode, 'width'>): number {
 
 /** 导出的行高：字号 × 1.5（与视图的 line-height 对齐）。 */
 export const WHITEBOARD_LINE_HEIGHT = 1.5
+
+// ---------------------------------------------------------------------------
+// T75 · 可调字号
+//
+// 档位而非滑杆：白板上的字号是「排版决定」，不是「连续参数」——13 与 13.7 肉眼分不出，
+// 但会让同一批图元的字号看起来「莫名不一致」，也让「两张图是不是同级」判断不了。
+// 档位从 10 到 80，在常用区（10–24）密、大标题区（32–80）疏，与 Word 的字号列表同一个节奏。
+//
+// 三条口径：
+//   ① **只存用户改过的**：没调过就不落 `fontSize` 键，口径回到形状默认（便签 14、其余 13）。
+//      老库因此逐字节不变，撤销也能干净地回到「默认」而不是「13 这个数字」。
+//   ② 渲染**忠实使用存下来的值**，不在读取时往档位上归。手工改过库的人写 17 就画 17；
+//      档位只在用户点 A− / A+ 时起作用（否则会出现「点一下从 17 跳到 18」的惊跳）。
+//   ③ 缩放与字号**互不牵连**：缩放是图元的包围盒，字号是里面的字。把框拉大不会把字拉大
+//      ——「框变大字变大」会让挪动一个框的手感完全失控。
+// ---------------------------------------------------------------------------
+
+/** 档位表（升序，唯一真值）。`WHITEBOARD_FONT_MIN/MAX` 由它两头取，不另写一份。 */
+export const WHITEBOARD_FONT_SIZES: readonly number[] = [10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 40, 48, 56, 64, 80]
+export const WHITEBOARD_FONT_MIN = WHITEBOARD_FONT_SIZES[0]!
+export const WHITEBOARD_FONT_MAX = WHITEBOARD_FONT_SIZES[WHITEBOARD_FONT_SIZES.length - 1]!
+/**
+ * T77 · 可输入字号的硬边界，与 `schema.ts` 的 8..96 逐字对齐。
+ *
+ * 为什么不复用上面的 MIN/MAX：那两个是**档位表**的两端（10..80），只用于「A± 最多走到哪」。
+ * 用户手动输入时能存下的范围是 schema 的范围——把 96 夹成 80 等于又一次「藏起一半能力」，
+ * 而这正是 T77 要解决的问题。
+ */
+export const WHITEBOARD_FONT_LIMIT_MIN = 8
+export const WHITEBOARD_FONT_LIMIT_MAX = 96
+
+/** 文本图元的内边距（左右各 4px，与画布 `padding: '0 4px'` 对齐）。 */
+export const WHITEBOARD_TEXT_PADDING = 4
+
+/**
+ * 一个图元实际用的字号（**唯一判断点**：视图、导出、自适应高度都走它）。
+ * 有 `fontSize` 就只认它，没有才按形状给默认值。
+ */
+export function resolveNodeFontSize(node: Pick<WhiteboardNode, 'shape' | 'fontSize'>): number {
+  if (node.fontSize !== undefined) return node.fontSize
+  return node.shape === 'note' ? WHITEBOARD_NOTE_FONT_SIZE : WHITEBOARD_FONT_SIZE
+}
+
+/**
+ * 在档位上走一格。当前值不在档位表里（手工改过库）时，往相邻方向取**最近的档**——
+ * 不能按「+1」算，否则 17 按一下变 18、再按一下才到 20，用户看到的是「有时跳一档有时跳两档」。
+ * 已经到头就停在头（不循环，也不返回越界值）。
+ */
+export function stepFontSize(current: number, direction: 1 | -1): number {
+  const sizes = WHITEBOARD_FONT_SIZES
+  if (direction > 0) {
+    for (const size of sizes) if (size > current + 0.5) return size
+    return sizes[sizes.length - 1]!
+  }
+  for (let index = sizes.length - 1; index >= 0; index -= 1) {
+    if (sizes[index]! < current - 0.5) return sizes[index]!
+  }
+  return sizes[0]!
+}
+
+/**
+ * 文本图元在「这个宽度 + 这个字号」下需要多高。
+ *
+ * 为什么必须算：文本图元没有框，高度就是文字的外廓。字号从 13 调到 32 而高度还停在 32，
+ * 文字会溢出到框外的选中环之外——看起来像「拖不动的一团字」，用户没法判断点哪儿。
+ *
+ * 宽度**不参与重算**：宽度是用户拉的换行宽度（拉宽 → 一行装更多字），字号变化只影响行数，
+ * 行数影响高度。这样「拉宽」与「调字号」是两件互不打架的事。
+ */
+export function fitTextHeight(text: string, fontSize: number, width: number): number {
+  const available = Math.max(12, width - WHITEBOARD_TEXT_PADDING * 2)
+  const lines = Math.max(1, wrapText(text, available, fontSize).length)
+  return Math.max(WHITEBOARD_MIN_HEIGHT, Math.ceil(lines * fontSize * WHITEBOARD_LINE_HEIGHT))
+}
+
+/** T74 · 贴图落进画布时的最大显示框（内容坐标）：超过就等比缩到这个框里。 */
+export const WHITEBOARD_IMAGE_MAX_WIDTH = 360
+export const WHITEBOARD_IMAGE_MAX_HEIGHT = 280
+
+/**
+ * 图片的显示尺寸：等比缩进 maxW × maxH，**不放大小图**（1×1 的像素图铺成 360 宽只会变糊），
+ * 结果按网格取整——与拖动吸附同一把尺子，贴进来的图不会跟别的图元错半格。
+ */
+export function fitImageSize(
+  natural: { width: number; height: number },
+  maxWidth: number = WHITEBOARD_IMAGE_MAX_WIDTH,
+  maxHeight: number = WHITEBOARD_IMAGE_MAX_HEIGHT,
+): { width: number; height: number } {
+  const width = natural.width > 0 ? natural.width : WHITEBOARD_DEFAULT_SIZE.image.width
+  const height = natural.height > 0 ? natural.height : WHITEBOARD_DEFAULT_SIZE.image.height
+  const scale = Math.min(1, maxWidth / width, maxHeight / height)
+  // 比最小尺寸还小的图（图标、1×1 像素）：等比抬到刚好可点中，而不是把宽高分别夹死
+  // ——分别夹会让 16×16 变成 48×32，图就变形了。
+  const liftScale = Math.max(WHITEBOARD_MIN_WIDTH / (width * scale), WHITEBOARD_MIN_HEIGHT / (height * scale), 1)
+  return {
+    width: Math.max(WHITEBOARD_MIN_WIDTH, snapToGrid(width * scale * liftScale)),
+    height: Math.max(WHITEBOARD_MIN_HEIGHT, snapToGrid(height * scale * liftScale)),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// T81 · 对齐 / 等距分布 / 移到视野中心
+//
+// 白板是「用户决定位置」，所以这一节只算「该挪到哪」，不落地、不排序、不碰 DOM。
+// 视图拿到 move 列表直接喂 `applyPatchNodes`——一次点击仍是**一条**撤销项。
+//
+// 四条口径：
+//   ① 对齐以**选区包围盒**为准（左 = 全贴 minX、右 = 右缘全贴 maxX…），不是「以先点中的那个为准」。
+//      后者在选区里混着大小图元时结果取决于点击顺序，用户没法预期。
+//   ② 分布按**空隙相等**（PPT / Figma 的 distribute spacing），不是「中心等距」：
+//      首尾两枚不动，中间按 `(跨度 - 各宽之和) / (n-1)` 重排。宽度不一时等中心距看起来是歪的。
+//   ③ 结果取整但**不吸附网格**：吸附会把不同宽度的图元算到不同的格上，刚对好的边反而破了。
+//   ④ 位置没变的图元**不写 patch**：否则「再点一次对齐」会攒出一条空撤销项。
+// ---------------------------------------------------------------------------
+
+export type WhiteboardAlignMode = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'
+/** 两个轴的名字只在「分布」与「视野居中」里用，语义相同：横 / 竖。 */
+export type WhiteboardAxis = 'horizontal' | 'vertical'
+
+/** 位移指令：`patch` 里只出现被改的那一个轴，绝不会出现「值为 undefined 的键」。 */
+export interface WhiteboardNodeMove {
+  id: string
+  patch: WhiteboardNodePatch
+}
+
+type Movable = Pick<WhiteboardNode, 'id' | 'x' | 'y' | 'width' | 'height'>
+
+/** 造一条 move；位置没变就返回 null（由调用方 filter 掉）。 */
+function moveTo(node: Movable, axis: 'x' | 'y', value: number): WhiteboardNodeMove | null {
+  const next = Math.round(value)
+  if (next === node[axis]) return null
+  return { id: node.id, patch: axis === 'x' ? { x: next } : { y: next } }
+}
+
+function compact(moves: readonly (WhiteboardNodeMove | null)[]): WhiteboardNodeMove[] {
+  return moves.filter((move): move is WhiteboardNodeMove => move !== null)
+}
+
+/**
+ * 对齐到选区包围盒。少于两枚没有「互相」可言，返回空数组（工具栏也不该给出按钮）。
+ */
+export function alignNodes(nodes: readonly Movable[], mode: WhiteboardAlignMode): WhiteboardNodeMove[] {
+  if (nodes.length < 2) return []
+  const { minX, minY, maxX, maxY } = whiteboardBounds(nodes)
+  return compact(
+    nodes.map((node) => {
+      switch (mode) {
+        case 'left':
+          return moveTo(node, 'x', minX)
+        case 'center':
+          return moveTo(node, 'x', (minX + maxX) / 2 - node.width / 2)
+        case 'right':
+          return moveTo(node, 'x', maxX - node.width)
+        case 'top':
+          return moveTo(node, 'y', minY)
+        case 'middle':
+          return moveTo(node, 'y', (minY + maxY) / 2 - node.height / 2)
+        default:
+          return moveTo(node, 'y', maxY - node.height)
+      }
+    }),
+  )
+}
+
+/**
+ * 等距分布：**首尾不动**，中间重排，让相邻图元之间的空隙相等。
+ *
+ * 少于三枚没有「中间」可排（两枚的空隙已经是它自己），返回空数组。
+ * 空隙算出来是负数（图元总宽已经超过跨度）时照原样排——那是用户自己摆成重叠的，
+ * 硬夹成 0 会把它们叠得更死。
+ */
+export function distributeNodes(nodes: readonly Movable[], axis: WhiteboardAxis): WhiteboardNodeMove[] {
+  if (nodes.length < 3) return []
+  const pos = axis === 'horizontal' ? 'x' : 'y'
+  const size = axis === 'horizontal' ? 'width' : 'height'
+  // 按起点排序；起点相同时按尺寸排，保证同样的输入永远排出同样的结果（撤销重放要能对上）
+  const sorted = [...nodes].sort((a, b) => a[pos] - b[pos] || a[size] - b[size])
+  const first = sorted[0]!
+  const last = sorted[sorted.length - 1]!
+  const span = last[pos] + last[size] - first[pos]
+  const used = sorted.reduce((sum, node) => sum + node[size], 0)
+  const gap = (span - used) / (sorted.length - 1)
+  const moves: (WhiteboardNodeMove | null)[] = []
+  let cursor = first[pos]
+  for (const node of sorted) {
+    moves.push(moveTo(node, pos, cursor))
+    cursor += node[size] + gap
+  }
+  return compact(moves)
+}
+
+/**
+ * 把选区包围盒的中心挪到给定点（视图传的是「当前视口中心」的内容坐标）。
+ *
+ * 单选也成立——「把这张便签摆到屏幕中间」是最常见的一种用法。
+ * 白板是无限画布，没有「页面」可对齐，所以这里的参照物只能是**视野**。
+ */
+export function centerNodesOn(
+  nodes: readonly Movable[],
+  axis: WhiteboardAxis,
+  center: WhiteboardPoint,
+): WhiteboardNodeMove[] {
+  if (nodes.length === 0) return []
+  const { minX, minY, maxX, maxY } = whiteboardBounds(nodes)
+  const delta = axis === 'horizontal' ? center.x - (minX + maxX) / 2 : center.y - (minY + maxY) / 2
+  return compact(nodes.map((node) => moveTo(node, axis === 'horizontal' ? 'x' : 'y', node[axis === 'horizontal' ? 'x' : 'y'] + delta)))
+}
+

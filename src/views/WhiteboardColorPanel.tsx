@@ -43,7 +43,7 @@ export interface WhiteboardColorPanelProps {
 export function WhiteboardColorPanel(props: WhiteboardColorPanelProps): ReactElement {
   const { nodes, onPatch, t } = props
   const [open, setOpen] = useState(false)
-  const [anchor, setAnchor] = useState<{ left: number; top: number } | null>(null)
+  const [anchor, setAnchor] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
   const [hexDraft, setHexDraft] = useState('')
   const [hexError, setHexError] = useState(false)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
@@ -62,9 +62,13 @@ export function WhiteboardColorPanel(props: WhiteboardColorPanelProps): ReactEle
     if (trigger === null) return
     const rect = trigger.getBoundingClientRect()
     const width = pxNum(PANEL_WIDTH)
+    // T81 起属性条悬浮在画布底边：下面已经没有空间，硬往下弹会把面板整个送出视口。
+    // 下方放不下（按面板毛高 280 估，两行色格 + 自定义行 + 内边距）就贴着按钮上沿向上弹。
+    const estimatedHeight = 280
+    const opensUp = rect.bottom + 6 + estimatedHeight > window.innerHeight
     setAnchor({
       left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
-      top: rect.bottom + 6,
+      ...(opensUp ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }),
     })
   }, [open])
 
@@ -124,9 +128,10 @@ export function WhiteboardColorPanel(props: WhiteboardColorPanelProps): ReactEle
           data-testid="whiteboard-color-chip"
           aria-hidden="true"
           style={{
-            width: sp(12),
-            height: sp(12),
-            borderRadius: sp(3),
+            width: sp(13),
+            height: sp(13),
+            // 圆点而不是方块：12px 的方块挨着文字，第一眼会被读成复选框（T78 截图里就是这样）
+            borderRadius: '50%',
             // 没选中统一色时给一块斜纹，表示「颜色不一致」
             background: triggerChip ?? 'repeating-linear-gradient(45deg, var(--oe-border) 0 3px, transparent 3px 6px)',
             border: '1px solid var(--oe-border)',
@@ -143,7 +148,12 @@ export function WhiteboardColorPanel(props: WhiteboardColorPanelProps): ReactEle
                 data-testid="whiteboard-color-panel"
                 role="dialog"
                 aria-label={t('whiteboard.color')}
-                style={{ ...panelStyle, left: anchor?.left ?? 0, top: anchor?.top ?? 0 }}
+                style={{
+                  ...panelStyle,
+                  left: anchor?.left ?? 0,
+                  top: anchor?.top ?? 'auto',
+                  bottom: anchor?.bottom ?? 'auto',
+                }}
                 // portal 仍在 WhiteboardView 的 React 树里：面板上的 Delete 会一路冒泡到视图的
                 // 全局快捷键，把正在上色的图元删掉。这里把它吃掉。
                 onKeyDown={(event) => {

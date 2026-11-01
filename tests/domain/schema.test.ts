@@ -201,6 +201,42 @@ describe('VaultSchema', () => {
   })
 })
 
+describe('T73 · NoteDoc 的可选属性', () => {
+  const doc = (extra: Record<string, unknown>) => ({
+    id: 'doc-1',
+    notebookId: 'nb-1',
+    parentId: null,
+    title: '周会纪要',
+    content: '正文',
+    order: 'U',
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...extra,
+  })
+
+  it('tags / taskIds 缺省即可（老库不需要补这两个键）', () => {
+    const vault = makeVault({ noteDocs: [doc({})] })
+    const parsed = VaultSchema.parse(JSON.parse(JSON.stringify(vault)))
+    expect(parsed.noteDocs[0]?.tags).toBeUndefined()
+    expect(parsed.noteDocs[0]?.taskIds).toBeUndefined()
+    // 关键：解析不会给老库塞默认值（否则「打开再保存」会让文件逐字节变化）
+    expect(JSON.stringify(parsed.noteDocs[0])).not.toContain('"tags"')
+  })
+
+  it('给了就原样保留', () => {
+    const vault = makeVault({ noteDocs: [doc({ tags: ['周会', '支付'], taskIds: ['task-1'] })] })
+    const parsed = VaultSchema.parse(JSON.parse(JSON.stringify(vault)))
+    expect(parsed.noteDocs[0]?.tags).toEqual(['周会', '支付'])
+    expect(parsed.noteDocs[0]?.taskIds).toEqual(['task-1'])
+  })
+
+  it('taskIds 里的空串会被拒（那不是合法 id）', () => {
+    expect(() =>
+      VaultSchema.parse(makeVault({ noteDocs: [doc({ taskIds: [''] })] })),
+    ).toThrow(z.ZodError)
+  })
+})
+
 describe('needsMigration', () => {
   it('当前版本无需迁移', () => {
     expect(needsMigration(makeVault())).toBe(false)
@@ -315,5 +351,151 @@ describe('migrate', () => {
       },
     ] })
     expect(vault.mindmaps[0]!.root.children[0]!.folded).toBe(true)
+  })
+})
+
+// T74 · 白板的图片图元：`shape: 'image'` + `image: 'assets/<id>.<ext>'`。
+// 两条红线：① 只放行 assets 根目录下的文件名（外链 / 子目录会让 gc 的引用扫描失效）；
+// ② 没有图片的老节点解析后**不长出 image 键**，否则老库打开再保存就多出字段。
+describe('T74 · 白板图片图元', () => {
+  function boardWith(node: Record<string, unknown>): Vault {
+    return makeVault({
+      whiteboards: [
+        {
+          id: 'w1',
+          name: '板',
+          order: 'U',
+          nodes: [node as never],
+          edges: [],
+          createdAt: NOW,
+          updatedAt: NOW,
+        },
+      ],
+    })
+  }
+
+  function imageNode(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      id: 'n1',
+      shape: 'image',
+      x: 0,
+      y: 0,
+      width: 320,
+      height: 200,
+      text: 'shot.png',
+      tone: 'plain',
+      image: 'assets/abc123.png',
+      ...overrides,
+    }
+  }
+
+  it('接受 image 形状与 assets 引用', () => {
+    const parsed = VaultSchema.parse(boardWith(imageNode()))
+    expect(parsed.whiteboards[0]!.nodes[0]!.image).toBe('assets/abc123.png')
+    expect(parsed.whiteboards[0]!.nodes[0]!.shape).toBe('image')
+  })
+
+  it('外链与子目录被拒（引用扫描只认 assets/ 根目录）', () => {
+    for (const bad of ['https://example.com/a.png', 'assets/sub/a.png', 'assets/', 'data:image/png;base64,xx']) {
+      expect(() => VaultSchema.parse(boardWith(imageNode({ image: bad })))).toThrow()
+    }
+  })
+
+  it('不带 image 的普通图元：解析后对象上没有这个键', () => {
+    const parsed = VaultSchema.parse(boardWith({ id: 'n2', shape: 'rect', x: 0, y: 0, width: 120, height: 60, text: '', tone: 'plain' }))
+    const node = parsed.whiteboards[0]!.nodes[0]!
+    expect(Object.prototype.hasOwnProperty.call(node, 'image')).toBe(false)
+    expect(JSON.stringify(node)).not.toContain('"image"')
+  })
+})
+
+// T75 · 字号：可选、整数、8..96。范围比档位表（10..80）宽一点——手改过库的人写 17
+// 该照原样画出来；小数一律拒（半像素字号会让同一批图元看起来「莫名不一致」）。
+describe('T75 · 白板字号', () => {
+  function boardWith(node: Record<string, unknown>): Vault {
+    return makeVault({
+      whiteboards: [
+        {
+          id: 'w1',
+          name: '板',
+          order: 'U',
+          nodes: [node as never],
+          edges: [],
+          createdAt: NOW,
+          updatedAt: NOW,
+        },
+      ],
+    })
+  }
+
+  function nodeWith(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return { id: 'n1', shape: 'rect', x: 0, y: 0, width: 120, height: 60, text: '服务', tone: 'plain', ...overrides }
+  }
+
+  it('接受范围内的整数，原样保留', () => {
+    for (const size of [8, 13, 17, 32, 96]) {
+      const parsed = VaultSchema.parse(boardWith(nodeWith({ fontSize: size })))
+      expect(parsed.whiteboards[0]!.nodes[0]!.fontSize).toBe(size)
+    }
+  })
+
+  it('拒绝小数、越界与非数字', () => {
+    for (const bad of [13.5, 7, 97, '13', null]) {
+      expect(() => VaultSchema.parse(boardWith(nodeWith({ fontSize: bad })))).toThrow()
+    }
+  })
+
+  it('没写 fontSize 的图元：解析后对象上没有这个键（老库逐字节不变）', () => {
+    const parsed = VaultSchema.parse(boardWith(nodeWith()))
+    const node = parsed.whiteboards[0]!.nodes[0]!
+    expect(Object.prototype.hasOwnProperty.call(node, 'fontSize')).toBe(false)
+    expect(JSON.stringify(node)).not.toContain('fontSize')
+  })
+})
+
+// T77 · 字效与图片贴合：三个字段都是可选、无 .default。
+// 老库打开再保存必须逐字节不变，这一条由「键根本不出现」来保证，不是靠默认值补齐。
+describe('T77 · 白板字效与图片贴合', () => {
+  function boardWith(node: Record<string, unknown>): Vault {
+    return makeVault({
+      whiteboards: [
+        { id: 'w1', name: '板', order: 'U', nodes: [node as never], edges: [], createdAt: NOW, updatedAt: NOW },
+      ],
+    })
+  }
+
+  function nodeWith(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return { id: 'n1', shape: 'text', x: 0, y: 0, width: 120, height: 60, text: '标题', tone: 'plain', ...overrides }
+  }
+
+  it('bold / italic / imageFit 原样保留', () => {
+    const parsed = VaultSchema.parse(boardWith(nodeWith({ bold: true, italic: true, imageFit: 'cover' })))
+    const node = parsed.whiteboards[0]!.nodes[0]!
+    expect(node.bold).toBe(true)
+    expect(node.italic).toBe(true)
+    expect(node.imageFit).toBe('cover')
+  })
+
+  it('只写一个也不影响另外两个', () => {
+    const parsed = VaultSchema.parse(boardWith(nodeWith({ bold: false })))
+    const node = parsed.whiteboards[0]!.nodes[0]!
+    expect(node.bold).toBe(false)
+    expect(node.italic).toBeUndefined()
+    expect(node.imageFit).toBeUndefined()
+  })
+
+  it('imageFit 只认 contain / cover，其余一律拒', () => {
+    for (const bad of ['fill', 'none', '', true, null]) {
+      expect(() => VaultSchema.parse(boardWith(nodeWith({ imageFit: bad })))).toThrow()
+    }
+  })
+
+  it('没写这三个字段的图元：解析后对象上连键都没有（老库逐字节不变）', () => {
+    const node = VaultSchema.parse(boardWith(nodeWith())).whiteboards[0]!.nodes[0]!
+    for (const key of ['bold', 'italic', 'imageFit']) {
+      expect(Object.prototype.hasOwnProperty.call(node, key)).toBe(false)
+    }
+    const json = JSON.stringify(node)
+    for (const key of ['bold', 'italic', 'imageFit']) expect(json).not.toContain(key)
   })
 })

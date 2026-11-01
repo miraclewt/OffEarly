@@ -24,6 +24,7 @@ test('probe notebook widths', async ({ page }) => {
     [2560, 1440, '2560'],
     [1920, 1080, '1920'],
     [1440, 900, '1440'],
+    [1080, 800, '1080'],
   ] as const) {
     await page.setViewportSize({ width: w, height: h })
     await openAppWith(page, loadExampleVaultFs())
@@ -46,7 +47,6 @@ test('probe notebook widths', async ({ page }) => {
         innerWidth: window.innerWidth,
         shell: q('#root > div'),
         sidebar: q('#root > div > div:first-child > aside'),
-        books: q('[data-testid="notebook-books-pane"]'),
         tree: q('[data-testid="notebook-tree-pane"]'),
         main: q('[data-testid="notebook"] main'),
         outline: q('[data-testid="notebook-outline-panel"]'),
@@ -57,5 +57,13 @@ test('probe notebook widths', async ({ page }) => {
     })
     console.log(`[${tag}] ${JSON.stringify(m)}`)
     await page.screenshot({ path: join(OUT, `t68-notebook-${tag}.png`) })
+
+    // T72 · 笔记本切换器展开态：窄屏下菜单是否贴住栏宽、有没有被裁
+    if (tag === '1080') {
+      await page.getByTestId('notebook-switcher').click()
+      await page.waitForTimeout(200)
+      await page.screenshot({ path: join(OUT, 't72-notebook-switcher-1080.png') })
+      await page.mouse.click(760, 520)
+    }
   }
 })

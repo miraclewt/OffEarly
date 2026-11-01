@@ -234,7 +234,7 @@ describe('批量 patch', () => {
 describe('模板', () => {
   it('贴模板：相对坐标偏移到落点，连线按下标接上真 id', () => {
     const { store, bus } = mount({ ...baseVault(), whiteboards: [whiteboard('b1')] })
-    expect(applyAddTemplate(bus, store.getVault(), 'b1', 'architecture', { x: 100, y: 50 }, {}, { newId: seqIds('t') })).toBe(true)
+    expect(applyAddTemplate(bus, store.getVault(), 'b1', 'architecture', { x: 100, y: 50 }, {}, { newId: seqIds('t') })).toHaveLength(11)
     const current = store.getVault().whiteboards[0]!
     expect(current.nodes.length).toBe(11)
     expect(current.edges.length).toBe(6)
@@ -252,7 +252,7 @@ describe('模板', () => {
   it('四个模板都能落地且都有内容', () => {
     for (const templateId of ['architecture', 'flow', 'quadrant', 'radial'] as const) {
       const { store, bus } = mount({ ...baseVault(), whiteboards: [whiteboard('b1')] })
-      expect(applyAddTemplate(bus, store.getVault(), 'b1', templateId, { x: 0, y: 0 }, {}, { newId: seqIds() })).toBe(true)
+      expect(applyAddTemplate(bus, store.getVault(), 'b1', templateId, { x: 0, y: 0 }, {}, { newId: seqIds() })).not.toHaveLength(0)
       expect(store.getVault().whiteboards[0]!.nodes.length).toBeGreaterThan(2)
     }
   })
@@ -332,5 +332,145 @@ describe('自定义色（T70）', () => {
     expect(store.getVault().whiteboards[0]!.nodes[0]!.fill).toBe('#EF4444')
     bus.undo()
     expect(store.getVault().whiteboards[0]!.nodes[0]!.fill).toBe('#FEF3C7')
+  })
+})
+
+// T75 · 字号也是「一次动作一条撤销项」，而且撤销要能回到**默认**——
+// 所以逆元对 fontSize 用的是 null（删键），不是一个凑出来的 13。
+describe('字号（T75）', () => {
+  it('调到 32 之后 undo：键消失，回到形状默认', () => {
+    const { store, bus } = mount({ ...baseVault(), whiteboards: [whiteboard('b1', [node('n1')])] })
+    expect(applyPatchNodes(bus, store.getVault(), 'b1', [{ id: 'n1', patch: { fontSize: 32 } }])).toBe(true)
+    expect(store.getVault().whiteboards[0]!.nodes[0]!.fontSize).toBe(32)
+
+    bus.undo()
+    const restored = store.getVault().whiteboards[0]!.nodes[0]!
+    expect(restored.fontSize).toBeUndefined()
+    // 不是留一个 fontSize: null 的键（schema 会拒，整库打不开）
+    expect('fontSize' in restored).toBe(false)
+  })
+
+  it('从 20 改到 48，undo 只回到 20，不是一路清空', () => {
+    const { store, bus } = mount({ ...baseVault(), whiteboards: [whiteboard('b1', [node('n1', { fontSize: 20 })])] })
+    applyPatchNodes(bus, store.getVault(), 'b1', [{ id: 'n1', patch: { fontSize: 48 } }])
+    expect(store.getVault().whiteboards[0]!.nodes[0]!.fontSize).toBe(48)
+
+    bus.undo()
+    expect(store.getVault().whiteboards[0]!.nodes[0]!.fontSize).toBe(20)
+  })
+
+  it('清除字号（fontSize: null）后 undo 能把原字号还回来', () => {
+    const { store, bus } = mount({ ...baseVault(), whiteboards: [whiteboard('b1', [node('n1', { fontSize: 28 })])] })
+    expect(applyPatchNodes(bus, store.getVault(), 'b1', [{ id: 'n1', patch: { fontSize: null } }])).toBe(true)
+    expect('fontSize' in store.getVault().whiteboards[0]!.nodes[0]!).toBe(false)
+
+    bus.undo()
+    expect(store.getVault().whiteboards[0]!.nodes[0]!.fontSize).toBe(28)
+  })
+
+  it('多选调字号是一条撤销项（两个框一起回去）', () => {
+    const { store, bus } = mount({ ...baseVault(), whiteboards: [whiteboard('b1', [node('n1'), node('n2')])] })
+    const patches = ['n1', 'n2'].map((id) => ({ id, patch: { fontSize: 24 } }))
+    expect(applyPatchNodes(bus, store.getVault(), 'b1', patches)).toBe(true)
+    expect(store.getVault().whiteboards[0]!.nodes.map((item) => item.fontSize)).toEqual([24, 24])
+
+    bus.undo()
+    expect(store.getVault().whiteboards[0]!.nodes.map((item) => item.fontSize)).toEqual([undefined, undefined])
+  })
+})
+
+// T77 · 加粗 / 斜体 / 图片贴合：与字号完全同一条口径——`null` 是删除键，
+// 所以「点亮 → 取消」之后节点回到原样，撤销也能干净地退回上一态。
+describe('字效与图片贴合（T77）', () => {
+  it('加粗之后 undo：键消失，不是留一个 bold: false', () => {
+    const { store, bus } = mount({ ...baseVault(), whiteboards: [whiteboard('b1', [node('n1')])] })
+    expect(applyPatchNodes(bus, store.getVault(), 'b1', [{ id: 'n1', patch: { bold: true } }])).toBe(true)
+    expect(store.getVault().whiteboards[0]!.nodes[0]!.bold).toBe(true)
+
+    bus.undo()
+    const restored = store.getVault().whiteboards[0]!.nodes[0]!
+    expect(restored.bold).toBeUndefined()
+    expect('bold' in restored).toBe(false)
+  })
+
+  it('取消加粗（bold: null）删键，undo 把 true 还回来', () => {
+    const { store, bus } = mount({
+      ...baseVault(),
+      whiteboards: [whiteboard('b1', [node('n1', { bold: true, italic: true })])],
+    })
+    expect(applyPatchNodes(bus, store.getVault(), 'b1', [{ id: 'n1', patch: { bold: null } }])).toBe(true)
+    const cleared = store.getVault().whiteboards[0]!.nodes[0]!
+    expect('bold' in cleared).toBe(false)
+    // 只动 bold，斜体不受牵连
+    expect(cleared.italic).toBe(true)
+
+    bus.undo()
+    expect(store.getVault().whiteboards[0]!.nodes[0]!.bold).toBe(true)
+  })
+
+  it('图片切到铺满（cover）后 undo 回到 contain（键消失）', () => {
+    const { store, bus } = mount({
+      ...baseVault(),
+      whiteboards: [whiteboard('b1', [node('n1', { shape: 'image', image: 'assets/a.png' })])],
+    })
+    expect(applyPatchNodes(bus, store.getVault(), 'b1', [{ id: 'n1', patch: { imageFit: 'cover' } }])).toBe(true)
+    expect(store.getVault().whiteboards[0]!.nodes[0]!.imageFit).toBe('cover')
+
+    bus.undo()
+    expect('imageFit' in store.getVault().whiteboards[0]!.nodes[0]!).toBe(false)
+  })
+
+  it('替换图片只改引用与文件名，位置尺寸原样', () => {
+    const { store, bus } = mount({
+      ...baseVault(),
+      whiteboards: [
+        whiteboard('b1', [node('n1', { shape: 'image', image: 'assets/old.png', text: 'old.png', x: 40, y: 60, width: 200, height: 120 })]),
+      ],
+    })
+    expect(
+      applyPatchNodes(bus, store.getVault(), 'b1', [{ id: 'n1', patch: { image: 'assets/new.png', text: 'new.png' } }]),
+    ).toBe(true)
+    const replaced = store.getVault().whiteboards[0]!.nodes[0]!
+    expect(replaced.image).toBe('assets/new.png')
+    expect(replaced.text).toBe('new.png')
+    expect([replaced.x, replaced.y, replaced.width, replaced.height]).toEqual([40, 60, 200, 120])
+
+    bus.undo()
+    expect(store.getVault().whiteboards[0]!.nodes[0]!.image).toBe('assets/old.png')
+  })
+})
+
+// T76 · 新增图元要能回传 id。
+// 视图层得靠它选中「刚建出来的那个」——以前只回 boolean，新建的文本图元既没选中、
+// 也没进编辑态，用户看到的是「点了文本按钮，什么都没出现」。
+describe('新增图元返回 id（T76）', () => {
+  it('返回新节点 id，顺序与草稿一致', () => {
+    const { store, bus } = mount({ ...baseVault(), whiteboards: [whiteboard('b1')] })
+    const ids = applyAddDrafts(
+      bus,
+      store.getVault(),
+      'b1',
+      [
+        { shape: 'text', x: 0, y: 0, text: '' },
+        { shape: 'rect', x: 100, y: 0, text: 'A' },
+      ],
+      [],
+      { newId: seqIds('y') },
+    )
+    expect(ids).toEqual(['y1', 'y2'])
+    expect(store.getVault().whiteboards[0]!.nodes.map((item) => item.id)).toEqual(['y1', 'y2'])
+  })
+
+  it('板不存在：空数组、零写入、不进撤销栈', () => {
+    const { store, bus } = mount({ ...baseVault(), whiteboards: [whiteboard('b1')] })
+    expect(applyAddDrafts(bus, store.getVault(), 'nope', [{ shape: 'rect', x: 0, y: 0 }])).toEqual([])
+    expect(store.getVault().whiteboards[0]!.nodes).toHaveLength(0)
+    expect(bus.undoDepth()).toBe(0)
+  })
+
+  it('空草稿：空数组，且不写一条「什么都没加」的撤销项', () => {
+    const { store, bus } = mount({ ...baseVault(), whiteboards: [whiteboard('b1')] })
+    expect(applyAddDrafts(bus, store.getVault(), 'b1', [])).toEqual([])
+    expect(bus.undoDepth()).toBe(0)
   })
 })

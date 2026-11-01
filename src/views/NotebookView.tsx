@@ -28,6 +28,8 @@ import {
   applyMoveDoc,
   applyRenameNotebook,
   applySaveDocContent,
+  applySetDocTags,
+  applyToggleDocTask,
 } from '../controllers/notebookActions'
 import type { NotebookActionDeps } from '../controllers/notebookActions'
 import { applyTrashDoc } from '../controllers/trashActions'
@@ -51,6 +53,8 @@ import { Icon } from './IconSprite'
 import { NoteEditor } from './NoteEditor'
 import type { NoteAssetsPort, NoteLinkTarget } from './NoteEditor'
 import { NotePresenter } from './NotePresenter'
+import { NoteProperties } from './NoteProperties'
+import type { NotePropertyTask } from './NoteProperties'
 import { MeetingImportPanel } from './MeetingImportPanel'
 import {
   buildExportHtml,
@@ -164,13 +168,16 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
   const [docId, setDocId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   /**
-   * T51 · 左两栏的折叠态（笔记本栏 / 文档树）：纯 UI 态，不进 vault、不进撤销栈——
+   * T51 · 文档树的折叠态：纯 UI 态，不进 vault、不进撤销栈——
    * 它描述的是「界面现在怎么摆」，不是「库里有什么」。与甘特左侧任务表（T39）同一口径：
    * 收起后只留一条 30px 竖轨，**展开入口就在竖轨上**（面板头部的按钮跟着面板一起消失，
    * 所以竖轨自身必须是可点的按钮，否则收起就成了单向操作）。
+   *
+   * T72 · 笔记本栏不再是独立一列，收起的对象只剩文档树；笔记本改由头部切换器托管。
    */
-  const [booksOpen, setBooksOpen] = useState(true)
   const [treeOpen, setTreeOpen] = useState(true)
+  /** T72 · 笔记本切换器菜单：纯 UI 态，点外面即关。 */
+  const [navOpen, setNavOpen] = useState(false)
   /**
    * T68 · 两栏宽度跟着界面尺度走（宽屏富余的横向空间分给列表，而不是全留给正文两侧的空白）。
    * 只在跨档时变一次，因此不会在拖窗口时每帧重排。
@@ -189,6 +196,12 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
   const [exportMenu, setExportMenu] = useState(false)
   /** T58 · 右侧阅读辅助栏（大纲 + 反向链接）。纯视图态，不落盘。 */
   const [outlineOpen, setOutlineOpen] = useState(false)
+  /**
+   * T73 · 用户是否亲手动过大纲开关。
+   * 动过之后就不再「自动展开」——自动行为只能在用户还没表态时替他做决定，
+   * 否则他刚关掉、切一篇文档又弹回来。
+   */
+  const outlineTouchedRef = useRef(false)
   const [exporting, setExporting] = useState<ExportKind | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   /** T62 · 会议导入浮层：纯 UI 态，不落盘（与导出菜单同口径）。 */
@@ -263,9 +276,44 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
     [activeDoc, vault.noteDocs],
   )
 
+  // T73 · 属性行。关联任务按文档里记的顺序解析（id → 任务）；任务被删掉的 id 直接跳过，
+  // 候选池则排除已经挂上的，免得下拉里出现「点了没反应」的重复项。
+  const linkedTasks = useMemo<NotePropertyTask[]>(() => {
+    const ids = activeDoc?.taskIds ?? []
+    if (ids.length === 0) return []
+    const byId = new Map(vault.tasks.map((task) => [task.id, task]))
+    const out: NotePropertyTask[] = []
+    for (const id of ids) {
+      const task = byId.get(id)
+      if (task !== undefined) out.push({ id: task.id, title: task.title, status: task.status })
+    }
+    return out
+  }, [activeDoc, vault.tasks])
+
+  const candidateTasks = useMemo<NotePropertyTask[]>(() => {
+    const linked = new Set(activeDoc?.taskIds ?? [])
+    return vault.tasks
+      .filter((task) => !linked.has(task.id))
+      .map((task) => ({ id: task.id, title: task.title, status: task.status }))
+  }, [activeDoc, vault.tasks])
+
+  /**
+   * T73 · 宽屏上自动展开大纲。
+   *
+   * 为什么不是「一律默认展开」：刚做的布局瘦身把正文从 436 拉到 633，右栏一开又还回去——
+   * 1080 宽的窗口上大纲栏只有 200px，正文会被挤到没法读。所以只在
+   * 「窗口够宽（≥1500）+ 这篇文档确实有 ≥3 个标题」时替用户展开一次；
+   * 用户自己点过开关之后就不再干预。
+   */
+  useEffect(() => {
+    if (outlineTouchedRef.current) return
+    if (activeDoc === undefined) return
+    const width = typeof window === 'undefined' ? 0 : window.innerWidth
+    setOutlineOpen(width >= OUTLINE_AUTO_OPEN_WIDTH && outline.length >= OUTLINE_AUTO_OPEN_HEADINGS)
+  }, [activeDoc, outline.length])
+
   /** 点大纲跳到编辑器里第 index 个标题；找不到就静默不动（正文可能刚被改短）。 */
-  function jumpToHeading(index: number): void {
-    const root = document.querySelector('[data-testid="note-editor-content"]')
+  function jumpToHeading(index: number): void {    const root = document.querySelector('[data-testid="note-editor-content"]')
     if (root === null) return
     const headings = root.querySelectorAll('h1, h2, h3, h4, h5, h6')
     headings[index]?.scrollIntoView({ block: 'start', behavior: 'smooth' })
@@ -431,6 +479,7 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
     setNotebookId(id)
     setDocId(null)
     setEditing(null)
+    setNavOpen(false)
   }
 
   function createDoc(parentId: string | null): void {
@@ -486,6 +535,19 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
     applyDeleteNotebook(bus, vault, id)
     setNotebookId(null)
     setDocId(null)
+  }
+
+  /**
+   * T73 · 属性行的写入。三个动作都走控制器：规格化 + 零写入短路 + 进撤销栈。
+   * 空值一律落成「没有这个键」，所以把标签删光、把任务全取消之后，
+   * 文档在 vault.json 里回到加这个功能之前的样子。
+   */
+  function setDocTags(doc: NoteDoc, next: readonly string[]): void {
+    applySetDocTags(bus, vault, doc.id, next, deps)
+  }
+
+  function toggleDocTask(doc: NoteDoc, taskId: string): void {
+    applyToggleDocTask(bus, vault, doc.id, taskId, deps)
   }
 
   function handleLinkNavigate(_title: string, matches: readonly NoteLinkTarget[]): void {
@@ -549,136 +611,31 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
 
   return (
     <div data-testid="notebook" style={ROOT}>
-      {/* ① 笔记本：可收起（T51）——收起后留竖轨，正文能多吃 176px 宽 */}
-      {booksOpen ? (
-        <aside data-testid="notebook-books-pane" style={{ ...PANE_NOTEBOOKS, ...paneWidth(panes.books) }}>
+      {/* ② 文档树：T72 起，笔记本切换器也挂在这条头部上，不再单独占一列 */}
+      {treeOpen ? (
+        <aside
+          data-testid="notebook-tree-pane"
+          style={{ ...PANE_TREE, position: 'relative', ...paneWidth(panes.tree) }}
+        >
           <div style={PANE_HEAD}>
-            <span style={PANE_TITLE}>{t('notebook.title')}</span>
             <button
               type="button"
-              data-testid="notebook-add"
-              aria-label={t('notebook.create')}
-              title={t('notebook.create')}
-              onClick={() => setEditing({ kind: 'notebook-create' })}
-              style={ICON_BUTTON}
+              data-testid="notebook-switcher"
+              aria-haspopup="menu"
+              aria-expanded={navOpen}
+              aria-label={t('notebook.switchNotebook')}
+              title={t('notebook.switchNotebook')}
+              onClick={() => setNavOpen((open) => !open)}
+              style={navOpen ? { ...SWITCHER, ...SWITCHER_OPEN } : SWITCHER}
             >
-              <Icon name="plus" size={13} />
+              <span style={{ display: 'flex', flex: '0 0 auto', color: INDIGO }}>
+                <Icon name="notebook" size={13} />
+              </span>
+              <span style={ELLIPSIS}>{activeNotebook?.name ?? ''}</span>
+              <span style={{ display: 'flex', flex: '0 0 auto', color: FAINT }}>
+                <Icon name="chevron" size={11} />
+              </span>
             </button>
-            <PaneToggle
-              testId="notebook-books-collapse"
-              label={t('notebook.collapseBooks')}
-              onCollapse={() => setBooksOpen(false)}
-            />
-          </div>
-
-          <div role="list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: px('0 6px 8px') }}>
-            {notebooks.map((notebook) => {
-              const active = notebook.id === activeNotebook?.id
-              const rowId = `nb:${notebook.id}`
-              return (
-                <div key={notebook.id}>
-                  {editing !== null && editing.kind === 'notebook' && editing.id === notebook.id ? (
-                    <InlineInput
-                      testId="notebook-name-input"
-                      ariaLabel={t('notebook.rename')}
-                      initial={notebook.name}
-                      onCommit={(value) => {
-                        setEditing(null)
-                        if (value.trim() !== '') applyRenameNotebook(bus, vault, notebook.id, value, deps)
-                      }}
-                      onCancel={() => setEditing(null)}
-                    />
-                  ) : (
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      data-testid={`notebook-row-${notebook.id}`}
-                      aria-current={active ? 'true' : undefined}
-                      title={notebook.name}
-                      onMouseEnter={() => setHover(rowId)}
-                      onMouseLeave={() => setHover((current) => (current === rowId ? null : current))}
-                      onClick={() => {
-                        setNotebookId(notebook.id)
-                        setDocId(null)
-                      }}
-                      onDoubleClick={() => setEditing({ kind: 'notebook', id: notebook.id })}
-                      onKeyDown={(event) => {
-                        if (event.key !== 'Enter' && event.key !== ' ') return
-                        event.preventDefault()
-                        setNotebookId(notebook.id)
-                        setDocId(null)
-                      }}
-                      style={{ ...NB_ROW, ...(hover === rowId && !active ? { background: ROW_HOVER } : null), ...(active ? NB_ROW_ACTIVE : null) }}
-                    >
-                      <span style={{ display: 'flex', flex: '0 0 auto', color: active ? INDIGO : FAINT }}>
-                        <Icon name="notebook" size={14} />
-                      </span>
-                      <span style={ELLIPSIS}>{notebook.name}</span>
-                      {hover === rowId || active ? (
-                        <span style={{ display: 'flex', gap: sp(2), flex: '0 0 auto' }}>
-                          <button
-                            type="button"
-                            data-testid={`notebook-rename-${notebook.id}`}
-                            aria-label={t('notebook.rename')}
-                            title={t('notebook.rename')}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              setEditing({ kind: 'notebook', id: notebook.id })
-                            }}
-                            style={ROW_ACTION}
-                          >
-                            <Icon name="pencil" size={11} />
-                          </button>
-                          <button
-                            type="button"
-                            data-testid={`notebook-delete-${notebook.id}`}
-                            aria-label={isArmed(rowId) ? t('notebook.confirmDelete') : t('notebook.delete')}
-                            title={isArmed(rowId) ? t('notebook.confirmDelete') : t('notebook.delete')}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              armOrRun(rowId, () => deleteNotebook(notebook.id))
-                            }}
-                            style={{ ...ROW_ACTION, ...(isArmed(rowId) ? { color: DANGER } : null) }}
-                          >
-                            <Icon name={isArmed(rowId) ? 'close' : 'trash'} size={11} />
-                          </button>
-                        </span>
-                      ) : (
-                        <span style={{ ...COUNT, flex: '0 0 auto' }}>{counts.get(notebook.id) ?? 0}</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-
-            {editing !== null && editing.kind === 'notebook-create' ? (
-              <InlineInput
-                testId="notebook-name-input"
-                ariaLabel={t('notebook.namePlaceholder')}
-                initial=""
-                placeholder={t('notebook.namePlaceholder')}
-                onCommit={createNotebook}
-                onCancel={() => setEditing(null)}
-              />
-            ) : null}
-          </div>
-        </aside>
-      ) : (
-        <PaneRail
-          testId="notebook-books-rail"
-          label={t('notebook.title')}
-          hint={t('notebook.expandBooks')}
-          background="var(--oe-material-sidebar)"
-          onExpand={() => setBooksOpen(true)}
-        />
-      )}
-
-      {/* ② 文档树：同样可收起 */}
-      {treeOpen ? (
-        <aside data-testid="notebook-tree-pane" style={{ ...PANE_TREE, ...paneWidth(panes.tree) }}>
-          <div style={PANE_HEAD}>
-            <span style={{ ...PANE_TITLE, ...ELLIPSIS }}>{activeNotebook?.name ?? ''}</span>
             <span style={COUNT}>{notebookDocs.length}</span>
             <button
               type="button"
@@ -706,6 +663,125 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
               onCollapse={() => setTreeOpen(false)}
             />
           </div>
+
+          {/* T72 · 笔记本菜单：切换 / 重命名 / 删除 / 新建全在这里，替代原来独立的一列 */}
+          {navOpen ? (
+            <>
+              <div
+                data-testid="notebook-switcher-backdrop"
+                onMouseDown={() => setNavOpen(false)}
+                style={MENU_BACKDROP}
+              />
+              <div role="menu" data-testid="notebook-switcher-menu" aria-label={t('notebook.title')} style={NAV_MENU}>
+                <div style={NAV_SECTION}>{t('notebook.title')}</div>
+                <div style={{ display: 'grid', gap: sp(2), maxHeight: sp(240), overflowY: 'auto' }}>
+                  {notebooks.map((notebook) => {
+                    const active = notebook.id === activeNotebook?.id
+                    const rowId = `nbm:${notebook.id}`
+                    return (
+                      <div key={notebook.id}>
+                        {editing !== null && editing.kind === 'notebook' && editing.id === notebook.id ? (
+                          <InlineInput
+                            testId="notebook-name-input"
+                            ariaLabel={t('notebook.rename')}
+                            initial={notebook.name}
+                            onCommit={(value) => {
+                              setEditing(null)
+                              setNavOpen(false)
+                              if (value.trim() !== '') applyRenameNotebook(bus, vault, notebook.id, value, deps)
+                            }}
+                            onCancel={() => setEditing(null)}
+                          />
+                        ) : (
+                          <div
+                            role="menuitem"
+                            tabIndex={0}
+                            data-testid={`notebook-row-${notebook.id}`}
+                            aria-current={active ? 'true' : undefined}
+                            title={notebook.name}
+                            onMouseEnter={() => setHover(rowId)}
+                            onMouseLeave={() => setHover((current) => (current === rowId ? null : current))}
+                            onClick={() => {
+                              setNotebookId(notebook.id)
+                              setDocId(null)
+                              setNavOpen(false)
+                            }}
+                            onDoubleClick={() => setEditing({ kind: 'notebook', id: notebook.id })}
+                            onKeyDown={(event) => {
+                              if (event.key !== 'Enter' && event.key !== ' ') return
+                              event.preventDefault()
+                              setNotebookId(notebook.id)
+                              setDocId(null)
+                              setNavOpen(false)
+                            }}
+                            style={{ ...NB_ROW, ...(hover === rowId && !active ? { background: ROW_HOVER } : null), ...(active ? NB_ROW_ACTIVE : null) }}
+                          >
+                            <span style={{ display: 'flex', flex: '0 0 auto', color: active ? INDIGO : FAINT }}>
+                              <Icon name="notebook" size={14} />
+                            </span>
+                            <span style={ELLIPSIS}>{notebook.name}</span>
+                            {hover === rowId || active ? (
+                              <span style={{ display: 'flex', gap: sp(2), flex: '0 0 auto' }}>
+                                <button
+                                  type="button"
+                                  data-testid={`notebook-rename-${notebook.id}`}
+                                  aria-label={t('notebook.rename')}
+                                  title={t('notebook.rename')}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    setEditing({ kind: 'notebook', id: notebook.id })
+                                  }}
+                                  style={ROW_ACTION}
+                                >
+                                  <Icon name="pencil" size={11} />
+                                </button>
+                                <button
+                                  type="button"
+                                  data-testid={`notebook-delete-${notebook.id}`}
+                                  aria-label={isArmed(rowId) ? t('notebook.confirmDelete') : t('notebook.delete')}
+                                  title={isArmed(rowId) ? t('notebook.confirmDelete') : t('notebook.delete')}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    armOrRun(rowId, () => deleteNotebook(notebook.id))
+                                  }}
+                                  style={{ ...ROW_ACTION, ...(isArmed(rowId) ? { color: DANGER } : null) }}
+                                >
+                                  <Icon name={isArmed(rowId) ? 'close' : 'trash'} size={11} />
+                                </button>
+                              </span>
+                            ) : (
+                              <span style={{ ...COUNT, flex: '0 0 auto' }}>{counts.get(notebook.id) ?? 0}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+                <div style={NAV_DIVIDER} />
+                {editing !== null && editing.kind === 'notebook-create' ? (
+                  <InlineInput
+                    testId="notebook-name-input"
+                    ariaLabel={t('notebook.namePlaceholder')}
+                    initial=""
+                    placeholder={t('notebook.namePlaceholder')}
+                    onCommit={createNotebook}
+                    onCancel={() => setEditing(null)}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    data-testid="notebook-add"
+                    onClick={() => setEditing({ kind: 'notebook-create' })}
+                    style={NAV_CREATE}
+                  >
+                    <Icon name="plus" size={12} />
+                    <span>{t('notebook.create')}</span>
+                  </button>
+                )}
+              </div>
+            </>
+          ) : null}
 
           <div style={{ padding: px('0 8px 6px') }}>
             <div style={SEARCH_BOX}>
@@ -805,6 +881,10 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
               // 用 margin auto 居中，而不是靠左留一条空右边。
               maxWidth: sp(NOTE_READING_WIDTH),
               width: '100%',
+              // T72 · 补上 border-box：全站没有全局 `box-sizing`，而这里同时有 width:100%
+              // 和左右各 16px 的内边距。窄窗口下正文列会因此比可用宽度多出 32px，
+              // 右缘的「导出」按钮与底部字数被直接裁掉——正文越宽越看不出，越窄越明显。
+              boxSizing: 'border-box',
               margin: '0 auto',
             }}
           >
@@ -828,14 +908,17 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
                 {t('notebook.updatedAt', { date: activeDoc.updatedAt.slice(0, 10) })}
               </span>
               {/* T50：导出入库。菜单挂在按钮下方，backdrop 负责「点外面就关」。 */}
-              {/* T58：大纲 + 反向链接是一个可选右栏，默认收起——阅读时它不该占宽 */}
+              {/* T58：大纲 + 反向链接是一个可选右栏；T73 起带计数徽标，并在宽屏上自动展开 */}
               <button
                 type="button"
                 data-testid="notebook-outline-toggle"
                 aria-pressed={outlineOpen}
                 aria-label={t('notebook.outline')}
                 title={t('notebook.outline')}
-                onClick={() => setOutlineOpen((open) => !open)}
+                onClick={() => {
+                  outlineTouchedRef.current = true
+                  setOutlineOpen((open) => !open)
+                }}
                 style={
                   outlineOpen
                     ? { ...EXPORT_BUTTON, color: INDIGO, background: 'var(--oe-accent-tint)' }
@@ -843,6 +926,14 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
                 }
               >
                 <Icon name="outline" size={12} />
+                {outline.length === 0 ? null : (
+                  <span
+                    data-testid="notebook-outline-count"
+                    style={{ ...OUTLINE_BADGE, ...(outlineOpen ? OUTLINE_BADGE_ON : null) }}
+                  >
+                    {outline.length}
+                  </span>
+                )}
               </button>
               {/* T64 · 展示模式：按二级标题一页一页地看（只读浮层，不写库） */}
               <button
@@ -941,6 +1032,24 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
                 }
               }}
               style={TITLE_INPUT}
+            />
+
+            {/* T73 · 文档属性行：这篇属于哪个话题、挂了哪些任务、打了什么标签 */}
+            <NoteProperties
+              notebookName={activeNotebook?.name ?? ''}
+              tags={activeDoc.tags ?? []}
+              linked={linkedTasks}
+              candidates={candidateTasks}
+              onAddTag={(tag) => setDocTags(activeDoc, [...(activeDoc.tags ?? []), tag])}
+              onRemoveTag={(tag) =>
+                setDocTags(
+                  activeDoc,
+                  (activeDoc.tags ?? []).filter((item) => item !== tag),
+                )
+              }
+              onToggleTask={(taskId) => toggleDocTask(activeDoc, taskId)}
+              onOpenTask={props.onOpenTask}
+              t={t}
             />
 
             <div style={{ flex: 1, minHeight: 0, display: 'flex', marginTop: sp(8) }}>
@@ -1360,14 +1469,6 @@ const ROOT: CSSProperties = {
 }
 
 /** T68：宽度由 `resolveNotebookPaneWidths` 现算，这里只放与宽度无关的那部分。 */
-const PANE_NOTEBOOKS: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  minHeight: 0,
-  borderRight: `1px solid ${SEPARATOR}`,
-  background: 'var(--oe-material-sidebar)',
-}
-
 const PANE_TREE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
@@ -1433,13 +1534,79 @@ const PANE_HEAD: CSSProperties = {
   padding: px('10px 8px 6px 10px'),
 }
 
-const PANE_TITLE: CSSProperties = {
+/**
+ * T72 · 文档树头部左侧的笔记本切换器。
+ * 把原来 176px 宽的一整列压成一行按钮：图标 + 当前笔记本名 + 下拉指示。
+ * `flex: 1` + `minWidth: 0` 让它吃掉头部剩余宽度，笔记本名过长时由 ELLIPSIS 收口。
+ */
+const SWITCHER: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: sp(6),
   flex: 1,
   minWidth: 0,
-  fontSize: fs(11),
+  padding: px('4px 6px'),
+  marginLeft: sp(-2),
+  background: 'transparent',
+  border: 'none',
+  borderRadius: 'var(--oe-radius-control)',
+  cursor: 'pointer',
+  fontSize: fs(12),
   fontWeight: 650,
-  letterSpacing: '0.02em',
+  color: TEXT,
+  textAlign: 'left',
+}
+
+const SWITCHER_OPEN: CSSProperties = {
+  background: ROW_SELECTED,
+}
+
+/** 下拉菜单：贴在头部下方，宽度跟随栏宽（左右各留 6px），最多 240px 高再滚。 */
+const NAV_MENU: CSSProperties = {
+  position: 'absolute',
+  top: sp(38),
+  left: sp(6),
+  right: sp(6),
+  zIndex: 21,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: sp(4),
+  padding: px('6px'),
+  // 这里必须用**实色**而不是 `--oe-material-overlay`：那是个 86% 白的材质色，
+  // 靠 backdrop-filter 才成立；菜单在文档树内部、底下的行并没有被模糊，
+  // 半透明会让「支付重构周会纪要」这类行名直接透上来，两层字叠在一起。
+  background: 'var(--oe-surface)',
+  border: `1px solid ${SEPARATOR}`,
+  borderRadius: 'var(--oe-radius-overlay)',
+  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
+}
+
+const NAV_SECTION: CSSProperties = {
+  padding: px('2px 6px'),
+  fontSize: fs(10),
+  fontWeight: 650,
+  letterSpacing: '0.06em',
   color: FAINT,
+}
+
+const NAV_DIVIDER: CSSProperties = {
+  height: 1,
+  background: SEPARATOR,
+  margin: px('2px 0'),
+}
+
+const NAV_CREATE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: sp(6),
+  padding: px('5px 6px'),
+  background: 'transparent',
+  border: 'none',
+  borderRadius: 'var(--oe-radius-control)',
+  cursor: 'pointer',
+  fontSize: fs(12),
+  color: INDIGO,
+  textAlign: 'left',
 }
 
 const NB_ROW: CSSProperties = {
@@ -1516,8 +1683,30 @@ const ICON_BUTTON: CSSProperties = {
  */
 const NOTE_READING_WIDTH = 760
 
-/** T58 · 右侧阅读辅助栏：默认不占宽，展开后固定 196px，两个分区共用一套行样式。 */
-const RAIL_PANEL: CSSProperties = {
+/**
+ * T73 · 大纲栏自动展开的门槛：窗口要够宽，文档要有足够多的标题。
+ * 1500 = 侧栏 220 + 文档树 ~250 + 正文 760 + 大纲 196 + 留白，低于它展开就会把正文挤窄。
+ * 3 个标题以下没有「导航」价值，展开只是白占一列。
+ */
+const OUTLINE_AUTO_OPEN_WIDTH = 1500
+const OUTLINE_AUTO_OPEN_HEADINGS = 3
+
+/** T73 · 大纲按钮上的计数徽标：让「这里有 5 个标题可跳」在收起状态下也看得见。 */
+const OUTLINE_BADGE: CSSProperties = {
+  fontSize: fs(9),
+  lineHeight: 1.4,
+  padding: '0 3px',
+  borderRadius: 'var(--oe-radius-control)',
+  color: MUTED,
+  background: 'var(--oe-fill)',
+}
+
+const OUTLINE_BADGE_ON: CSSProperties = {
+  color: 'var(--oe-on-accent)',
+  background: INDIGO,
+}
+
+/** T58 · 右侧阅读辅助栏：默认不占宽，展开后固定 196px，两个分区共用一套行样式。 */const RAIL_PANEL: CSSProperties = {
   width: sp(196),
   flex: '0 0 auto',
   borderLeft: '1px solid var(--oe-separator)',

@@ -58,3 +58,109 @@ describe('白板导出的配色', () => {
     expect(svg).toContain('stroke-dasharray="6 4"')
   })
 })
+
+// T74 · 贴图导出：导出物必须**自包含**。写 `assets/x.png` 这种相对路径的话，
+// 文件一挪到下载目录就是死链——所以图片一律以 dataURL 内嵌，读不到就画灰底占位。
+describe('T74 · 图片图元导出', () => {
+  const DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=='
+
+  function imageNode(over: Partial<WhiteboardNode> = {}): WhiteboardNode {
+    return node({ shape: 'image', image: 'assets/wb1.png', text: 'shot.png', ...over })
+  }
+
+  function svgOf(nodes: WhiteboardNode[], images?: ReadonlyMap<string, string>): string {
+    return buildWhiteboardSvgMarkup(board(nodes), { range: 'full', images }).markup
+  }
+
+  it('拿到字节：写成内嵌 dataURL 的 <image>，且不画出灰底占位以外的形状', () => {
+    const svg = svgOf([imageNode()], new Map([['assets/wb1.png', DATA_URL]]))
+    expect(svg).toContain('<image')
+    expect(svg).toContain('data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==')
+    // 旧软件只认 xlink:href，现代浏览器认 href —— 两个都给
+    expect(svg).toContain('href=')
+    expect(svg).toContain('xlink:href')
+    expect(svg).toContain('preserveAspectRatio="xMidYMid meet"')
+    // 不把文件名当标签画在图上
+    expect(svg).not.toContain('shot.png')
+  })
+
+  it('没拿到字节：留浅灰占位，不写指向 assets/ 的死链', () => {
+    const svg = svgOf([imageNode()])
+    expect(svg).not.toContain('<image')
+    expect(svg).toContain('fill="#F2F2F7"')
+    expect(svg).not.toContain('assets/wb1.png')
+  })
+
+  it('普通图元不会因为带了 images map 就变成图片', () => {
+    const svg = svgOf([node({ text: '服务' })], new Map([['assets/wb1.png', DATA_URL]]))
+    expect(svg).not.toContain('<image')
+    expect(svg).toContain('服务')
+  })
+})
+
+// T75 · 字号：导出必须读节点上的值。用户把标题调到 32 号，导出却是 13 号，
+// 那这份图和屏幕上看到的完全不是一回事。
+describe('T75 · 字号导出', () => {
+  it('节点带 fontSize：导出用这个字号，不是形状默认', () => {
+    const svg = markup([node({ text: '订单服务', fontSize: 32 })])
+    expect(svg).toContain('font-size="32"')
+    expect(svg).not.toContain('font-size="13"')
+  })
+
+  it('没带 fontSize：便签仍按 14、其余按 13（与画布同口径）', () => {
+    expect(markup([node({ shape: 'note', text: '便签' })])).toContain('font-size="14"')
+    expect(markup([node({ text: '服务' })])).toContain('font-size="13"')
+  })
+
+  it('字号影响折行与基线：同一段文字在 32 号下会断成更多行', () => {
+    const text = '这条需求要先确认边界条件再动手'
+    const count = (svg: string): number => (svg.match(/<tspan/g) ?? []).length
+    expect(count(markup([node({ text, width: 168, height: 120 })]))).toBeLessThan(
+      count(markup([node({ text, width: 168, height: 240, fontSize: 32 })])),
+    )
+  })
+})
+
+// T77 · 字效与图片贴合：屏幕上是什么样，导出就得是什么样。
+// 这两条都容易「只在屏幕上对」——画布改 CSS 属性，导出改的是 SVG 呈现属性，两处必须同时改。
+describe('T77 · 字效与图片贴合导出', () => {
+  const DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=='
+  const imageNode = (over: Partial<WhiteboardNode> = {}): WhiteboardNode =>
+    node({ shape: 'image', image: 'assets/wb1.png', text: 'shot.png', ...over })
+
+  it('加粗落成 font-weight="700"，斜体落成 font-style="italic"', () => {
+    const svg = markup([node({ text: '标题', bold: true, italic: true })])
+    expect(svg).toContain('font-weight="700"')
+    expect(svg).toContain('font-style="italic"')
+  })
+
+  it('没加粗没斜体：两个属性都不出现（不是写 false / normal）', () => {
+    const svg = markup([node({ text: '正文' })])
+    expect(svg).not.toContain('font-weight="700"')
+    expect(svg).not.toContain('font-style')
+  })
+
+  it('分组框的标题仍是 600（不去抢它的强调），加粗后才到 700', () => {
+    expect(markup([node({ shape: 'frame', text: '第一层' })])).toContain('font-weight="600"')
+    expect(markup([node({ shape: 'frame', text: '第一层', bold: true })])).toContain('font-weight="700"')
+  })
+
+  it('图片 cover：preserveAspectRatio 用 slice，并给一层裁到节点矩形的 clipPath', () => {
+    const svg = buildWhiteboardSvgMarkup(board([imageNode({ imageFit: 'cover' })]), {
+      range: 'full',
+      images: new Map([['assets/wb1.png', DATA_URL]]),
+    }).markup
+    expect(svg).toContain('preserveAspectRatio="xMidYMid slice"')
+    expect(svg).toContain('<clipPath id="wb-clip-n1">')
+    expect(svg).toContain('clip-path="url(#wb-clip-n1)"')
+  })
+
+  it('图片缺省（contain）：不产生 clipPath，仍是 meet', () => {
+    const svg = buildWhiteboardSvgMarkup(board([imageNode()]), {
+      range: 'full',
+      images: new Map([['assets/wb1.png', DATA_URL]]),
+    }).markup
+    expect(svg).toContain('preserveAspectRatio="xMidYMid meet"')
+    expect(svg).not.toContain('clipPath')
+  })
+})

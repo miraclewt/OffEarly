@@ -33,6 +33,7 @@ import type {
   WhiteboardArrow,
   WhiteboardEdge,
   WhiteboardEdgePatch,
+  WhiteboardFit,
   WhiteboardNode,
   WhiteboardNodePatch,
   WhiteboardRoute,
@@ -61,6 +62,15 @@ export interface WhiteboardNodeDraft {
   height?: number
   text?: string
   tone?: WhiteboardTone
+  /** T74：`shape === 'image'` 时的附件引用（`assets/<id>.<ext>`）。 */
+  image?: string
+  /** T75：字号。不给就落形状默认（便签 14、其余 13），键不出现。 */
+  fontSize?: number
+  /** T77：加粗 / 斜体。只有 true 才落键（false 与缺省同义）。 */
+  bold?: boolean
+  italic?: boolean
+  /** T77：图片贴合方式。只有 `cover` 值得落键（`contain` 就是缺省）。 */
+  imageFit?: WhiteboardFit
 }
 
 /** 新连线的描述：两端是**已存在**的节点 id。 */
@@ -159,6 +169,15 @@ export function buildNode(draft: WhiteboardNodeDraft, deps: WhiteboardActionDeps
     height: draft.height ?? size.height,
     text: draft.text ?? '',
     tone: draft.tone ?? 'plain',
+    // 可选字段：只有图片图元才落这个键，其余形状连键都不出现（老库的形状不被改写）
+    ...(draft.image === undefined ? {} : { image: draft.image }),
+    // T75 同一条口径：没指定字号就不落键，渲染时回到形状默认
+    ...(draft.fontSize === undefined ? {} : { fontSize: draft.fontSize }),
+    // T77：`bold` / `italic` 只在为 true 时落键，`imageFit` 只认非缺省值——
+    // 否则每个新图元都会背上 `bold: false` / `imageFit: 'contain'` 这类冗余字段
+    ...(draft.bold === true ? { bold: true } : {}),
+    ...(draft.italic === true ? { italic: true } : {}),
+    ...(draft.imageFit === undefined || draft.imageFit === 'contain' ? {} : { imageFit: draft.imageFit }),
   }
 }
 
@@ -205,7 +224,13 @@ export function applyAddGraphic(
   return true
 }
 
-/** 一次性造好节点与连线并提交（连线用节点**下标**引用两端，这里换成真 id）。 */
+/**
+ * 一次性造好节点与连线并提交（连线用节点**下标**引用两端，这里换成真 id）。
+ *
+ * 返回**新节点的 id**（失败时空数组）：id 是 buildNode 现场生成的，调用方要选中刚建出来的东西
+ * 就只能从这里拿。以前只回 boolean，视图层没法知道「刚加的是哪个」——新建的文本图元因此
+ * 既没选中也没进编辑态，用户看到的是「点了文本按钮，什么都没出现」。
+ */
 export function applyAddDrafts(
   bus: CommandBus,
   vault: Vault,
@@ -213,7 +238,7 @@ export function applyAddDrafts(
   nodeDrafts: readonly WhiteboardNodeDraft[],
   edgeDrafts: readonly (Omit<WhiteboardEdgeDraft, 'from' | 'to'> & { from: number; to: number })[] = [],
   deps: WhiteboardActionDeps = {},
-): boolean {
+): string[] {
   const nodes = nodeDrafts.map((draft) => buildNode(draft, deps))
   const edges: WhiteboardEdge[] = []
   for (const draft of edgeDrafts) {
@@ -222,7 +247,8 @@ export function applyAddDrafts(
     if (from === undefined || to === undefined) continue
     edges.push(buildEdge({ ...draft, from: from.id, to: to.id }, deps))
   }
-  return applyAddGraphic(bus, vault, whiteboardId, nodes, edges)
+  if (nodes.length === 0 && edges.length === 0) return []
+  return applyAddGraphic(bus, vault, whiteboardId, nodes, edges) ? nodes.map((node) => node.id) : []
 }
 
 /**
@@ -237,7 +263,7 @@ export function applyAddTemplate(
   origin: { x: number; y: number },
   labels: Partial<Record<WhiteboardTemplateText, string>> = {},
   deps: WhiteboardActionDeps = {},
-): boolean {
+): string[] {
   const template = buildWhiteboardTemplate(templateId, labels)
   const drafts: WhiteboardNodeDraft[] = template.nodes.map((item) => ({
     shape: item.shape,

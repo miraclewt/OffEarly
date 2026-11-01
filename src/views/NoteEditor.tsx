@@ -44,6 +44,7 @@ import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import type { EditorState } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type {
   ChangeEvent as ReactChangeEvent,
   ClipboardEvent as ReactClipboardEvent,
@@ -64,6 +65,8 @@ import { Lightbox } from './Lightbox'
 import { isMermaidLanguage, mermaidBlockRefs, normalizeMermaidCode, renderMermaidSvg, scopeSvgIds } from './mermaid'
 import { highlightCode, tokenClassNames } from '../domain/codeHighlight'
 import { NOTE_FONT_SIZE_DEFAULT, NOTE_FONT_SIZE_MAX, NOTE_FONT_SIZE_MIN } from '../domain/types'
+import { filterSlashCommands, parseSlashTrigger } from './slashCommands'
+import type { SlashCommandSpec } from './slashCommands'
 import { fs, pxNum, sp, px } from '../styles/scale'
 
 const BORDER = 'var(--oe-border)'
@@ -1146,27 +1149,36 @@ interface ToolSpec {
   id: string
   icon: IconName
   label: MsgKey
+  /** 组首：在它前面画一条细分隔线（视觉分组，不改任何行为）。 */
+  group?: boolean
   isActive: (editor: Editor) => boolean
   run: (editor: Editor, t: (key: MsgKey, params?: TranslateParams) => string) => void
 }
 
-/** 工具栏一行（spec 6.4 的 15 个按钮）；顺序即视觉顺序。 */
+/**
+ * 工具栏一行（spec 6.4 的 15 个按钮）；顺序即视觉顺序。
+ *
+ * T73 · 分四组：**行内格式 → 标题与块 → 列表 → 插入**。
+ * 之前是一排 14 个等距图标，`code-block` 夹在斜体与标题之间、`divider` 掉在最后，
+ * 视觉上没有任何「这一类是什么」的线索。分组只加分隔线，不动按钮本身。
+ */
 const TOOLS: readonly ToolSpec[] = [
   { id: 'bold', icon: 'bold', label: 'noteEditor.bold', isActive: (e) => e.isActive('bold'), run: (e) => e.chain().focus().toggleBold().run() },
   { id: 'italic', icon: 'italic', label: 'noteEditor.italic', isActive: (e) => e.isActive('italic'), run: (e) => e.chain().focus().toggleItalic().run() },
   { id: 'strike', icon: 'strike', label: 'noteEditor.strike', isActive: (e) => e.isActive('strike'), run: (e) => e.chain().focus().toggleStrike().run() },
   { id: 'inline-code', icon: 'code', label: 'noteEditor.inlineCode', isActive: (e) => e.isActive('code'), run: (e) => e.chain().focus().toggleCode().run() },
-  { id: 'code-block', icon: 'code-block', label: 'noteEditor.codeBlock', isActive: (e) => e.isActive('codeBlock'), run: (e) => e.chain().focus().toggleCodeBlock().run() },
-  { id: 'h2', icon: 'heading-2', label: 'noteEditor.heading2', isActive: (e) => e.isActive('heading', { level: 2 }), run: (e) => e.chain().focus().toggleHeading({ level: 2 }).run() },
+  { id: 'h2', icon: 'heading-2', label: 'noteEditor.heading2', group: true, isActive: (e) => e.isActive('heading', { level: 2 }), run: (e) => e.chain().focus().toggleHeading({ level: 2 }).run() },
   { id: 'h3', icon: 'heading-3', label: 'noteEditor.heading3', isActive: (e) => e.isActive('heading', { level: 3 }), run: (e) => e.chain().focus().toggleHeading({ level: 3 }).run() },
-  { id: 'bullet-list', icon: 'list-ul', label: 'noteEditor.bulletList', isActive: (e) => e.isActive('bulletList'), run: (e) => e.chain().focus().toggleBulletList().run() },
+  { id: 'quote', icon: 'quote', label: 'noteEditor.quote', isActive: (e) => e.isActive('blockquote'), run: (e) => e.chain().focus().toggleBlockquote().run() },
+  { id: 'code-block', icon: 'code-block', label: 'noteEditor.codeBlock', isActive: (e) => e.isActive('codeBlock'), run: (e) => e.chain().focus().toggleCodeBlock().run() },
+  { id: 'bullet-list', icon: 'list-ul', label: 'noteEditor.bulletList', group: true, isActive: (e) => e.isActive('bulletList'), run: (e) => e.chain().focus().toggleBulletList().run() },
   { id: 'ordered-list', icon: 'list-ol', label: 'noteEditor.orderedList', isActive: (e) => e.isActive('orderedList'), run: (e) => e.chain().focus().toggleOrderedList().run() },
   { id: 'task-list', icon: 'list-task', label: 'noteEditor.taskList', isActive: (e) => e.isActive('taskList'), run: (e) => e.chain().focus().toggleTaskList().run() },
-  { id: 'quote', icon: 'quote', label: 'noteEditor.quote', isActive: (e) => e.isActive('blockquote'), run: (e) => e.chain().focus().toggleBlockquote().run() },
   {
     id: 'link',
     icon: 'link',
     label: 'noteEditor.link',
+    group: true,
     isActive: (e) => e.isActive('link'),
     run: (editor, t) => {
       if (editor.isActive('link')) {
@@ -1251,6 +1263,21 @@ interface TableBarState {
   above: boolean
 }
 
+/**
+ * T73 · 一次待处理的 `/` 输入。
+ * `from` 是 `/` 的绝对位置（选中后要连同查询一起删掉），`top/left` 是菜单的视口坐标
+ * （`coordsAtPos` 给的本来就是视口坐标，菜单又 portal 到 body，两边口径一致）。
+ */
+interface SlashState {
+  from: number
+  query: string
+  top: number
+  left: number
+  /** 光标下方放不下时翻到上方（用 translateY(-100%) 贴住光标上沿）。 */
+  above: boolean
+}
+
+
 export function NoteEditor(props: NoteEditorProps): ReactElement {
   const t = props.t ?? fallbackI18n.t
   const debounceMs = props.debounceMs ?? DEFAULT_DEBOUNCE_MS
@@ -1266,6 +1293,9 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   const [charCount, setCharCount] = useState(() => countNoteChars(props.value))
   /** T63 · 表格工具条（null = 光标不在表格里，不渲染）。 */
   const [tableBar, setTableBar] = useState<TableBarState | null>(null)
+  /** T73 · `/` 斜杠命令（null = 菜单关着）。 */
+  const [slash, setSlash] = useState<SlashState | null>(null)
+  const [slashIndex, setSlashIndex] = useState(0)
   /** 窗口尺寸变化只影响几何、不改文档 → 用一个计数器把「重新量一次」通知出去（值本身不用）。 */
   const [, setMeasureTick] = useState(0)
 
@@ -1274,6 +1304,13 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const anchorRef = useRef<number | null>(null)
+  /** T73：斜杠菜单的 DOM（判断 mousedown 是否点在菜单里，避免「点菜单=关菜单」）。 */
+  const slashMenuRef = useRef<HTMLDivElement | null>(null)
+  /**
+   * T73：斜杠菜单的按键处理。必须挂到 `editorProps.handleKeyDown`（在 ProseMirror 的按键映射之前），
+   * 但那儿只建一次、拿不到最新的 state，所以每次渲染把新闭包写进这个 ref。
+   */
+  const slashKeyRef = useRef<(event: KeyboardEvent) => boolean>(() => false)
   const timerRef = useRef<number | null>(null)
   /** 编辑器当前内容的权威快照（卸载补交时用，避免读到已销毁的编辑器）。 */
   const latestRef = useRef(props.value)
@@ -1385,6 +1422,55 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
     setLinkIndex(0)
   }, [])
 
+  /**
+   * T73 · 判断光标前是不是正在打一条 `/` 命令。
+   *
+   * 三条与双链菜单的关键差异（都是为了「不打断」）：
+   *  1) 只扫**当前块**的文本（`$from.parent`），不跨段落——上一行结尾的 `/` 不该影响这一行；
+   *  2) 代码块里直接不认：写 Dockerfile、正则、路径时 `/` 是普通字符；
+   *  3) 位置用 `coordsAtPos` 现取，菜单 portal 到 body 定位——外壳有 `backdrop-filter`，
+   *     `position: fixed` 在那种包含块里会错位（T24 的浮层踩过同一个坑）。
+   */
+  const detectSlashTrigger = useCallback((instance: Editor) => {
+    const { from, $from } = instance.state.selection
+    const parent = $from.parent
+    if (parent.type.name === 'codeBlock' || !instance.isEditable) {
+      setSlash((prev) => (prev === null ? prev : null))
+      return
+    }
+    const textBefore = parent.textBetween(0, $from.parentOffset, '\n', '\ufffc')
+    const parsed = parseSlashTrigger(textBefore)
+    if (parsed === null) {
+      setSlash((prev) => (prev === null ? prev : null))
+      return
+    }
+    const start = from - parsed.query.length - 1
+    let coords: { left: number; top: number; bottom: number }
+    try {
+      coords = instance.view.coordsAtPos(from)
+    } catch {
+      return // 位置在文档外（正在换文档的瞬间）：这一帧不弹，下一次输入自然会重算
+    }
+    // 视口右缘兜底：菜单宽 240，贴着右墙弹出去会被裁
+    const width = SLASH_MENU_WIDTH
+    const room = (typeof window === 'undefined' ? 1280 : window.innerWidth) - width - 8
+    const left = Math.max(8, Math.min(coords.left, Math.max(8, room)))
+    // 下方放不下（光标贴着屏幕底）就翻到上方：菜单高约 320，宁可往上弹也不要在底部被裁
+    const viewport = typeof window === 'undefined' ? 800 : window.innerHeight
+    const above = viewport - coords.bottom < SLASH_MENU_ESTIMATED_HEIGHT && coords.top > SLASH_MENU_ESTIMATED_HEIGHT
+    const top = above ? coords.top - 4 : coords.bottom + 4
+    setSlash((prev) =>
+      prev !== null &&
+      prev.from === start &&
+      prev.query === parsed.query &&
+      prev.top === top &&
+      prev.left === left &&
+      prev.above === above
+        ? prev
+        : { from: start, query: parsed.query, top, left, above },
+    )
+  }, [])
+
   const handleUpdate = useCallback(
     (instance: Editor) => {
       const markdown = instance.getMarkdown()
@@ -1396,10 +1482,11 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
         return
       }
       detectLinkTrigger(instance)
+      detectSlashTrigger(instance)
       if (markdown === lastSyncedRef.current) return
       scheduleCommit()
     },
-    [detectLinkTrigger, scheduleCommit],
+    [detectLinkTrigger, detectSlashTrigger, scheduleCommit],
   )
   const updateRef = useRef(handleUpdate)
   updateRef.current = handleUpdate
@@ -1427,6 +1514,8 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
         'aria-label': t('noteEditor.content'),
         // 占位提示走装饰节点的 data-placeholder（见 NotePlaceholder），这里不再重复
       },
+      // T73：斜杠菜单的 ↑↓ / Enter / Esc 必须在 ProseMirror 处理按键之前截住（见 slashKeyRef）
+      handleKeyDown: (_view, event) => slashKeyRef.current(event),
     },
     onUpdate: ({ editor: instance }) => updateRef.current(instance),
     onCreate: ({ editor: instance }) => {
@@ -1534,6 +1623,8 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
       suppressRef.current = false
     }
     setLinkQuery(null)
+    setSlash(null)
+    setSlashIndex(0)
     anchorRef.current = null
   }, [props.value, mode])
 
@@ -1562,6 +1653,109 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   }, [])
 
   /**
+   * T73 · 当前查询下可见的命令（空查询 = 全列，用户看得见有什么可选）。
+   * 「图片」在没有附件端口时**不列出**：任务弹窗里的笔记也能用斜杠菜单，
+   * 但那里没有落盘通道——列出来点了没反应，比没有这一项更糟。
+   */
+  const canInsertImage = props.assets !== undefined || props.onInsertImage !== undefined
+  const slashCommands = useMemo(() => {
+    if (slash === null) return []
+    const matched = filterSlashCommands(slash.query)
+    return canInsertImage ? matched : matched.filter((command) => command.id !== 'image')
+  }, [slash, canInsertImage])
+  const slashActiveIndex = slashCommands.length === 0 ? -1 : Math.min(slashIndex, slashCommands.length - 1)
+
+  /**
+   * 执行一条斜杠命令。
+   *
+   * **一次用户动作 = 一条撤销项**：删掉 `/查询` 与「把这段变成表格 / 待办」必须落在同一条链上，
+   * 所以这里把删除和命令串起来只 `run()` 一次，而不是先删再执行（那会变成两次 Ctrl+Z）。
+   * 图片与双链要宿主介入（开文件选择器 / 等 `[[` 菜单接管），单独两步走。
+   */
+  const runSlashCommand = useCallback(
+    (command: SlashCommandSpec) => {
+      const instance = editorRef.current
+      const trigger = slash
+      if (instance === null || trigger === null) return
+      const to = instance.state.selection.from
+      const chain = instance.chain().focus().deleteRange({ from: Math.min(trigger.from, to), to })
+      setSlash(null)
+      setSlashIndex(0)
+
+      if (command.id === 'image') {
+        chain.run()
+        if (props.assets !== undefined) fileInputRef.current?.click()
+        else props.onInsertImage?.()
+        return
+      }
+      if (command.id === 'wiki') {
+        // 插入 `[[` 后由既有双链菜单接管（它的检测跑在同一轮 onUpdate 里）
+        chain.insertContent('[[').run()
+        return
+      }
+      command.run?.(chain)
+      chain.run()
+    },
+    [slash, props.assets, props.onInsertImage],
+  )
+
+  /** 关闭菜单（Esc、点外面、换文档都走这里，保证索引一起归零）。 */
+  const closeSlash = useCallback(() => {
+    setSlash(null)
+    setSlashIndex(0)
+  }, [])
+
+  // 查询变了就把高亮拉回第一项：继续按 Enter 时选中「刚过滤出来的那条」，而不是上一次的位置。
+  useEffect(() => {
+    setSlashIndex(0)
+  }, [slash?.query, slash?.from])
+
+  // 点菜单以外的地方就收起。菜单是 portal 到 body 的，不在编辑器的点击链上，
+  // 只能靠文档级 mousedown 判断——这也是「点菜单项」必须排除在外的原因（否则一点就没了）。
+  useEffect(() => {
+    if (slash === null) return
+    const onPointerDown = (event: MouseEvent): void => {
+      const menu = slashMenuRef.current
+      // 注意：本文件里的 `Node` 是 TipTap 的节点类（不是 DOM 的），所以这里用 Element 判型
+      if (menu !== null && event.target instanceof Element && menu.contains(event.target)) return
+      closeSlash()
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [slash, closeSlash])
+
+  /**
+   * 斜杠菜单的键盘处理挂在 **ProseMirror 层**（`editorProps.handleKeyDown`），不是 React 的
+   * 容器 onKeyDown：Enter 先被 ProseMirror 的按键映射吃掉（splitBlock），React 里再 preventDefault
+   * 已经晚了，会多出一个空段落。挂在这里能在默认行为之前截住。
+   */
+  slashKeyRef.current = (event: KeyboardEvent): boolean => {
+    if (slash === null) return false
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation() // 别让抽屉的全局 Esc 顺手把弹窗也关了
+      closeSlash()
+      return true
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const count = slashCommands.length
+      if (count === 0) return true
+      setSlashIndex((index) =>
+        event.key === 'ArrowDown' ? (index + 1) % count : (index - 1 + count) % count,
+      )
+      return true
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      const picked = slashCommands[slashActiveIndex] ?? slashCommands[0]
+      if (picked !== undefined) runSlashCommand(picked)
+      return true
+    }
+    return false
+  }
+
+  /**
    * 富文本 ↔ Markdown 源码。
    * 进源码：草稿取编辑器当前 markdown（已规范化）；
    * 回富文本：先把源码整体载入编辑器（程序化载入，不进撤销栈），再按差异提交一次。
@@ -1573,6 +1767,8 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
       setCharCount(countNoteChars(current))
       setMode('source')
       setLinkQuery(null)
+      setSlash(null)
+      setSlashIndex(0)
       anchorRef.current = null
       return
     }
@@ -1595,6 +1791,8 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
     skipSyncRef.current = true
     setMode('rich')
     setLinkQuery(null)
+    setSlash(null)
+    setSlashIndex(0)
   }, [mode, sourceDraft, props.value])
 
   /** 源码模式的输入：照旧走 debounce，与富文本共用一条写路径。 */
@@ -1607,6 +1805,9 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   }
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    // T73：斜杠菜单的键由 ProseMirror 层处理（见 slashKeyRef）。这里让开，
+    // 否则同一次 Enter 会被处理两遍。事件仍会冒泡到这里，所以必须显式挡掉。
+    if (slash !== null) return
     if (linkQuery === null) return
     if (candidates.length === 0) {
       if (event.key === 'Escape') {
@@ -1728,31 +1929,33 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
             const active = instance === null ? false : tool.isActive(instance)
             const pending = tool.id === 'image' && props.onInsertImage === undefined && props.assets === undefined
             return (
-              <button
-                key={tool.id}
-                type="button"
-                data-testid={`note-tool-${tool.id}`}
-                data-pending={pending ? 't25' : undefined}
-                aria-label={t(tool.label)}
-                aria-pressed={active}
-                title={t(tool.label)}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => {
-                  const current = editorRef.current
-                  if (current === null) return
-                  if (tool.id === 'image') {
-                    // 有附件端口就开文件选择器（三条路径里的「工具栏选文件」）；
-                    // 没有则退回 T24 的 onInsertImage 接缝，按钮形态不变。
-                    if (props.assets !== undefined) fileInputRef.current?.click()
-                    else props.onInsertImage?.()
-                    return
-                  }
-                  tool.run(current, t)
-                }}
-                style={{ ...TOOL_BUTTON, ...(active ? TOOL_BUTTON_ACTIVE : null) }}
-              >
-                <Icon name={tool.icon} size={15} />
-              </button>
+              <span key={tool.id} style={{ display: 'contents' }}>
+                {tool.group === true ? <span data-testid="note-tool-sep" aria-hidden="true" style={TOOL_SEPARATOR} /> : null}
+                <button
+                  type="button"
+                  data-testid={`note-tool-${tool.id}`}
+                  data-pending={pending ? 't25' : undefined}
+                  aria-label={t(tool.label)}
+                  aria-pressed={active}
+                  title={t(tool.label)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    const current = editorRef.current
+                    if (current === null) return
+                    if (tool.id === 'image') {
+                      // 有附件端口就开文件选择器（三条路径里的「工具栏选文件」）；
+                      // 没有则退回 T24 的 onInsertImage 接缝，按钮形态不变。
+                      if (props.assets !== undefined) fileInputRef.current?.click()
+                      else props.onInsertImage?.()
+                      return
+                    }
+                    tool.run(current, t)
+                  }}
+                  style={{ ...TOOL_BUTTON, ...(active ? TOOL_BUTTON_ACTIVE : null) }}
+                >
+                  <Icon name={tool.icon} size={15} />
+                </button>
+              </span>
             )
           })}
         </div>
@@ -1945,6 +2148,58 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
         </div>
       ) : null}
 
+      {/* T73 · `/` 斜杠菜单。portal 到 body：外壳的 backdrop-filter 会造包含块，
+          留在这里的 fixed 定位会跟着偏移（T24 的浮层踩过同一个坑）。 */}
+      {slash === null || typeof document === 'undefined'
+        ? null
+        : createPortal(
+            <div
+              ref={slashMenuRef}
+              data-testid="note-slash-menu"
+              role="listbox"
+              aria-label={t('noteEditor.slashMenu')}
+              style={{
+                ...SLASH_MENU,
+                top: slash.top,
+                left: slash.left,
+                width: SLASH_MENU_WIDTH,
+                transform: slash.above ? 'translateY(-100%)' : undefined,
+              }}
+            >
+              {slashCommands.length === 0 ? (
+                <div data-testid="note-slash-empty" style={LINK_MENU_EMPTY}>
+                  {t('noteEditor.slashEmpty')}
+                </div>
+              ) : (
+                <>
+                  {/* 列表自己滚（命令有十几条），底部按键提示固定在外层——滚到底也看得见 */}
+                  <div style={SLASH_MENU_LIST}>
+                    {slashCommands.map((command, index) => (
+                      <div
+                        key={command.id}
+                        data-testid={`note-slash-option-${command.id}`}
+                        role="option"
+                        aria-selected={index === slashActiveIndex}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onMouseEnter={() => setSlashIndex(index)}
+                        onClick={() => runSlashCommand(command)}
+                        style={{ ...SLASH_MENU_ITEM, ...(index === slashActiveIndex ? SLASH_MENU_ITEM_ACTIVE : null) }}
+                      >
+                        <span style={SLASH_MENU_ICON}>
+                          <Icon name={command.icon} size={14} />
+                        </span>
+                        <span style={ELLIPSIS_TEXT}>{t(command.label)}</span>
+                        <span style={SLASH_MENU_HINT}>{t(command.hint)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={SLASH_MENU_FOOTER}>{t('noteEditor.slashKeys')}</div>
+                </>
+              )}
+            </div>,
+            document.body,
+          )}
+
       {rejectReason !== null ? (
         <div data-testid="note-asset-hint" role="status" style={ASSET_HINT}>
           {t(REJECT_KEY[rejectReason])}
@@ -1987,8 +2242,7 @@ const TOOLBAR: CSSProperties = {
 }
 
 /** 正文容器：排版交给 theme.css 的 `.oe-prose`，这里只管盒模型（内边距/滚动由 CSS 承担）。 */
-const NOTE_BODY: CSSProperties = {
-  minWidth: 0,
+const NOTE_BODY: CSSProperties = {  minWidth: 0,
   background: SURFACE,
   // T63：表格工具条是这里的绝对定位子元素（定位基准 = 正文容器，随内容滚动）
   position: 'relative',
@@ -2106,6 +2360,16 @@ const TOOL_BUTTON_ACTIVE: CSSProperties = {
   border: `1px solid ${INDIGO}`,
 }
 
+/** T73：工具栏分组分隔线。比正文里的分隔线短一截，读起来是「组」而不是「断行」。 */
+const TOOL_SEPARATOR: CSSProperties = {
+  display: 'inline-block',
+  width: 1,
+  height: sp(14),
+  margin: sp(2),
+  background: SEPARATOR,
+  flex: '0 0 auto',
+}
+
 const LINK_MENU: CSSProperties = {
   position: 'absolute',
   left: sp(8),
@@ -2168,6 +2432,83 @@ const ASSET_HINT: CSSProperties = {
 const LINK_MENU_KIND: CSSProperties = {
   flex: '0 0 auto',
   fontSize: fs(10),
+  color: MUTED,
+}
+
+// ── T73 · `/` 斜杠菜单 ────────────────────────────────────────────────────────
+// 定位口径是**视口**（`coordsAtPos` 给的就是视口坐标），菜单又 portal 到 body，
+// 所以这里叫 `fixed` 而宽度必须落成数值：右缘的兜底计算要用它做减法。
+const SLASH_MENU_WIDTH = 240
+/** 菜单的估算高度：只用来判断「下方放不放得下」，真实高度由内容决定。 */
+const SLASH_MENU_ESTIMATED_HEIGHT = 320
+
+const SLASH_MENU: CSSProperties = {
+  position: 'fixed',
+  zIndex: 45, // 与「展示浮层」同层：压过侧栏/筛选器，低于灯箱与冲突弹窗
+  padding: sp(4),
+  display: 'flex',
+  flexDirection: 'column',
+  gap: sp(2),
+  background: SURFACE,
+  border: `1px solid ${SEPARATOR}`,
+  borderRadius: RADIUS_OVERLAY,
+  boxShadow: 'var(--oe-shadow-pop)',
+}
+
+/** 命令列表：只有它滚，底部按键提示留在外层（滚到底也看得见）。 */
+const SLASH_MENU_LIST: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: sp(1),
+  maxHeight: sp(260),
+  overflowY: 'auto',
+}
+
+const SLASH_MENU_ITEM: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: sp(6),
+  padding: px('4px 6px'),
+  fontSize: fs(11),
+  color: TEXT,
+  borderRadius: RADIUS_CONTROL,
+  cursor: 'pointer',
+}
+
+const SLASH_MENU_ITEM_ACTIVE: CSSProperties = {
+  background: FILL,
+}
+
+const SLASH_MENU_ICON: CSSProperties = {
+  flex: '0 0 auto',
+  display: 'inline-flex',
+  alignItems: 'center',
+  color: MUTED,
+}
+
+const ELLIPSIS_TEXT: CSSProperties = {
+  flex: '1 1 auto',
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+}
+
+const SLASH_MENU_HINT: CSSProperties = {
+  flex: '0 0 auto',
+  fontSize: fs(10),
+  color: MUTED,
+  maxWidth: '45%',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+}
+
+const SLASH_MENU_FOOTER: CSSProperties = {
+  padding: px('3px 6px 1px'),
+  marginTop: sp(2),
+  borderTop: `1px solid ${SEPARATOR}`,
+  fontSize: fs(9),
   color: MUTED,
 }
 

@@ -356,6 +356,110 @@ describe('T24-4 · [[双链]]：候选弹层、插入与点击跳转', () => {
   })
 })
 
+describe('T73 · `/` 斜杠命令：触发、过滤、键盘与应用', () => {
+  const menu = (): HTMLElement | null => document.querySelector('[data-testid="note-slash-menu"]')
+  const options = (): Element[] =>
+    Array.from(document.querySelectorAll('[data-testid^="note-slash-option-"]'))
+  /** 键盘必须打在 contenteditable 上：斜杠菜单的按键走 ProseMirror 层（不是 React 容器）。 */
+  const key = (editor: Editor, name: string): void => {
+    fireEvent.keyDown(editor.view.dom, { key: name })
+  }
+
+  it('行首打 `/` 弹出全部命令，查询串把菜单过滤到命中的那几条', async () => {
+    const h = setupEditor()
+    const editor = await h.editor()
+    editor.commands.focus()
+    typeText(editor, '/')
+    await waitFor(() => expect(menu()).not.toBeNull())
+    expect(options().length).toBeGreaterThan(8)
+
+    typeText(editor, '表')
+    // 「表」既是「表格」也是「列表」的一部分，所以按「贴得紧」排序：表格必须排第一
+    await waitFor(() =>
+      expect(options()[0]?.getAttribute('data-testid')).toBe('note-slash-option-table'),
+    )
+    expect(options().length).toBeLessThan(4)
+
+    typeText(editor, '不存在的命令')
+    await waitFor(() => expect(h.view.getByTestId('note-slash-empty')).toBeTruthy())
+  })
+
+  it('Enter 应用选中项：`/表` 被删掉，位置换成一张真表格', async () => {
+    const h = setupEditor()
+    const editor = await h.editor()
+    editor.commands.focus()
+    typeText(editor, '/表')
+    await waitFor(() => expect(menu()).not.toBeNull())
+    key(editor, 'Enter')
+
+    await waitFor(() => expect(nodeTypes(editor)).toContain('table'))
+    // `表` 三个字符（`/` + 查询）不该留在正文里
+    expect(editor.state.doc.textContent).not.toContain('/')
+    await waitFor(() => expect(h.onCommit).toHaveBeenCalled())
+  })
+
+  it('↑↓ 换选中项：从「正文」走到「待办清单」再 Enter', async () => {
+    const h = setupEditor()
+    const editor = await h.editor()
+    editor.commands.focus()
+    typeText(editor, '/')
+    await waitFor(() => expect(menu()).not.toBeNull())
+    // 默认第 0 项是「正文」，第 5 项是「待办清单」（见 SLASH_COMMANDS 顺序）
+    for (let index = 0; index < 5; index += 1) key(editor, 'ArrowDown')
+    key(editor, 'Enter')
+    await waitFor(() => expect(nodeTypes(editor)).toContain('taskList'))
+    expect(editor.state.doc.textContent).not.toContain('/')
+  })
+
+  it('Esc 只关菜单，不冒泡到 window（抽屉不会被顺手关掉）', async () => {
+    const h = setupEditor()
+    const editor = await h.editor()
+    const drawerClose = vi.fn()
+    window.addEventListener('keydown', drawerClose)
+    try {
+      editor.commands.focus()
+      typeText(editor, '/')
+      await waitFor(() => expect(menu()).not.toBeNull())
+      key(editor, 'Escape')
+      await waitFor(() => expect(menu()).toBeNull())
+      expect(drawerClose).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('keydown', drawerClose)
+    }
+  })
+
+  it('点菜单项也能应用（鼠标路径与键盘路径同一套执行）', async () => {
+    const h = setupEditor()
+    const editor = await h.editor()
+    editor.commands.focus()
+    typeText(editor, '/引用')
+    await waitFor(() => expect(h.view.getByTestId('note-slash-option-quote')).toBeTruthy())
+    fireEvent.mouseDown(h.view.getByTestId('note-slash-option-quote'))
+    fireEvent.click(h.view.getByTestId('note-slash-option-quote'))
+    await waitFor(() => expect(nodeTypes(editor)).toContain('blockquote'))
+    expect(menu()).toBeNull()
+  })
+
+  it('不该误触发：URL、路径、代码块里的 `/` 都是普通字符', async () => {
+    const h = setupEditor()
+    const editor = await h.editor()
+    editor.commands.focus()
+    typeText(editor, '见 http://a.bc/d')
+    expect(menu()).toBeNull()
+
+    editor.commands.setContent('')
+    editor.commands.focus()
+    typeText(editor, '1/2 与 a/b')
+    expect(menu()).toBeNull()
+
+    editor.commands.setContent('')
+    editor.commands.focus()
+    editor.commands.toggleCodeBlock()
+    typeText(editor, '/表')
+    expect(menu()).toBeNull()
+  })
+})
+
 describe('T24-5 · 写路径：debounce / 卸载补交 / 外部值回声不上写', () => {
   it('编辑不立即提交，debounce 后提交一次归一化后的 markdown', async () => {
     const h = setupEditor()
