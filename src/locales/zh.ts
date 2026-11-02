@@ -802,6 +802,34 @@ export const zh = {
     purgeHint: '彻底删除后无法从回收站恢复（本次会话仍可撤销）',
     purged: '已彻底删除「{name}」',
   },
+
+  // T82 尾部追加：导入 Markdown 文件为笔记
+  markdownImport: {
+    title: '导入 Markdown',
+    hint: '把 AI 生成的 .md 文件拖进来，可以一次选多个。每篇落成一篇笔记，落在「{notebook}」；正文原样保留，图片路径与外链不会自动搬运。',
+    choose: '选择文件',
+    reading: '读取中…',
+    dropHint: '把 .md 文件拖到这里（可多选）',
+    selectAll: '全选',
+    selectNone: '全不选',
+    count: '已选 {n} / {total} 篇',
+    skipped: '跳过 {n} 个',
+    importAction: '导入 {n} 篇',
+    importActionEmpty: '导入',
+    done: '已导入 {n} 篇笔记',
+    cancel: '取消',
+    meta: '{file} · {lines} 行 · {bytes}',
+    exists: '同名已存在',
+    fromFrontMatter: '标题来自 YAML 头',
+    fromHeading: '标题来自首个 # 标题',
+    fromFilename: '标题来自文件名',
+    titleHint: '这个标题是从文件里取出来的，导入后可以在文档树里改名',
+    titleHintFilename: '文件里没有标题，先按文件名命名，导入后可以在文档树里改名',
+    skipUnsupported: '不是 Markdown 文件',
+    skipTooLarge: '文件超过 2 MB',
+    skipEmpty: '空文件',
+    skipUnknown: '无法导入',
+  },
 } as const
 
 export type MsgKey = NestedKeyOf<typeof zh>

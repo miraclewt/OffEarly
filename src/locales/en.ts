@@ -727,4 +727,32 @@ export const en: Record<MsgKey, string> = {
   'trash.purgeConfirm': 'Click again to delete forever',
   'trash.purgeHint': 'Deleting forever cannot be undone from the trash (still undoable in this session)',
   'trash.purged': 'Deleted "{name}" forever',
+
+  // T82 尾部追加：导入 Markdown 文件为笔记
+  'markdownImport.title': 'Import Markdown',
+  'markdownImport.hint':
+    'Drop the .md files your AI produced here — you can pick several at once. Each file becomes a note in "{notebook}"; the body is kept verbatim, and image paths or external links are not carried over.',
+  'markdownImport.choose': 'Choose files',
+  'markdownImport.reading': 'Reading…',
+  'markdownImport.dropHint': 'Drop .md files here (multiple allowed)',
+  'markdownImport.selectAll': 'Select all',
+  'markdownImport.selectNone': 'Select none',
+  'markdownImport.count': '{n} / {total} selected',
+  'markdownImport.skipped': '{n} skipped',
+  'markdownImport.importAction': 'Import {n}',
+  'markdownImport.importActionEmpty': 'Import',
+  'markdownImport.done': 'Imported {n} notes',
+  'markdownImport.cancel': 'Cancel',
+  'markdownImport.meta': '{file} · {lines} lines · {bytes}',
+  'markdownImport.exists': 'Same title exists',
+  'markdownImport.fromFrontMatter': 'Title from YAML front matter',
+  'markdownImport.fromHeading': 'Title from the first # heading',
+  'markdownImport.fromFilename': 'Title from the file name',
+  'markdownImport.titleHint': 'This title was taken from the file — rename it in the doc tree after import',
+  'markdownImport.titleHintFilename':
+    'The file has no title, so the file name is used — rename it in the doc tree after import',
+  'markdownImport.skipUnsupported': 'Not a Markdown file',
+  'markdownImport.skipTooLarge': 'File is over 2 MB',
+  'markdownImport.skipEmpty': 'Empty file',
+  'markdownImport.skipUnknown': 'Cannot import',
 }

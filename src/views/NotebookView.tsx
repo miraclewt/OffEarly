@@ -35,6 +35,8 @@ import type { NotebookActionDeps } from '../controllers/notebookActions'
 import { applyTrashDoc } from '../controllers/trashActions'
 import { collectMeetingKeys, importMeetingNotes } from '../controllers/meetingImport'
 import type { MeetingLabels } from '../controllers/meetingImport'
+import { importMarkdownDocs } from '../controllers/markdownImport'
+import type { MarkdownImportDoc } from '../controllers/markdownImport'
 import type { IcsEvent } from '../domain/ics'
 import { patchNoteFontSize } from '../controllers/settingsActions'
 import type { CommandBus } from '../domain/commandBus'
@@ -56,6 +58,7 @@ import { NotePresenter } from './NotePresenter'
 import { NoteProperties } from './NoteProperties'
 import type { NotePropertyTask } from './NoteProperties'
 import { MeetingImportPanel } from './MeetingImportPanel'
+import { MarkdownImportPanel } from './MarkdownImportPanel'
 import {
   buildExportHtml,
   createAssetResolver,
@@ -206,6 +209,8 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
   const [notice, setNotice] = useState<string | null>(null)
   /** T62 · 会议导入浮层：纯 UI 态，不落盘（与导出菜单同口径）。 */
   const [importOpen, setImportOpen] = useState(false)
+  /** T82 · Markdown 导入浮层。 */
+  const [mdImportOpen, setMdImportOpen] = useState(false)
   /** T64 · 展示模式：打开那一刻**定格**正文（之后在后台改字不该让正在看的页跳来跳去）。 */
   const [presentPages, setPresentPages] = useState<{ open: boolean; markdown: string }>({
     open: false,
@@ -238,6 +243,16 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
 
   // T62：已导过的会议令牌（扫全库正文）。导入面板用它标「已导入」并默认不勾。
   const importedMeetingKeys = useMemo(() => collectMeetingKeys(vault.noteDocs), [vault.noteDocs])
+
+  /**
+   * T82 · 当前笔记本里已有的文档标题。只用来在导入面板上标「同名已存在」——
+   * 不阻止导入：同一个文件用户可能真的想导两次（比如改过一版），
+   * 该不该挡由用户看着这条标记决定。
+   */
+  const existingDocTitles = useMemo(
+    () => new Set(notebookDocs.map((doc) => doc.title)),
+    [notebookDocs],
+  )
 
   // 生成笔记用的正文模板文案：跟随当前界面语言，导入那一刻定格在笔记里
   const meetingLabels = useMemo<MeetingLabels>(
@@ -518,6 +533,25 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
     setNotice(t('meetingImport.done', { n: created.length }))
   }
 
+  /**
+   * T82 · 把勾选的 md 落成笔记。每篇一条命令（撤销一次回退一篇），
+   * 落在当前笔记本顶层：导入的笔记自成一组，不钻进当前选中的那篇下面。
+   */
+  function runMarkdownImport(docs: MarkdownImportDoc[]): void {
+    if (activeNotebookId === null || docs.length === 0) return
+    const ids = importMarkdownDocs(
+      bus,
+      vault,
+      { notebookId: activeNotebookId, docs, fallbackTitle: t('notebook.untitledDoc') },
+      deps,
+    )
+    const created = ids.filter((id): id is string => id !== null)
+    const first = created[0]
+    if (first === undefined) return
+    focusDoc(activeNotebookId, first)
+    setNotice(t('markdownImport.done', { n: created.length }))
+  }
+
   function renameDoc(doc: NoteDoc, title: string): void {
     setEditing(null)
     const trimmed = title.trim()
@@ -656,6 +690,16 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
               style={ICON_BUTTON}
             >
               <Icon name="calendar" size={13} />
+            </button>
+            <button
+              type="button"
+              data-testid="notebook-import-md"
+              aria-label={t('markdownImport.title')}
+              title={t('markdownImport.title')}
+              onClick={() => setMdImportOpen(true)}
+              style={ICON_BUTTON}
+            >
+              <Icon name="doc" size={13} />
             </button>
             <PaneToggle
               testId="notebook-tree-collapse"
@@ -1161,6 +1205,16 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
         t={t}
         importedKeys={importedMeetingKeys}
         onImport={runMeetingImport}
+      />
+
+      {/* T82 · Markdown 导入：选 / 拖 .md → 勾篇 → 落成笔记 */}
+      <MarkdownImportPanel
+        open={mdImportOpen}
+        onOpenChange={setMdImportOpen}
+        notebookName={activeNotebook?.name ?? ''}
+        t={t}
+        existingTitles={existingDocTitles}
+        onImport={runMarkdownImport}
       />
 
       {notice === null ? null : (

@@ -431,6 +431,73 @@ describe('T62 · 从 .ics 导入会议', () => {
   })
 })
 
+describe('T82 · 导入 Markdown 文件', () => {
+  const seed = { notebooks: [notebook('nb1', 'AI 笔记')], noteDocs: [] }
+
+  const A = ['---', 'title: 周报', 'tags: [工作]', '---', '', '本周进展。', ''].join('\n')
+  const B = ['# 季度复盘', '', '## 数据', '', '- 一条', ''].join('\n')
+
+  function choose(...files: File[]): void {
+    fireEvent.change(screen.getByTestId('markdown-import-file-input'), { target: { files } })
+  }
+
+  it('文档树头部有入口，点开后是导入面板', () => {
+    setup(seed)
+    expect(screen.queryByTestId('markdown-import')).toBeNull()
+    fireEvent.click(screen.getByTestId('notebook-import-md'))
+    expect(screen.getByTestId('markdown-import')).toBeTruthy()
+    expect(screen.getByTestId('markdown-import').textContent).toContain('AI 笔记')
+  })
+
+  it('一次选两个文件 → 确认导入：两篇都落进当前笔记本，正文原样', async () => {
+    const { store, rerender } = setup(seed)
+    fireEvent.click(screen.getByTestId('notebook-import-md'))
+    choose(new File([A], 'a.md', { type: 'text/markdown' }), new File([B], 'b.md', { type: 'text/markdown' }))
+    await waitFor(() => expect(screen.getAllByTestId('markdown-import-row')).toHaveLength(2))
+
+    fireEvent.click(screen.getByTestId('markdown-import-confirm'))
+
+    const docs = store.getVault().noteDocs
+    expect(docs).toHaveLength(2)
+    expect(docs.map((created) => created.title)).toEqual(['周报', '季度复盘'])
+    expect(docs[0]?.content).toBe('本周进展。\n')
+    expect(docs[0]?.tags).toEqual(['工作'])
+    expect(docs[1]?.content).toBe('## 数据\n\n- 一条\n')
+    // 两篇的排序键不能撞（批量导入用的是同一份旧快照）
+    expect(new Set(docs.map((created) => created.order)).size).toBe(2)
+
+    rerender()
+    expect(screen.getByTestId('notebook-export-notice').textContent).toContain('已导入 2 篇笔记')
+    expect(screen.queryByTestId('markdown-import')).toBeNull()
+  })
+
+  it('只勾一篇时另一篇不进来', async () => {
+    const { store } = setup(seed)
+    fireEvent.click(screen.getByTestId('notebook-import-md'))
+    choose(new File([A], 'a.md', { type: 'text/markdown' }), new File([B], 'b.md', { type: 'text/markdown' }))
+    await waitFor(() => expect(screen.getAllByTestId('markdown-import-row')).toHaveLength(2))
+    fireEvent.click(screen.getByTestId('markdown-import-select-none'))
+    // 行序与选文件顺序一致：第一行是 a.md（周报）
+    const boxes = screen.getAllByRole('checkbox') as HTMLInputElement[]
+    fireEvent.click(boxes[0] as HTMLInputElement)
+    fireEvent.click(screen.getByTestId('markdown-import-confirm'))
+    expect(store.getVault().noteDocs.map((created) => created.title)).toEqual(['周报'])
+  })
+
+  it('导入后 Ctrl+Z 一次只回退一篇', async () => {
+    const { store, bus, rerender } = setup(seed)
+    fireEvent.click(screen.getByTestId('notebook-import-md'))
+    choose(new File([A], 'a.md', { type: 'text/markdown' }), new File([B], 'b.md', { type: 'text/markdown' }))
+    await waitFor(() => expect(screen.getAllByTestId('markdown-import-row')).toHaveLength(2))
+    fireEvent.click(screen.getByTestId('markdown-import-confirm'))
+
+    bus.undo()
+    expect(store.getVault().noteDocs.map((created) => created.title)).toEqual(['周报'])
+    rerender()
+    expect(screen.getByTestId('notebook-tree').textContent).toContain('周报')
+  })
+})
+
 describe('T73 · 大纲栏：计数徽标 + 宽屏自动展开', () => {
   const seed = {
     notebooks: [notebook('nb1', '研发手册')],

@@ -99,6 +99,11 @@ export function applyCreateDoc(
     /** 新建文档的初始正文（通常是空串，测试/模板场景可预填）。 */
     content?: string
     /**
+     * T82 · 新建即带的标签（Markdown 导入从 front matter 里带过来）。
+     * 空数组 / 不传 = 不落这个键，与 T73「空值 = 没有这个键」同一口径。
+     */
+    tags?: readonly string[]
+    /**
      * 显式排序键。批量新建（如 .ics 一次导入多场会议）时必须由调用方给：
      * 每次 apply 后传入的 `vault` 快照仍是旧的，`nextDocOrder` 会重复算出同一个键。
      */
@@ -113,6 +118,7 @@ export function applyCreateDoc(
     : vault.noteDocs.find((doc) => doc.id === input.parentId)
   const parentId = parent !== undefined && parent.notebookId === input.notebookId ? parent.id : null
   const now = stamp(deps)
+  const tags = normalizeNoteTags(input.tags ?? [])
   const doc: NoteDoc = {
     id: genId(deps),
     notebookId: input.notebookId,
@@ -123,6 +129,10 @@ export function applyCreateDoc(
     createdAt: now,
     updatedAt: now,
   }
+  // 标签单独后补：对象是逐个键写出来的，直接给 `tags: undefined` 会留一个值为
+  // undefined 的键（`'tags' in doc` 为真），序列化后虽然在 JSON 里看不见，但类型与
+  // 判定口径会分叉。有标签才加这个键，没有就一个字都不多。
+  if (tags.length > 0) doc.tags = tags
   bus.apply(createNoteDocCommand(doc))
   return doc.id
 }
