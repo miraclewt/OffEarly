@@ -255,7 +255,7 @@ test('导出本文档为 HTML：浏览器下载一份自包含文件，图已渲
   expect(html).not.toMatch(/<script\b[^>]*src=/i)
 })
 
-test('收起左栏（T72/T57）：笔记本并进切换器，收起文档树后正文变宽、宽屏停在阅读上限', async ({ page }) => {
+test('收起左栏（T72/T57/T83）：笔记本并进切换器，正文三档宽度切换并在宽屏各停其位', async ({ page }) => {
   await openAppWith(page, withNotebooks([{ title: '正文', content: '# 正文\n\n收起面板之后这一行还得在。' }]))
   await connectWorkspace(page, { create: false })
   await page.getByTestId('view-notebook').click()
@@ -298,9 +298,41 @@ test('收起左栏（T72/T57）：笔记本并进切换器，收起文档树后�
   await expect(page.getByTestId('notebook-tree')).toBeVisible()
   expect(await width()).toBeCloseTo(start, 0)
 
-  // 宽屏（1600）下正文列停在上限：窗口再宽也不会把一行拉到读不完
-  await page.setViewportSize({ width: 1600, height: 900 })
-  expect(await width()).toBeLessThan(1000)
+  // 宽屏（2560 / 27" 2K 档）下三档宽度的相对关系：
+  // T83 默认「适中」放宽了上限；「窄」回到 T57 的阅读上限；「全宽」吃满整个外围。
+  await page.setViewportSize({ width: 2560, height: 1440 })
+  // uiScale 走 rAF 跟随 resize：等档位真正落到 1.3 再量，否则量到的还是上一档的换算
+  await expect
+    .poll(async () => page.evaluate(() => document.documentElement.dataset.uiScale))
+    .toBe('1.3')
+
+  const medium = await width()
+  expect(medium).toBeGreaterThan(1000)
+
+  await page.getByTestId('notebook-width').click()
+  await page.getByTestId('notebook-width-narrow').click()
+  const narrow = await width()
+  expect(narrow).toBeGreaterThan(900)
+  expect(narrow).toBeLessThan(medium)
+
+  await page.getByTestId('notebook-width').click()
+  await page.getByTestId('notebook-width-full').click()
+  const full = await width()
+  expect(full).toBeGreaterThan(1500)
+  expect(full).toBeGreaterThan(medium)
+
+  // 切回默认适中，档位选择被记住：刷新后仍是适中
+  // （fake fs 活在页面上，reload 会丢——先取快照再回放，与上面重开用例同口径）
+  await page.getByTestId('notebook-width').click()
+  await page.getByTestId('notebook-width-medium').click()
+  expect(await width()).toBeCloseTo(medium, 0)
+  const snapshot = await readFakeFs(page)
+  await seedFakeFs(page, snapshot)
+  await page.reload()
+  await expect(page.getByText('连接数据文件夹')).toBeVisible()
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-notebook').click()
+  expect(await width()).toBeCloseTo(medium, 0)
 })
 
 const TABLE_DOC = [

@@ -560,6 +560,12 @@ export const en: Record<MsgKey, string> = {
   'notebook.collapseTree': 'Collapse document tree',
   'notebook.expandTree': 'Expand document tree',
   'notebook.railTree': 'Docs',
+  // note width gears: narrow = reading first, medium = default (adaptive), full = charts/tables first
+  'notebook.width': 'Text width',
+  'notebook.widthNarrow': 'Narrow',
+  'notebook.widthMedium': 'Medium',
+  'notebook.widthFull': 'Full width',
+  'notebook.widthHint': 'Your choice is remembered for next time',
   // T50 tail-append: export (key set must match zh.ts exactly)
   'notebook.export': 'Export',
   'notebook.exportDoc': 'Export this doc as HTML',

@@ -653,6 +653,12 @@ export const zh = {
     collapseTree: '收起文档树',
     expandTree: '展开文档树',
     railTree: '文档',
+    // 正文宽度三档：窄 = 阅读优先，适中 = 默认（随屏自适应），全宽 = 图表/表格优先
+    width: '正文宽度',
+    widthNarrow: '窄',
+    widthMedium: '适中',
+    widthFull: '全宽',
+    widthHint: '记住本次选择，下次打开沿用',
     // T50 追加：导出
     export: '导出',
     exportDoc: '导出本文档为 HTML',

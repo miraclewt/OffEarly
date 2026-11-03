@@ -205,6 +205,13 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
    * 否则他刚关掉、切一篇文档又弹回来。
    */
   const outlineTouchedRef = useRef(false)
+  /**
+   * T83 · 正文宽度档（窄 / 适中 / 全宽）。纯视图偏好：不进 vault、不可撤销，
+   * 只写 localStorage（大纲栏的 T58 口径是「不落盘」，那个是每次开文档都要重新
+   * 判断的瞬态；宽度是稳定的个人习惯，用户明确要求记住）。
+   */
+  const [widthMode, setWidthMode] = useState<NoteWidthMode>(readNoteWidthMode)
+  const [widthMenu, setWidthMenu] = useState(false)
   const [exporting, setExporting] = useState<ExportKind | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   /** T62 · 会议导入浮层：纯 UI 态，不落盘（与导出菜单同口径）。 */
@@ -914,6 +921,7 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
           </div>
         ) : (
           <div
+            data-testid="notebook-editor-column"
             style={{
               flex: 1,
               minHeight: 0,
@@ -921,9 +929,13 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
               flexDirection: 'column',
               padding: px('10px 16px 14px'),
               // T57 · 阅读宽度上限：宽屏下正文不再一路铺到 1900px。
+              // T83 · 上限随档位变：窄 = T57 原值，适中 = 放宽后的默认，全宽 = 不加上限。
               // 整列（面包屑 / 标题 / 正文 / 工具栏）一起收，这样标题左缘与正文左缘仍然对齐；
               // 用 margin auto 居中，而不是靠左留一条空右边。
-              maxWidth: sp(NOTE_READING_WIDTH),
+              maxWidth:
+                widthMode === 'full'
+                  ? undefined
+                  : sp(widthMode === 'narrow' ? NOTE_READING_WIDTH_NARROW : NOTE_READING_WIDTH_MEDIUM),
               width: '100%',
               // T72 · 补上 border-box：全站没有全局 `box-sizing`，而这里同时有 width:100%
               // 和左右各 16px 的内边距。窄窗口下正文列会因此比可用宽度多出 32px，
@@ -952,6 +964,53 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
                 {t('notebook.updatedAt', { date: activeDoc.updatedAt.slice(0, 10) })}
               </span>
               {/* T50：导出入库。菜单挂在按钮下方，backdrop 负责「点外面就关」。 */}
+              {/* T83 · 正文宽度三档切换：默认适中；记住选择（localStorage），纯视图偏好不进 vault */}
+              <span style={{ position: 'relative', display: 'flex', flex: '0 0 auto' }}>
+                <button
+                  type="button"
+                  data-testid="notebook-width"
+                  aria-haspopup="menu"
+                  aria-expanded={widthMenu}
+                  title={t('notebook.width')}
+                  onClick={() => setWidthMenu((open) => !open)}
+                  style={widthMenu ? { ...EXPORT_BUTTON, color: INDIGO, background: 'var(--oe-accent-tint)' } : EXPORT_BUTTON}
+                >
+                  <Icon name="width" size={12} />
+                  <span>{t('notebook.width')}</span>
+                </button>
+                {widthMenu ? (
+                  <>
+                    <div
+                      data-testid="notebook-width-backdrop"
+                      onMouseDown={() => setWidthMenu(false)}
+                      style={MENU_BACKDROP}
+                    />
+                    <div role="menu" data-testid="notebook-width-menu" style={EXPORT_MENU}>
+                      <div style={EXPORT_MENU_HINT}>{t('notebook.widthHint')}</div>
+                      {NOTE_WIDTH_MODES.map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          role="menuitem"
+                          data-testid={`notebook-width-${mode}`}
+                          onClick={() => {
+                            setWidthMode(mode)
+                            writeNoteWidthMode(mode)
+                            setWidthMenu(false)
+                          }}
+                          style={
+                            widthMode === mode
+                              ? { ...EXPORT_MENU_ITEM, color: INDIGO }
+                              : EXPORT_MENU_ITEM
+                          }
+                        >
+                          {t(NOTE_WIDTH_LABEL_KEYS[mode])}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
+              </span>
               {/* T58：大纲 + 反向链接是一个可选右栏；T73 起带计数徽标，并在宽屏上自动展开 */}
               <button
                 type="button"
@@ -1734,8 +1793,44 @@ const ICON_BUTTON: CSSProperties = {
  * T57 · 正文阅读宽度上限（逻辑像素，随 uiScale 缩放）。
  * 760 是「13px 字号下约 55 个汉字 + 表格/代码不吃紧」的折中：比 700 宽一点，
  * 长表格不至于横向挤；再宽就回到「一行读不完」的老问题。
+ *
+ * T83 · 单一上限改成三档（窄 / 适中 / 全宽），用户在产品评审后拍板：
+ * 笔记不只有纯文本——Mermaid、表格、看板式内容在窄列里是真痛点；
+ * 但纯文字纪要在 27 寸全宽下行长会到 130+ 字符，扫读效率反而下降。
+ * 默认「适中」：上限放宽到 1100，且因为上限与字号同乘 uiScale，
+ * 任何档下一行字数都稳定落在约 80–85 个汉字。
  */
-const NOTE_READING_WIDTH = 760
+const NOTE_READING_WIDTH_NARROW = 760
+const NOTE_READING_WIDTH_MEDIUM = 1100
+
+/** 正文宽度三档。存 localStorage 的是 mode 字符串本身。 */
+type NoteWidthMode = 'narrow' | 'medium' | 'full'
+const NOTE_WIDTH_MODES: ReadonlyArray<NoteWidthMode> = ['narrow', 'medium', 'full']
+const NOTE_WIDTH_STORAGE_KEY = 'oe.noteWidthMode'
+
+/** 档位 → 文案键。t() 的键是字面量联合类型，动态拼模板字符串过不了 tsc，这里显式映射。 */
+const NOTE_WIDTH_LABEL_KEYS: Record<NoteWidthMode, 'notebook.widthNarrow' | 'notebook.widthMedium' | 'notebook.widthFull'> = {
+  narrow: 'notebook.widthNarrow',
+  medium: 'notebook.widthMedium',
+  full: 'notebook.widthFull',
+}
+
+function readNoteWidthMode(): NoteWidthMode {
+  try {
+    const raw = window.localStorage.getItem(NOTE_WIDTH_STORAGE_KEY)
+    return (NOTE_WIDTH_MODES as ReadonlyArray<string>).includes(raw ?? '') ? (raw as NoteWidthMode) : 'medium'
+  } catch {
+    return 'medium'
+  }
+}
+
+function writeNoteWidthMode(mode: NoteWidthMode): void {
+  try {
+    window.localStorage.setItem(NOTE_WIDTH_STORAGE_KEY, mode)
+  } catch {
+    // 私密浏览等场景写不进去：当次会话内切换仍生效，下次打开回默认。
+  }
+}
 
 /**
  * T73 · 大纲栏自动展开的门槛：窗口要够宽，文档要有足够多的标题。

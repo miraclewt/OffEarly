@@ -6,7 +6,7 @@
 // 而不是「回调有没有被调用」——因为「删错了能不能撤销」是这层最重要的承诺。
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createCommandBus } from '../../src/domain/commandBus'
 import { createVaultStore } from '../../src/domain/store'
@@ -685,5 +685,54 @@ describe('T73-2 · 文档属性行：话题 / 关联任务 / 标签', () => {
     )
     fireEvent.click(view2.getByTestId('note-prop-task-open-k1'))
     expect(onOpenTask).toHaveBeenCalledWith('k1')
+  })
+})
+
+describe('T83 · 正文宽度三档（窄 / 适中 / 全宽）', () => {
+  const seed = {
+    notebooks: [notebook('nb1', '手册')],
+    noteDocs: [doc('d1', 'nb1', null, 'U', '正文', '# 正文')],
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  const columnMaxWidth = (): string =>
+    (screen.getByTestId('notebook-editor-column') as HTMLDivElement).style.maxWidth
+
+  it('默认适中档：上限是 1100 逻辑像素（随 uiScale 缩放）', () => {
+    setup(seed)
+    expect(columnMaxWidth()).toContain('1100px')
+  })
+
+  it('菜单切到窄档：上限回落 760，选择写进 localStorage', () => {
+    setup(seed)
+    fireEvent.click(screen.getByTestId('notebook-width'))
+    expect(screen.getByTestId('notebook-width-menu')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('notebook-width-narrow'))
+    expect(columnMaxWidth()).toContain('760px')
+    expect(window.localStorage.getItem('oe.noteWidthMode')).toBe('narrow')
+    // 菜单点选后收起
+    expect(screen.queryByTestId('notebook-width-menu')).toBeNull()
+  })
+
+  it('全宽档：maxWidth 解除，整列吃满可用宽度', () => {
+    setup(seed)
+    fireEvent.click(screen.getByTestId('notebook-width'))
+    fireEvent.click(screen.getByTestId('notebook-width-full'))
+    expect(columnMaxWidth()).toBe('')
+  })
+
+  it('重新打开时沿用上次的选择（localStorage → 初始档位）', () => {
+    window.localStorage.setItem('oe.noteWidthMode', 'narrow')
+    setup(seed)
+    expect(columnMaxWidth()).toContain('760px')
+  })
+
+  it('localStorage 里的脏值回退到默认适中档', () => {
+    window.localStorage.setItem('oe.noteWidthMode', 'whatever')
+    setup(seed)
+    expect(columnMaxWidth()).toContain('1100px')
   })
 })
