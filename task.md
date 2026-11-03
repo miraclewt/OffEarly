@@ -1714,3 +1714,19 @@ tests/**                         与 src 镜像
  | 遗留: 无（T82 的遗留项已在 T82 记录里，本次发版未新增）
  | 越界改动: 本次发版提交的改动面只有版本号三处 + `docs/t82-md-import.png` / `docs/t82-tree-header.png` 两张证据图随 release 提交入库；源码、测试、e2e、capture 均在上一条提交
  | 全量验证: `tsc --noEmit` **0** / `npm test` **1556 passed (85 files)** / e2e **86 passed + 1 skipped** / `npm run build` **11/11**（本机 6,559,255；CI 侧 6,559,231，差 24 个 CR）/ 发布附件 e2e 抽检 **2 passed** / 远端 refs：`refs/heads/feat/foundation` = `eec46f6`、`refs/tags/v0.8.0` 指向 `eec46f6`
+- [2026-11-03] T83 笔记正文宽度三档（窄 / 适中 / 全宽） | agent:qoder | commit: `84466d3 T83: note width gears (narrow / medium / full)` | 验收: 用户截图反馈「笔记区域太小了，尤其在 27 寸大屏上，是否应该扩展到整个外围」→ 以三方案对比图回答（现状窄列 / 全宽铺满 / 弹性自适应 + 档位），用户拍板 C。实现：`NOTE_READING_WIDTH` 拆成三档常量（窄 760 = T57 原值、适中 1100 = 新默认、全宽不设上限），上限继续乘 uiScale——任何屏上一行都稳定约 80–85 个汉字；面包屑工具条新增「正文宽度」菜单（复用导出菜单的 backdrop 与菜单样式，当前档靛蓝高亮，选中即收起），档位写 `localStorage['oe.noteWidthMode']`（纯视图偏好，不进 vault、不占撤销栈），读取做白名单校验、脏值回退适中；新增 `width` 图标（横贯箭头 + 两条不等长横线，与 outline 的层级语义区分）。列容器补 `data-testid="notebook-editor-column"` 供单测断言 maxWidth。 | 备注:
+①**默认值故意变了**：同样的屏幕，旧笔记打开比 0.8.0 宽（停在「适中」档）；想回原阅读宽度切「窄」即可且会被记住，Release 说明里写明，避免「怎么突然变宽了」的意外。
+②**不选全宽做默认**：纯文字纪要在 27 寸全宽下行长 130+ 字符，扫读反而变差；「所有内容一种宽度」是错误抽象——三档分别覆盖文字党与图表党，成本只是一个 max-width 变量 + 一个切换器。
+③**e2e 时序坑**：uiScale 走 rAF 跟随 resize，`setViewportSize` 后立刻量宽度会读到上一档的换算值（实测 1014.6 而非 1430），必须先 `expect.poll` 等 `html[data-ui-scale]` 落档再断言。
+④**Playwright 每次运行会清空 `test-results/`**：截图用例输出目录改为 `docs/`（与 t70 探针同口径），否则成品图会被下一次 e2e 连目录一起删掉。
+ | 遗留: ①「全宽」未做单行字数二次保护（按 uiScale 等比缩放已使 2K–5K 行宽一致，5K 全宽一行约 130 汉字，靠用户自选档位规避）；②档位只在笔记本视图生效，展示模式（T64）与导出 HTML 仍用固定版心；③未加埋点验证「全宽」真实选中率，若确认几乎没人用，可收敛为两档。
+ | 越界改动: 改动 `src/views/NotebookView.tsx`（三档常量 + localStorage 读写 + 菜单 + maxWidth 逻辑 + 列 testid）、`src/views/IconSprite.tsx`（+width 图标）、`src/locales/{zh,en}.ts`（+5 键）、`tests/views/NotebookView.test.tsx`（+5 例）、`e2e/10-notebook.spec.ts`（T57 用例改为三档断言 + 刷新保持）、新增 `capture/t83-width-gears.spec.ts`。零新依赖。
+ | 全量验证: `tsc --noEmit` **0** / `npm test` **1561 passed (85 files)**（基线 1556，+5）/ `npx playwright test --trace=off` **86 passed + 1 skipped** / `npm run build` **11/11**（产物 **6,561,041 字节**，余量 1,827,567）
+- [2026-11-03] 发版 v0.9.0（T83 入库） | agent:qoder | commits: `84466d3 T83: note width gears (narrow / medium / full)` / `e66c51c chore(release): 0.9.0` | 验收: 发版前全量复跑 `tsc --noEmit` **0** / `npm test` **1561 passed (85 files)** / `npx playwright test --trace=off` **86 passed + 1 skipped** / `npm run build` **11/11**（产物 **6,561,041 字节**，余量 1,827,567）/ `npm ci --dry-run` 通过；版本号三处改 `0.9.0`（`package.json`、`package-lock.json` 顶部与 `packages[""]`、`vaultRepository.ts` 的 `appVersion: 'OffEarly 0.9.0'`）；annotated tag `v0.9.0` 正文即 Release 说明 → push tag（第 1 次即成）→ 再单独 push 分支（第 1 次即成）→ CI `release.yml` 自行构建并挂附件（约 90 秒出 Release） | 备注:
+①发版内容 = T83 笔记正文宽度三档（窄 / 适中 / 全宽 + 偏好记忆）。
+②push 本轮一次通过（与 0.8.0 的 7 连败形成对照）：网络抖动无规律，仍按「看 push 自己的输出、不以 `ls-remote` 复核」执行。
+③附件与本地产物差 24 字节，仍为 CRLF 行尾差异：附件 **0 个 CR**（6,561,017）、本地 **24 个 CR**（6,561,041）；附件 sha256 `9506f935…ee3b3` 与 Release 公示值逐字一致，不处理。
+④发版后直接验「用户下载到的那个文件」：`curl` 实下载附件 → 静态探针（外链 0 / `type="module"` 0 / DOCTYPE 在 / 「正文宽度」标记在）→ 临时换到 `dist/OffEarly.html` 位置跑 `e2e/10-notebook.spec.ts`（含 T83 三档用例）→ **11 passed** → 备份还原。
+ | 遗留: 无（T83 的遗留项已在 T83 记录里，本次发版未新增）
+ | 越界改动: 本次发版提交的改动面只有版本号三处 + `docs/t83-width-{narrow,medium,full,menu}-2560.png` 四张证据图随 release 提交入库；源码、测试、e2e、capture 均在上一条提交
+ | 全量验证: `tsc --noEmit` **0** / `npm test` **1561 passed (85 files)** / e2e **86 passed + 1 skipped** / `npm run build` **11/11**（本机 6,561,041；CI 侧 6,561,017，差 24 个 CR）/ 发布附件 e2e 抽检 **11 passed** / 远端 refs：`refs/heads/feat/foundation` = `e66c51c`、`refs/tags/v0.9.0` 指向 `e66c51c`
