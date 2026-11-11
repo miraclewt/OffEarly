@@ -145,6 +145,28 @@ describe('T49-6 · 文档树', () => {
     expect(screen.getByTestId('doc-row-d2').getAttribute('aria-level')).toBe('2')
   })
 
+  it.each([
+    ['d3', 'ArrowUp', ['d1', 'd3', 'd2']],
+    ['d2', 'ArrowUp', ['d2', 'd1', 'd3']],
+    ['d1', 'ArrowUp', ['d1', 'd2', 'd3']],
+    ['d1', 'ArrowDown', ['d2', 'd1', 'd3']],
+    ['d3', 'ArrowDown', ['d1', 'd2', 'd3']],
+  ])('Alt+%s %s 只移动一位并保留边界', (id, key, expected) => {
+    const { store, bus, rerender } = setup({
+      notebooks: [notebook('nb1', '手册')],
+      noteDocs: [doc('d1', 'nb1', null, 'T', 'A'), doc('d2', 'nb1', null, 'U', 'B'), doc('d3', 'nb1', null, 'V', 'C')],
+    })
+    fireEvent.keyDown(screen.getByTestId(`doc-row-${id}`), { key, altKey: true })
+    rerender()
+    expect(screen.getAllByRole('treeitem').map((row) => row.getAttribute('data-testid'))).toEqual(
+      (expected as string[]).map((item) => `doc-row-${item}`),
+    )
+    if (bus.canUndo()) {
+      bus.undo()
+      expect(store.getVault().noteDocs.map((item) => item.order)).toEqual(['T', 'U', 'V'])
+    }
+  })
+
   it('折叠父文档后子文档从树上消失，再点一次回来', () => {
     setup(seed)
     fireEvent.click(screen.getByTestId('doc-toggle-d1'))
@@ -274,6 +296,37 @@ describe('T50 · 导出与正文字号', () => {
 
     fireEvent.mouseDown(screen.getByTestId('notebook-export-backdrop'))
     expect(screen.queryByTestId('notebook-export-menu')).toBeNull()
+  })
+
+  it.each([false, true])('源码编辑导出包含最新正文（已提交=%s）', async (saved) => {
+    const { store, rerender } = withDoc()
+    await screen.findByTestId('note-tool-bold')
+    fireEvent.click(screen.getByTestId('note-mode-toggle'))
+    const markdown = '# 最新源码\n\n尚未切回富文本的修改。'
+    fireEvent.change(screen.getByTestId('note-source'), { target: { value: markdown } })
+    if (saved) {
+      await waitFor(() => expect(store.getVault().noteDocs[0]?.content).toBe(markdown))
+      rerender()
+    }
+    const blobs: Blob[] = []
+    const original = URL.createObjectURL
+    URL.createObjectURL = (blob: Blob) => { blobs.push(blob); return 'blob:export-test' }
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    try {
+      fireEvent.click(screen.getByTestId('notebook-export'))
+      fireEvent.click(screen.getByTestId('notebook-export-markdown'))
+      expect(blobs).toHaveLength(1)
+      const text = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(reader.error)
+        reader.readAsText(blobs[0]!)
+      })
+      expect(text).toBe(markdown)
+    } finally {
+      URL.createObjectURL = original
+      click.mockRestore()
+    }
   })
 
   it('A+ / A- 直接把字号写进 settings（可撤销的一条命令）', () => {

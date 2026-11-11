@@ -17,7 +17,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactElement, ReactNode } from 'react'
-import type { Editor } from '@tiptap/core'
 import dayjs from 'dayjs'
 
 import {
@@ -53,7 +52,7 @@ import { createI18n } from '../locales/i18n'
 import type { MsgKey, TranslateParams } from '../locales/i18n'
 import { Icon } from './IconSprite'
 import { NoteEditor } from './NoteEditor'
-import type { NoteAssetsPort, NoteLinkTarget } from './NoteEditor'
+import type { NoteAssetsPort, NoteLinkTarget, NoteMarkdownHandle } from './NoteEditor'
 import { NotePresenter } from './NotePresenter'
 import { NoteProperties } from './NoteProperties'
 import type { NotePropertyTask } from './NoteProperties'
@@ -227,7 +226,7 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
    * 当前编辑器的实例：导出要取「用户刚打完、还在 400ms debounce 里」的内容。
    * 只读 vault.noteDocs 会导出上一版——这正是过去所有"导出的和屏幕上不一样"的根因。
    */
-  const editorRef = useRef<Editor | null>(null)
+  const editorRef = useRef<NoteMarkdownHandle | null>(null)
 
   const notebooks = useMemo(
     () => [...vault.notebooks].sort((a, b) => (a.order < b.order ? -1 : a.order > b.order ? 1 : 0)),
@@ -1173,9 +1172,7 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
                 fontSize={vault.settings.noteFontSize}
                 onFontSizeChange={(size) => patchNoteFontSize(bus, vault, size)}
                 // 导出要取"屏幕上这一刻"的内容，而不是上一次落盘的内容
-                onReady={(instance) => {
-                  if (instance !== null) editorRef.current = instance
-                }}
+                markdownRef={editorRef}
                 style={{ flex: 1, minHeight: 0 }}
               />
             </div>
@@ -1405,7 +1402,7 @@ export function NotebookView(props: NotebookViewProps): ReactElement {
             if (event.key === 'ArrowUp' && selfAt > 0) {
               applyMoveDoc(bus, vault, doc.id, {
                 parentId: doc.parentId,
-                beforeId: siblingIds[selfAt - 2] ?? null,
+                beforeId: siblingIds[selfAt - 1] ?? null,
               })
             } else if (event.key === 'ArrowDown' && selfAt < siblingIds.length - 1) {
               applyMoveDoc(bus, vault, doc.id, {

@@ -95,6 +95,49 @@ test('新建笔记本 → 新建文档 → 写 Markdown → 落盘 → 重开仍
   await expect(page.getByTestId('note-editor-content')).toContainText('没有快照的发布不叫发布')
 })
 
+test('源码模式修改后导出 Markdown 读取最新草稿', async ({ page }) => {
+  await openAppWith(page, withNotebooks([{ title: '源码导出', content: '旧正文' }]))
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-notebook').click()
+  await expect(page.getByTestId('note-editor-content')).toBeVisible()
+
+  await page.getByTestId('note-mode-toggle').click()
+  const markdown = '# 最新源码\n\n尚未切回富文本的修改。'
+  await page.getByTestId('note-source').fill(markdown)
+
+  await page.getByTestId('notebook-export').click()
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByTestId('notebook-export-markdown').click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe('源码导出.md')
+  const filePath = await download.path()
+  expect(filePath).not.toBeNull()
+  expect(readFileSync(filePath as string, 'utf8')).toBe(markdown)
+})
+
+test('文档树 Alt+↑ 只上移一位，而不是跳到末尾', async ({ page }) => {
+  await openAppWith(
+    page,
+    withNotebooks([
+      { title: 'A', content: '' },
+      { title: 'B', content: '' },
+      { title: 'C', content: '' },
+    ]),
+  )
+  await connectWorkspace(page, { create: false })
+  await page.getByTestId('view-notebook').click()
+
+  await page.getByTestId('doc-row-doc-e2e-2').press('Alt+ArrowUp')
+  await expect
+    .poll(() =>
+      page
+        .getByTestId('notebook-tree')
+        .locator('[role="treeitem"]')
+        .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-testid'))),
+    )
+    .toEqual(['doc-row-doc-e2e-2', 'doc-row-doc-e2e-1', 'doc-row-doc-e2e-3'])
+})
+
 test('图片缩放：选 50% 后正文落成 <img width="50%">，重开尺寸还在', async ({ page }) => {
   await openAppWith(
     page,

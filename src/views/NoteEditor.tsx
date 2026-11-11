@@ -1092,6 +1092,10 @@ export interface NoteAssetsPort {
   subscribe?: (listener: () => void) => () => void
 }
 
+export interface NoteMarkdownHandle {
+  getMarkdown(): string
+}
+
 export interface NoteEditorProps {
   /** 当前笔记（Markdown 纯文本）。 */
   value: string
@@ -1109,6 +1113,8 @@ export interface NoteEditorProps {
   onAssetRejected?: (reason: AssetRejectReason | 'failed') => void
   /** 编辑器就绪句柄（宿主/测试用）；卸载时回送 null。 */
   onReady?: (editor: Editor | null) => void
+  /** 模式无关的当前 Markdown；源码模式下读草稿而不是隐藏的富文本实例。 */
+  markdownRef?: { current: NoteMarkdownHandle | null }
   /** 覆盖 debounce 毫秒数（测试确定化用）。 */
   debounceMs?: number
   /** 空内容时的占位提示；省略用通用文案。 */
@@ -1289,6 +1295,8 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   const [rejectReason, setRejectReason] = useState<AssetRejectReason | 'failed' | null>(null)
   /** 富文本 / Markdown 源码两种模式（T49）。源码模式是给「想直接改 md」的人开的后门。 */
   const [mode, setMode] = useState<'rich' | 'source'>('rich')
+  const modeRef = useRef(mode)
+  modeRef.current = mode
   const [sourceDraft, setSourceDraft] = useState(props.value)
   const [charCount, setCharCount] = useState(() => countNoteChars(props.value))
   /** T63 · 表格工具条（null = 光标不在表格里，不渲染）。 */
@@ -1323,6 +1331,15 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
    * 这一次外部同步必须跳过，否则刚载入的源码内容会被旧值覆盖回去。
    */
   const skipSyncRef = useRef(false)
+  const markdownRef = props.markdownRef
+  useEffect(() => {
+    if (markdownRef === undefined) return
+    markdownRef.current = { getMarkdown: () => latestRef.current }
+    return () => {
+      markdownRef.current = null
+    }
+  }, [markdownRef])
+
   const commitRef = useRef(props.onCommit)
   commitRef.current = props.onCommit
   const assetsRef = useRef(props.assets)
@@ -1377,7 +1394,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
   /** 插入一张图：落盘（宿主）→ 拿到 src → 在光标处插图片节点（markdown 由编辑器生成）。 */
   const insertFiles = useCallback(async (files: readonly File[]) => {
     const assets = assetsRef.current
-    if (assets === undefined) return
+    if (assets === undefined || modeRef.current !== 'rich') return
     for (const file of files) {
       const result = await assets.insert(file)
       if (!result.ok) {
@@ -1385,6 +1402,7 @@ export function NoteEditor(props: NoteEditorProps): ReactElement {
         rejectedRef.current?.(result.reason)
         continue
       }
+      if (modeRef.current !== 'rich') continue
       const instance = editorRef.current
       if (instance === null) continue
       instance.chain().focus().setImage({ src: result.src, alt: result.alt ?? '' }).run()

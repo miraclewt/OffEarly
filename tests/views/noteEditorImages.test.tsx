@@ -9,7 +9,7 @@
 // 粘贴只读 paste 事件的 clipboardData（T01 R4 在企业 Edge 实测通过的那条路径），
 // 不使用 navigator.clipboard.read()——它额外要求前台焦点与 clipboard-read 权限。
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createI18n } from '../../src/locales/i18n'
@@ -138,6 +138,47 @@ describe('T25-1 · 三条插入路径都汇到 assets.insert', () => {
     await waitFor(() => expect(port.insert).toHaveBeenCalledTimes(1))
     expect(port.insert.mock.calls[0]?.[0].name).toBe('drop.png')
     await expectCommitted(onCommit, '![](assets/a1.png)')
+  })
+
+  it.each(['paste', 'drop'])('源码模式 %s 图片不会覆盖正文', async (kind) => {
+    const { port, onCommit } = setup({ value: 'original' })
+    await toolbarButton('bold')
+    fireEvent.click(screen.getByTestId('note-mode-toggle'))
+    fireEvent.change(screen.getByTestId('note-source'), { target: { value: 'source-only-change' } })
+    await expectCommitted(onCommit, 'source-only-change')
+    await act(async () => {
+      if (kind === 'paste') {
+        fireEvent.paste(screen.getByTestId('note-source'), { clipboardData: clipboardWith([fileOf()]) })
+      } else {
+        fireEvent.drop(screen.getByTestId('note-source'), { dataTransfer: { files: [fileOf()] } })
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(port.insert).not.toHaveBeenCalled()
+    expect(onCommit.mock.calls.at(-1)?.[0]).toBe('source-only-change')
+    fireEvent.click(screen.getByTestId('note-mode-toggle'))
+    expect(content().textContent).toBe('source-only-change')
+    expect(content().querySelector('[data-note-image]')).toBeNull()
+  })
+
+  it('插图等待期间切到源码并编辑，迟到的图片不会回写旧正文', async () => {
+    let resolveInsert!: (result: NoteAssetInsert) => void
+    const { onCommit } = setup({
+      value: 'original',
+      port: { insert: () => new Promise((resolve) => { resolveInsert = resolve }) },
+    })
+    await toolbarButton('bold')
+    fireEvent.paste(content(), { clipboardData: clipboardWith([fileOf()]) })
+    fireEvent.click(screen.getByTestId('note-mode-toggle'))
+    fireEvent.change(screen.getByTestId('note-source'), { target: { value: 'source-only-change' } })
+    await expectCommitted(onCommit, 'source-only-change')
+    await act(async () => {
+      resolveInsert({ ok: true, src: 'assets/a1.png' })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(onCommit.mock.calls.at(-1)?.[0]).toBe('source-only-change')
+    fireEvent.click(screen.getByTestId('note-mode-toggle'))
+    expect(content().querySelector('[data-note-image]')).toBeNull()
   })
 
   it('纯文本粘贴不拦（快捷语法、列表续行照旧走浏览器默认）', () => {

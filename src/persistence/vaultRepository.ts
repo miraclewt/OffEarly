@@ -402,7 +402,7 @@ export function createRevisionWatcher(deps: RevisionWatcherDeps): RevisionWatche
       return 'notified'
     }
     await deps.reload()
-    return 'reloaded'
+    return deps.isDirty() ? 'notified' : 'reloaded'
   }
 
   return {

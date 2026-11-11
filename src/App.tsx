@@ -247,11 +247,18 @@ function openSession(
     getMemoryRevision: () => store.getVault().revision,
     isDirty: () => autosave.isDirty(),
     reload: async () => {
+      const baseline = store.getVault()
       const disk = await repository.load()
       if (disk === null) return
+      // 未保存编辑不抬 revision，只能靠 Store 引用/dirty 复核，避免异步读盘期间的新输入被覆盖。
+      if (store.getVault() !== baseline || autosave.isDirty()) {
+        hooks.onRemoteChange()
+        return
+      }
       // 重载前后停一次：否则 setVault 会被 autosave 当成用户编辑而立刻回写
       autosave.stop()
       store.setVault(disk)
+      bus.clear()
       autosave.start()
     },
     notify: () => {

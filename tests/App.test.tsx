@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '../src/App'
 import type { Session, StartupPorts } from '../src/App'
+import { patchTaskCommand } from '../src/domain/commandBus'
 import { createNewVault, createVaultRepository } from '../src/persistence/vaultRepository'
 import { asDirHandle, makeDir, makeFile } from './persistence/mockFs'
 import type { MockDirHandle } from './persistence/mockFs'
@@ -448,5 +449,106 @@ describe('T52：空库引导与顶栏撤销', () => {
     // 键盘路径：焦点不在输入框时 Ctrl+Z 生效
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
     await waitFor(() => expect(screen.getByTestId('board-column-count-doing').textContent).toBe('0'))
+  })
+})
+
+describe('远程重载：不覆盖本地编辑，也不保留失效撤销栈', () => {
+  function vaultWithTask(title: string): Vault {
+    const vault = createNewVault()
+    return {
+      ...vault,
+      topics: [{ id: 'topic-1', name: '话题', color: '#6366f1', parentId: null, order: 'U', archived: false }],
+      tasks: [{
+        id: 'task-1',
+        topicId: 'topic-1',
+        title,
+        status: 'todo',
+        kind: 'feature',
+        priority: 'P1',
+        progress: 0,
+        tags: [],
+        note: '',
+        order: 'U',
+        createdAt: '2026-10-22T09:00:00.000Z',
+        updatedAt: '2026-10-22T09:00:00.000Z',
+        archived: false,
+      }],
+    }
+  }
+
+  it('异步重载等待期间的本地编辑保留为未保存，而不是被磁盘版本覆盖', async () => {
+    const initial = vaultWithTask('初始标题')
+    const dir = dirWith({ vault: JSON.stringify(initial) })
+    const p = ports({ dir })
+    let hold = false
+    let started = false
+    const loadGate: { release: ((vault: Vault | null) => void) | null } = { release: null }
+    const openRepository = p.openRepository
+    p.openRepository = (handle) => {
+      const repository = openRepository(handle)
+      return {
+        ...repository,
+        load: () => {
+          if (!hold) return repository.load()
+          started = true
+          return new Promise<Vault | null>((resolve) => { loadGate.release = resolve })
+        },
+      }
+    }
+    const captured: Session[] = []
+    await renderApp(p, (session) => captured.push(session))
+    await waitFor(() => expect(screen.getByTestId('board')).toBeTruthy())
+    const session = captured[0]
+    if (session === undefined) throw new Error('会话未建立')
+
+    const remote: Vault = {
+      ...initial,
+      revision: 1,
+      tasks: initial.tasks.map((task) => ({ ...task, title: '远程标题' })),
+    }
+    dir.files.set('vault.json', makeFile('vault.json', { text: JSON.stringify(remote) }))
+    hold = true
+    const checking = session.watcher.check()
+    await waitFor(() => expect(started).toBe(true))
+
+    act(() => {
+      session.bus.apply(patchTaskCommand(session.store.getVault(), 'task-1', { title: '本地未保存' }))
+    })
+    expect(session.autosave.isDirty()).toBe(true)
+
+    loadGate.release?.(remote)
+    await checking
+    expect(session.store.getVault().tasks[0]?.title).toBe('本地未保存')
+    expect(session.autosave.isDirty()).toBe(true)
+    session.watcher.stop()
+    session.autosave.stop()
+  })
+
+  it('接受远程版本后清空撤销/重做栈，避免对已删除对象执行旧逆命令', async () => {
+    const initial = vaultWithTask('初始标题')
+    const dir = dirWith({ vault: JSON.stringify(initial) })
+    const captured: Session[] = []
+    await renderApp(ports({ dir }), (session) => captured.push(session))
+    await waitFor(() => expect(screen.getByTestId('board')).toBeTruthy())
+    const session = captured[0]
+    if (session === undefined) throw new Error('会话未建立')
+
+    act(() => {
+      session.bus.apply(patchTaskCommand(session.store.getVault(), 'task-1', { title: '本地已保存' }))
+    })
+    await session.autosave.saveNow()
+    expect(session.bus.undoDepth()).toBe(1)
+
+    const remote: Vault = { ...initial, revision: 2, tasks: [] }
+    dir.files.set('vault.json', makeFile('vault.json', { text: JSON.stringify(remote) }))
+    await session.watcher.check()
+
+    expect(session.store.getVault().tasks).toHaveLength(0)
+    expect(session.bus.undoDepth()).toBe(0)
+    expect(session.bus.redoDepth()).toBe(0)
+    expect(session.bus.undo()).toBe(false)
+    expect((screen.getByTestId('undo-button') as HTMLButtonElement).disabled).toBe(true)
+    session.watcher.stop()
+    session.autosave.stop()
   })
 })
