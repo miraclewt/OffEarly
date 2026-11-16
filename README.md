@@ -12,7 +12,7 @@ OffEarly 是一个**单文件、离线、数据自持**的个人工作台：看�
 
 ## 特性一览
 
-- **单文件交付**：`OffEarly.html` 约 6.3 MB（v0.9.0 为 6,561,041 字节），无任何外链 script / link / 远程资源，`file://` 直接打开
+- **单文件交付**：`OffEarly.html` 约 6.3 MB（v0.9.2 为 6,564,573 字节），无任何外链 script / link / 远程资源，`file://` 直接打开
 - **数据自持**：数据库是一个可读可手改的纯 JSON（`vault.json`），图片附件在 `assets/`，换电脑拷走文件夹即可；没有账号、没有云端、没有遥测
 - **看板**：固定四列，卡片拖拽换列，列底「+ 新建任务」支持回车连续录入
 - **甘特图**：依赖箭头、关键路径、日/周刻度、工作日历驱动的工期计算；任务条上直接显示任务名；左侧任务表与右侧未排期面板可折叠；导出 PNG / SVG / CSV（仅可见区或全时间跨度）
@@ -111,14 +111,14 @@ React 19 · TypeScript · Vite 8（vite-plugin-singlefile 打单文件）· Zust
 - [docs/delivery.md](docs/delivery.md) —— 交付说明与验收证据（对应早期版本；当前基线见下节）
 - [docs/visual-audit.md](docs/visual-audit.md) —— 视觉审计（方案 A · macOS 通透，强调色系统靛 `#5E5CE6`）
 
-## 当前基线（v0.9.0）
+## 当前基线（v0.9.2）
 
 | 关口 | 结果 |
 |---|---|
 | 类型检查 | `npx tsc --noEmit` 0 |
-| 单元 / 组件 | `npm test` 1561 passed (85 files) |
-| 端到端 | `npx playwright test --trace=off` 86 passed + 1 skipped |
-| 构建 | `npm run build` 11/11 项产物校验通过，6,561,041 字节 |
+| 单元 / 组件 | `npm test` 1581 passed (85 files) |
+| 端到端 | `npx playwright test --trace=off` 90 passed + 1 skipped |
+| 构建 | `npm run build` 11/11 项产物校验通过，6,564,573 字节 |
 
 逐次发版与验收自检见 `task.md` 文末《完成记录》。
 
