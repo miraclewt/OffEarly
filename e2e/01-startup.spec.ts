@@ -6,7 +6,7 @@
 import { expect, test } from '@playwright/test'
 
 import { connectWorkspace, openAppWith } from './fixtures/app'
-import { EMPTY_FS, fromBase64, readFakeFs } from './fixtures/fakeFs'
+import { EMPTY_FS, fromBase64, readFakeFs, setFakePicker } from './fixtures/fakeFs'
 import { loadExampleVaultFs } from './fixtures/exampleVault'
 
 test('首屏要求连接数据文件夹，且不渲染看板', async ({ page }) => {
@@ -52,6 +52,69 @@ test('已有库：直接打开、不询问创建，且看板渲染出示例任�
   await expect(page.getByTestId('topic-tree')).toContainText('支付重构')
   await expect(page.getByTestId('topic-tree')).toContainText('数据平台')
   await expect(page.getByTestId('topic-sidebar-footer')).toBeVisible()
+})
+
+test('已连接一个库之后仍能再选工作区：旧库不被覆盖，新库正常建立', async ({ page }) => {
+  await openAppWith(page, loadExampleVaultFs())
+  await connectWorkspace(page, { create: false })
+  await expect(page.getByTestId('topic-tree')).toContainText('支付重构')
+
+  await page.getByTestId('sidebar-open-settings').click()
+  await expect(page.getByTestId('settings-folder-name')).toContainText('vault')
+
+  // 真 Chromium 几何探针：新区块不能把面板撑出视口，也不能让「切换文件夹」被滚出可视区
+  const geom = await page.evaluate(() => {
+    const panel = document.querySelector('[data-testid="settings-panel"]') as HTMLElement | null
+    const button = document.querySelector('[data-testid="settings-folder-switch"]') as HTMLElement | null
+    if (panel === null || button === null) return null
+    const p = panel.getBoundingClientRect()
+    const b = button.getBoundingClientRect()
+    return {
+      panelRight: p.right,
+      panelBottom: p.bottom,
+      viewWidth: window.innerWidth,
+      viewHeight: window.innerHeight,
+      overflowX: panel.scrollWidth - panel.clientWidth,
+      buttonInside: b.top >= p.top && b.bottom <= p.bottom && b.right <= p.right,
+    }
+  })
+  expect(geom).not.toBeNull()
+  expect(geom?.panelRight).toBeLessThanOrEqual(geom?.viewWidth ?? 0)
+  expect(geom?.panelBottom).toBeLessThanOrEqual(geom?.viewHeight ?? 0)
+  expect(geom?.overflowX).toBe(0)
+  expect(geom?.buttonInside).toBe(true)
+
+  // 模拟用户在系统目录选择框里挑了另一个空文件夹
+  await setFakePicker(page, { root: 'second-vault' })
+  await page.getByTestId('settings-folder-switch').click()
+
+  await expect(page.getByText('在此创建新库？')).toBeVisible()
+  await page.getByRole('button', { name: '创建数据库' }).click()
+  await expect(page.getByTestId('board')).toBeVisible()
+  await expect(page.getByTestId('topic-tree')).not.toContainText('支付重构')
+
+  const fs = await readFakeFs(page)
+  expect(Object.keys(fs.files)).toContain('second-vault/vault.json')
+  expect(fs.dirs).toContain('second-vault/assets')
+  expect(fs.dirs).toContain('second-vault/.backup')
+  const oldVault = JSON.parse(fromBase64(fs.files['vault.json'] as string)) as { tasks: unknown[] }
+  expect(oldVault.tasks).toHaveLength(15)
+
+  await page.getByTestId('sidebar-open-settings').click()
+  await expect(page.getByTestId('settings-folder-name')).toContainText('second-vault')
+})
+
+test('取消目录选择时原地保持原工作区，不退回连接屏', async ({ page }) => {
+  await openAppWith(page, loadExampleVaultFs())
+  await connectWorkspace(page, { create: false })
+
+  await page.getByTestId('sidebar-open-settings').click()
+  await setFakePicker(page, { abort: true })
+  await page.getByTestId('settings-folder-switch').click()
+
+  await expect(page.getByTestId('topic-tree')).toContainText('支付重构')
+  await expect(page.getByText('连接数据文件夹')).toHaveCount(0)
+  await expect(page.getByTestId('settings-panel')).toBeVisible()
 })
 
 test('外壳骨架齐全：视图切换、保存指示、四个底部入口', async ({ page }) => {

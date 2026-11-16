@@ -50,7 +50,9 @@ function vault(overrides: Partial<Vault> = {}): Vault {
   }
 }
 
-function setup(options: { vault?: Vault; open?: boolean } = {}) {
+function setup(
+  options: { vault?: Vault; open?: boolean; folderName?: string; onSwitchFolder?: () => void } = {},
+) {
   const store = createVaultStore(options.vault ?? vault())
   const bus = createCommandBus(store)
   const i18n = createI18n({ getLocale: () => 'zh', subscribe: () => () => {} })
@@ -62,6 +64,8 @@ function setup(options: { vault?: Vault; open?: boolean } = {}) {
       t={i18n.t}
       open={options.open ?? true}
       onOpenChange={onOpenChange}
+      folderName={options.folderName}
+      onSwitchFolder={options.onSwitchFolder}
     />,
   )
   return { store, bus, view, onOpenChange, t: i18n.t }
@@ -227,6 +231,24 @@ describe('SettingsPanel · 工作日历', () => {
     const holidays = screen.getByTestId('settings-holidays')
     expect(within(holidays).getByText('暂无假期')).toBeDefined()
     expect(within(screen.getByTestId('settings-extra')).getByText('暂无补班')).toBeDefined()
+  })
+})
+
+describe('SettingsPanel · 数据文件夹', () => {
+  it('没接换库回调时整块不渲染（组件可独立挂载，不留死按钮）', () => {
+    setup()
+    expect(screen.queryByTestId('settings-folder')).toBeNull()
+    expect(screen.queryByTestId('settings-folder-switch')).toBeNull()
+  })
+
+  it('显示当前目录名，点击只把换库动作外送、不自己碰文件系统', () => {
+    const onSwitchFolder = vi.fn()
+    setup({ folderName: 'my-vault', onSwitchFolder })
+
+    expect(screen.getByText('数据文件夹')).toBeDefined()
+    expect(screen.getByTestId('settings-folder-name').textContent).toBe('当前：my-vault')
+    fireEvent.click(screen.getByTestId('settings-folder-switch'))
+    expect(onSwitchFolder).toHaveBeenCalledTimes(1)
   })
 })
 

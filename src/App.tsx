@@ -104,7 +104,8 @@ export interface StartupPorts {
   storeDir(dir: VaultDirHandle): Promise<unknown>
   hasWritePermission(dir: VaultDirHandle): Promise<boolean>
   requestWritePermission(dir: VaultDirHandle): Promise<boolean>
-  pickDir(): Promise<VaultDirHandle>
+  /** fresh=true：不使用浏览器记住的 picker id（切换文件夹时别把用户钉回旧库）。 */
+  pickDir(fresh?: boolean): Promise<VaultDirHandle>
   openRepository(dir: VaultDirHandle): VaultRepository
 }
 
@@ -118,7 +119,7 @@ export function startupPorts(): StartupPorts {
     storeDir: (dir) => handleStore.save(dir),
     hasWritePermission: (dir) => verifyPermission(dir, false),
     requestWritePermission: (dir) => verifyPermission(dir, true),
-    pickDir: async () => asVaultDir(await connectDir()),
+    pickDir: async (fresh) => asVaultDir(await connectDir(fresh)),
     openRepository: (dir) => createVaultRepository(dir),
   }
 }
@@ -411,6 +412,7 @@ function PaletteMount(props: {
   onSelectView: (view: PaletteView) => void
   onOpenSettings: () => void
   onOpenBackup: () => void
+  onSwitchFolder: () => void
 }) {
   const vault = useStore(props.store, (state) => state.vault)
   return <CommandPalette {...props} vault={vault} />
@@ -699,6 +701,8 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
   }, [ports])
 
   const session = phase.kind === 'ready' || phase.kind === 'readonly' ? phase : null
+  /** 设置面板里显示的当前目录名；目录句柄只有 name，拿不到绝对路径（浏览器也不给）。 */
+  const folderName = 'dir' in phase ? phase.dir.name : undefined
 
   // 自动保存跟着会话起停；只读安全模式下不起——那是「一个字节都不许写」的相位
   const autosave = phase.kind === 'ready' ? phase.autosave : null
@@ -793,19 +797,83 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
     }
   }, [session, drawerOpen])
 
-  function handlePick() {
+  /** 浮层全都挂在「旧库」的会话上：换库前收掉，免得新库里还留着旧任务弹窗 / 旧冲突弹窗。 */
+  function closeOverlays(): void {
+    setSettingsOpen(false)
+    setBackupOpen(false)
+    setFilterOpen(false)
+    setMilestoneOpen(false)
+    setTrashOpen(false)
+    setDrawerOpen(false)
+    setPaletteOpen(false)
+    setConflict(null)
+    setNotice(null)
+    setFocusDoc(null)
+    setDrawerTaskId(null)
+    setMilestoneSelectedId(null)
+  }
+
+  /**
+   * 所有「挑一个数据文件夹」动作共用的骨架。
+   *
+   * 硬约束：showDirectoryPicker 要 transient user activation，picker 的 Promise 必须在
+   * **点击的同步调用栈**里取到；落盘收尾、相位切换一律放到 then 里做。
+   * 取消 / 失败的去处交给调用方：启动屏取消回连接屏；已连接库取消必须原地不动。
+   */
+  function chooseDir(options: {
+    fresh?: boolean
+    onCancel: () => void
+    onError: (reason: string) => void
+    /** 返回 false = 不许切（例如还有没落盘的改动）。 */
+    beforeOpen?: () => Promise<boolean>
+  }): void {
     void ports
-      .pickDir()
-      .then((dir) => {
-        return openDir(dir)
+      .pickDir(options.fresh)
+      .then(async (dir) => {
+        if (options.beforeOpen !== undefined && !(await options.beforeOpen())) return
+        closeOverlays()
+        await openDir(dir)
       })
       .catch((e: unknown) => {
         if (isAbort(e)) {
-          setPhase({ kind: 'need-dir' })
+          options.onCancel()
         } else {
-          setPhase({ kind: 'failed', reason: loadFailureReason(e) })
+          options.onError(loadFailureReason(e))
         }
       })
+  }
+
+  /** 启动屏 / 失败屏：还没有可用会话，取消就退回连接屏。 */
+  function handlePick(): void {
+    chooseDir({
+      onCancel: () => setPhase({ kind: 'need-dir' }),
+      onError: (reason) => setPhase({ kind: 'failed', reason }),
+    })
+  }
+
+  /**
+   * 已连接库之后的「切换数据文件夹」——此前这个入口根本不存在：
+   * 句柄存进 IndexedDB 后启动会自动打开旧库，need-dir 只在「无句柄 / 出错」时可达，
+   * 用户一旦选过一次就再没有第二个文件夹可挑。设置 / 命令面板 / 授权屏 / 安全模式横幅共用这条。
+   */
+  function handleSwitchDir(): void {
+    chooseDir({
+      fresh: true,
+      onCancel: () => {}, // 取消 = 什么都没发生，旧库照常用
+      // 选择失败不能毁掉当前会话：只在顶栏给一行提示
+      onError: (reason) => setNotice({ text: t('settingsPanel.switchFolderFailed', { reason }) }),
+      beforeOpen: async () => {
+        if (phase.kind !== 'ready') return true
+        // autosave 有 1200ms debounce，直接换相位会丢掉最后一次改动
+        await phase.autosave.saveNow()
+        if (phase.autosave.isDirty()) {
+          // 保存失败 / 冲突未决：数据还没落盘，此时切库等于丢数据
+          setNotice({ text: t('settingsPanel.switchFolderBlocked') })
+          return false
+        }
+        return true
+      },
+    })
   }
 
   function handleGrant(dir: VaultDirHandle) {
@@ -895,6 +963,8 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
     busy: t('safemode.busy'),
     failed: t('safemode.failed'),
     resolved: t('safemode.resolved'),
+    switchFolder: t('safemode.switchFolder'),
+    switchFolderHint: t('safemode.switchFolderHint'),
   }
 
   /**
@@ -968,6 +1038,8 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           title={t('startup.permissionTitle')}
           hint={t('startup.permissionHint')}
           primary={{ label: t('startup.permissionButton'), onClick: () => handleGrant(phase.dir) }}
+          // 记住的目录被删掉 / 不想再授权时，也得有路换一个文件夹
+          secondary={{ label: t('startup.useAnotherFolder'), onClick: handleSwitchDir }}
         />
       )
       break
@@ -978,7 +1050,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           title={t('startup.createTitle')}
           hint={t('startup.createHint')}
           primary={{ label: t('startup.createConfirm'), onClick: () => handleCreate(phase.dir) }}
-          secondary={{ label: t('startup.createCancel'), onClick: () => setPhase({ kind: 'need-dir' }) }}
+          secondary={{ label: t('startup.createCancel'), onClick: handlePick }}
         />
       )
       break
@@ -1015,7 +1087,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           title={t('startup.errorTitle')}
           hint={t('startup.errorTitle')}
           reason={phase.reason}
-          primary={{ label: t('startup.errorRetry'), onClick: () => setPhase({ kind: 'need-dir' }) }}
+          primary={{ label: t('startup.errorRetry'), onClick: handlePick }}
         />
       )
       break
@@ -1079,6 +1151,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           // T28 收尾：开备份面板，从 .backup/ 里挑一份载入（safe-mode 无会话，走现场造的快照存储）
           onChooseOther={() => setBackupOpen(true)}
           onExportCurrent={() => {}}
+          onSwitchFolder={handleSwitchDir}
         />
       )
     }
@@ -1102,6 +1175,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           const { filename } = await active.loader.exportCurrent(active.store.getVault())
           setNotice({ key: 'shell.exported', params: { name: filename } })
         }}
+        onSwitchFolder={handleSwitchDir}
       />
     )
   }
@@ -1276,6 +1350,7 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           onSelectView={setView}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenBackup={() => setBackupOpen(true)}
+          onSwitchFolder={handleSwitchDir}
         />
       )}
       {session === null ? null : (
@@ -1288,6 +1363,8 @@ export function App(props: { ports?: StartupPorts; onSession?: (session: Session
           t={t}
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
+          folderName={folderName}
+          onSwitchFolder={handleSwitchDir}
         />
       )}
       {session === null && recovery === undefined ? null : (

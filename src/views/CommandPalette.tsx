@@ -30,6 +30,8 @@ export interface CommandPaletteProps {
   onSelectView: (view: PaletteView) => void
   onOpenSettings: () => void
   onOpenBackup: () => void
+  /** 换库是启动流程的动作；省略时不列这条命令（组件可独立挂载）。 */
+  onSwitchFolder?: () => void
 }
 
 type ItemKind = 'task' | 'doc' | 'command'
@@ -93,6 +95,9 @@ export function CommandPalette(props: CommandPaletteProps): ReactElement | null 
     { key: 'notebook', label: t('palette.cmdNotebook'), run: () => props.onSelectView('notebook') },
     { key: 'settings', label: t('palette.cmdSettings'), run: props.onOpenSettings },
     { key: 'backup', label: t('palette.cmdBackup'), run: props.onOpenBackup },
+    ...(props.onSwitchFolder === undefined
+      ? []
+      : [{ key: 'switch-folder', label: t('palette.cmdSwitchFolder'), run: props.onSwitchFolder }]),
   ]
 
   const needle = query.trim().toLowerCase()

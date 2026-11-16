@@ -7,12 +7,19 @@ type DirectoryPicker = (options?: {
   mode?: 'read' | 'readwrite';
 }) => Promise<FileSystemDirectoryHandle>;
 
-export function connectDir(): Promise<FileSystemDirectoryHandle> {
+/**
+ * `id` 让浏览器记住「上次用这个 id 选的目录」，下次 picker 直接落在那里。
+ * 首次连接时这很方便；但**切换文件夹**时它反而会把用户钉在旧库里（想选别的还得先往上退一级），
+ * 所以切换路径传 fresh=true 省略 id，让 picker 从默认位置起。句柄的记忆不靠浏览器：
+ * 健康打开后由 handleStore 存进 IndexedDB。
+ */
+export function connectDir(fresh = false): Promise<FileSystemDirectoryHandle> {
   const picker = (globalThis as { showDirectoryPicker?: DirectoryPicker }).showDirectoryPicker;
   if (typeof picker !== 'function') {
     throw new Error('showDirectoryPicker is unavailable in this browser');
   }
-  return picker.call(globalThis, { id: 'offearly-vault', mode: 'readwrite' });
+  const options = fresh ? { mode: 'readwrite' as const } : { id: 'offearly-vault', mode: 'readwrite' as const };
+  return picker.call(globalThis, options);
 }
 
 export async function ensureSubdirs(dir: FileSystemDirectoryHandle): Promise<void> {

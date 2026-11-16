@@ -35,6 +35,9 @@ export interface SafeModeLabels {
   busy: string
   failed: string
   resolved: string
+  /** 换一个数据文件夹（库坏到没法用时也要留一条出路）。 */
+  switchFolder: string
+  switchFolderHint: string
 }
 
 export const SAFE_MODE_LABELS_ZH: SafeModeLabels = {
@@ -51,6 +54,8 @@ export const SAFE_MODE_LABELS_ZH: SafeModeLabels = {
   busy: '正在处理…',
   failed: '处理失败',
   resolved: '已处理',
+  switchFolder: '选择其他文件夹',
+  switchFolderHint: '换一个数据文件夹打开',
 }
 
 function fill(template: string, params: Record<string, string | number>): string {
@@ -81,6 +86,8 @@ export interface SafeModeBannerProps {
   /** 只做回调：打开备份面板由集成车道处理（T28）。 */
   onChooseOther: () => void | Promise<void>
   onExportCurrent: () => void | Promise<void>
+  /** 只做回调：换库由启动流程（App）负责；省略时不显示这个按钮。 */
+  onSwitchFolder?: () => void
   /** 覆盖文案（接 locales 用）；未覆盖的键取中文兜底。 */
   labels?: Partial<SafeModeLabels>
 }
@@ -185,6 +192,24 @@ export function SafeModeBanner(props: SafeModeBannerProps) {
         </button>
         <span style={{ fontSize: fs(11), color: MUTED }}>{text.exportCurrentHint}</span>
       </div>
+
+      {props.onSwitchFolder === undefined ? null : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: sp(4) }}>
+          <button
+            type="button"
+            data-testid="safe-mode-switch-folder"
+            disabled={busy}
+            // picker 必须留在用户手势的同步调用栈里，故不经 run() 的 Promise 包装
+            onClick={() => {
+              props.onSwitchFolder?.()
+            }}
+            style={{ ...BUTTON, color: TEXT }}
+          >
+            {text.switchFolder}
+          </button>
+          <span style={{ fontSize: fs(11), color: MUTED }}>{text.switchFolderHint}</span>
+        </div>
+      )}
 
       {busy ? (
         <div data-testid="safe-mode-status" style={{ color: MUTED }}>

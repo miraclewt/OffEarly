@@ -144,6 +144,135 @@ describe('启动流程：已记住的目录句柄', () => {
   })
 })
 
+/** 切换文件夹用例：两个名字与 vaultId 都不同的库，方便断言「现在到底开着哪一个」。 */
+function namedDir(name: string, vaultId: string): MockDirHandle {
+  const raw = JSON.parse(vaultJson()) as Vault
+  raw.vaultId = vaultId
+  return makeDir(name, {
+    files: [makeFile('vault.json', { text: JSON.stringify(raw) })],
+    dirs: [makeDir('assets'), makeDir('.backup')],
+  })
+}
+
+async function openSettings(): Promise<void> {
+  fireEvent.click(await screen.findByTestId('sidebar-open-settings'))
+  await screen.findByTestId('settings-panel')
+}
+
+describe('切换数据文件夹：选过一次之后仍然能再选一个', () => {
+  it('设置面板显示当前文件夹；换库后新句柄被记住、新库真正生效', async () => {
+    const first = namedDir('first-vault', 'vault-first')
+    const second = namedDir('second-vault', 'vault-second')
+    const p = ports({ dir: first })
+    p.pickDir = vi.fn(async () => asDirHandle(second))
+    await renderApp(p)
+    await screen.findByTestId('board')
+
+    await openSettings()
+    expect(screen.getByTestId('settings-folder-name').textContent).toContain('first-vault')
+    fireEvent.click(screen.getByTestId('settings-folder-switch'))
+
+    // 启动记一次 first、换库记一次 second；没有回到 need-dir
+    await waitFor(() => expect(p.storeDir).toHaveBeenCalledTimes(2))
+    expect(p.storeDir).toHaveBeenLastCalledWith(asDirHandle(second))
+    expect(screen.queryByText('连接数据文件夹')).toBeNull()
+
+    await openSettings()
+    expect(screen.getByTestId('settings-about').textContent).toContain('vault-second')
+    expect(screen.getByTestId('settings-folder-name').textContent).toContain('second-vault')
+  })
+
+  it('取消目录选择时原地保持当前库，绝不退回连接屏', async () => {
+    const abort = new Error('canceled')
+    abort.name = 'AbortError'
+    const first = namedDir('first-vault', 'vault-first')
+    const p = ports({ dir: first })
+    ;(p.pickDir as ReturnType<typeof vi.fn>).mockRejectedValue(abort)
+    await renderApp(p)
+    await screen.findByTestId('board')
+    await openSettings()
+
+    fireEvent.click(screen.getByTestId('settings-folder-switch'))
+
+    await waitFor(() => expect(p.pickDir).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId('board')).toBeTruthy()
+    expect(screen.getByTestId('settings-panel')).toBeTruthy()
+    expect(screen.queryByText('连接数据文件夹')).toBeNull()
+    expect(p.storeDir).toHaveBeenCalledTimes(1)
+  })
+
+  it('切换前先 flush 未落盘的改动，最后一次编辑不丢', async () => {
+    const first = namedDir('first-vault', 'vault-first')
+    const second = namedDir('second-vault', 'vault-second')
+    const p = ports({ dir: first })
+    p.pickDir = vi.fn(async () => asDirHandle(second))
+    const captured: Session[] = []
+    await renderApp(p, (session) => captured.push(session))
+    await screen.findByTestId('board')
+
+    act(() => {
+      captured[0]?.store.update((v) => ({ ...v, appVersion: 'flushed-before-switch' }))
+    })
+    await waitFor(() => expect(screen.getByTestId('save-indicator').textContent).toContain('未保存'))
+
+    await openSettings()
+    fireEvent.click(screen.getByTestId('settings-folder-switch'))
+
+    await waitFor(() => expect(p.storeDir).toHaveBeenCalledTimes(2))
+    expect(new TextDecoder().decode(first.files.get('vault.json')?.bytes())).toContain('flushed-before-switch')
+  })
+
+  it('当前库保存失败时拒绝切换并给出提示，不把未落盘数据留在旧库里不管', async () => {
+    const first = namedDir('first-vault', 'vault-first')
+    const second = namedDir('second-vault', 'vault-second')
+    const gate = { failing: true }
+    const p = ports({ dir: first, saveGate: gate })
+    p.pickDir = vi.fn(async () => asDirHandle(second))
+    const captured: Session[] = []
+    await renderApp(p, (session) => captured.push(session))
+    await screen.findByTestId('board')
+
+    act(() => {
+      captured[0]?.store.update((v) => ({ ...v }))
+    })
+    await openSettings()
+    fireEvent.click(screen.getByTestId('settings-folder-switch'))
+
+    await waitFor(() => expect(screen.getByTestId('shell-notice').textContent).toContain('未保存的改动'))
+    expect(screen.getByTestId('board')).toBeTruthy()
+    expect(p.storeDir).toHaveBeenCalledTimes(1)
+  })
+
+  it('记住的目录要重新授权时，「改用其他文件夹」能直接换库', async () => {
+    const first = namedDir('first-vault', 'vault-first')
+    const second = namedDir('second-vault', 'vault-second')
+    const p = ports({ stored: asDirHandle(first), hasPermission: false })
+    p.pickDir = vi.fn(async () => asDirHandle(second))
+    await renderApp(p)
+
+    fireEvent.click(await screen.findByRole('button', { name: '改用其他文件夹' }))
+
+    await waitFor(() => expect(screen.getByTestId('board')).toBeTruthy())
+    expect(p.storeDir).toHaveBeenCalledWith(asDirHandle(second))
+  })
+
+  it('只读安全模式也有「选择其他文件夹」出口', async () => {
+    const broken = makeDir('broken-vault', {
+      files: [makeFile('vault.json', { text: '{"schemaVersion":1,"vaultId":"abc"' })],
+    })
+    const second = namedDir('second-vault', 'vault-second')
+    const p = ports({ dir: broken })
+    p.pickDir = vi.fn(async () => asDirHandle(second))
+    await renderApp(p)
+
+    expect(await screen.findByText('只读安全模式')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('safe-mode-switch-folder'))
+
+    await waitFor(() => expect(screen.getByTestId('board')).toBeTruthy())
+    expect(p.storeDir).toHaveBeenCalledWith(asDirHandle(second))
+  })
+})
+
 describe('启动流程：损坏的库进入只读安全模式', () => {
   it('vault.json 语法坏时给出安全模式占位，且不写盘', async () => {
     const original = '{"schemaVersion":1,"vaultId":"abc"'

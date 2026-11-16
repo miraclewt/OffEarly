@@ -22,6 +22,7 @@ export const en: Record<MsgKey, string> = {
   'startup.permissionHint':
     'The browser remembers your data folder, but write access needs one click to confirm.',
   'startup.permissionButton': 'Grant access and continue',
+  'startup.useAnotherFolder': 'Use another folder',
   'startup.createTitle': 'Create a new vault here?',
   'startup.createHint':
     'This folder has no vault.json yet. Confirm to initialize an empty vault in it.',
@@ -111,6 +112,8 @@ export const en: Record<MsgKey, string> = {
   'safemode.busy': 'Working…',
   'safemode.failed': 'Failed',
   'safemode.resolved': 'Resolved, loading…',
+  'safemode.switchFolder': 'Choose another folder',
+  'safemode.switchFolderHint': 'Open a different data folder',
 
   // T22 addition: Gantt unscheduled sidebar copy (additive only, existing keys untouched)
   'ganttUnscheduled.title': 'Unscheduled',
@@ -410,6 +413,14 @@ export const en: Record<MsgKey, string> = {
   'settingsPanel.aboutRevision': 'Revision',
   'settingsPanel.aboutVersion': 'Version',
   'settingsPanel.aboutCounts': '{tasks} tasks · {topics} topics · {milestones} milestones',
+  'settingsPanel.dataFolder': 'Data folder',
+  'settingsPanel.currentFolder': 'Current: {name}',
+  'settingsPanel.switchFolder': 'Switch folder…',
+  'settingsPanel.switchFolderHint':
+    'The current vault is saved first; the new folder is remembered next time.',
+  'settingsPanel.switchFolderBlocked':
+    'The current vault still has unsaved changes — retry saving before switching folders.',
+  'settingsPanel.switchFolderFailed': 'Could not choose a new data folder: {reason}',
   // T39 尾部追加：甘特图左侧任务表折叠
   'ganttTable.rail': 'Tasks',
   'ganttTable.collapse': 'Collapse task table',
@@ -588,6 +599,7 @@ export const en: Record<MsgKey, string> = {
   'palette.cmdNotebook': 'Open notebook',
   'palette.cmdSettings': 'Open settings',
   'palette.cmdBackup': 'Open backups',
+  'palette.cmdSwitchFolder': 'Switch data folder',
   // T73: note property row (topic / linked tasks / tags)
   'notebookProp.topic': 'Topic',
   'notebookProp.linkTask': 'Link task',

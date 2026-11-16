@@ -54,6 +54,13 @@ export interface SettingsPanelProps {
   open?: boolean
   /** 开合请求外送（受控时由接线方决定，非受控时仅作通知）。 */
   onOpenChange?: (open: boolean) => void
+  /** 当前连接的数据文件夹名（由接线层从目录句柄读）。 */
+  folderName?: string
+  /**
+   * 「切换数据文件夹」。省略时整块不渲染——组件可独立挂载，不假装自己能碰文件系统。
+   * 换库属于启动流程（App 的相位状态机），纯视图只负责把点击外送。
+   */
+  onSwitchFolder?: () => void
   style?: CSSProperties
 }
 
@@ -342,6 +349,34 @@ export function SettingsPanel(props: SettingsPanelProps) {
             <Icon name="close" size={13} />
           </button>
         </div>
+
+        {/* ── 数据文件夹 ── */}
+        {props.onSwitchFolder === undefined ? null : (
+          <>
+            <div style={SECTION_TITLE}>{t('settingsPanel.dataFolder')}</div>
+            <div data-testid="settings-folder" style={{ display: 'flex', flexDirection: 'column', gap: sp(6) }}>
+              {props.folderName === undefined || props.folderName === '' ? null : (
+                <div
+                  data-testid="settings-folder-name"
+                  style={{ fontSize: fs(12), color: SECONDARY, wordBreak: 'break-all' }}
+                >
+                  {t('settingsPanel.currentFolder', { name: props.folderName })}
+                </div>
+              )}
+              <div>
+                <button
+                  type="button"
+                  data-testid="settings-folder-switch"
+                  onClick={props.onSwitchFolder}
+                  style={GHOST_BUTTON}
+                >
+                  {t('settingsPanel.switchFolder')}
+                </button>
+              </div>
+              <div style={HINT}>{t('settingsPanel.switchFolderHint')}</div>
+            </div>
+          </>
+        )}
 
         {/* ── 语言 ── */}
         <div style={SECTION_TITLE}>{t('settingsPanel.language')}</div>

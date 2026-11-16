@@ -28,6 +28,30 @@ export const EMPTY_FS: FakeFsState = { files: {}, dirs: [] }
 /** 页面内的树根键名，测试用同一常量取值。 */
 export const FS_KEY = '__oe_fs'
 
+/** 页面内的 picker 行为键名（默认返回根目录）。 */
+export const PICKER_KEY = '__oe_picker'
+
+export interface FakePickerState {
+  /** picker 返回的目录在假磁盘里的路径；'' = 原来的库根目录。 */
+  root: string
+  /** 模拟用户按了「取消」。 */
+  abort: boolean
+}
+
+const DEFAULT_PICKER: FakePickerState = { root: '', abort: false }
+
+/** 运行期改 picker 行为：切换文件夹用例用它模拟「选了另一个目录」或「取消」。 */
+export async function setFakePicker(page: Page, next: Partial<FakePickerState>): Promise<void> {
+  await page.evaluate(
+    ({ key, patch }: { key: string; patch: Partial<FakePickerState> }) => {
+      const w = window as unknown as Record<string, unknown>
+      const prev = (w[key] as FakePickerState | undefined) ?? { root: '', abort: false }
+      w[key] = { ...prev, ...patch }
+    },
+    { key: PICKER_KEY, patch: next },
+  )
+}
+
 export function toBase64(text: string): string {
   return Buffer.from(text, 'utf8').toString('base64')
 }
@@ -66,7 +90,8 @@ export async function writeFakeFile(page: Page, path: string, text: string): Pro
 
 /** 安装 `showDirectoryPicker` 替身。 */
 export async function installFakeDirectoryPicker(page: Page): Promise<void> {
-  await page.addInitScript((key: string) => {
+  await page.addInitScript(
+    ({ key, pickerKey, defaults }: { key: string; pickerKey: string; defaults: FakePickerState }) => {
     interface State {
       files: Record<string, string>
       dirs: string[]
@@ -198,9 +223,20 @@ export async function installFakeDirectoryPicker(page: Page): Promise<void> {
     // 必须用 defineProperty：直接 `window.showDirectoryPicker = fn` 在这版 Chromium
     // 上会被静默忽略（该操作定义在 Window 上且非可写），表现为「点了按钮永远不动」。
     Object.defineProperty(window, 'showDirectoryPicker', {
-      value: async () => makeDirHandle('vault', ''),
+      value: async () => {
+        const w = window as unknown as Record<string, unknown>
+        const behaviour = (w[pickerKey] as FakePickerState | undefined) ?? defaults
+        if (behaviour.abort) {
+          const error = new Error('canceled')
+          error.name = 'AbortError'
+          throw error
+        }
+        // root 非空 = 用户挑了另一个文件夹；句柄只暴露最后一段作为 name，路径仍带前缀
+        const root = behaviour.root
+        return makeDirHandle(root === '' ? 'vault' : root, root)
+      },
       configurable: true,
       writable: true,
     })
-  }, FS_KEY)
+  }, { key: FS_KEY, pickerKey: PICKER_KEY, defaults: DEFAULT_PICKER })
 }

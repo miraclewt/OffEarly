@@ -27,6 +27,8 @@ export const zh = {
     permissionTitle: '需要重新授权',
     permissionHint: '浏览器已记住你的数据文件夹，但写入权限需要一次点击确认。',
     permissionButton: '授权并继续',
+    // 记住的目录打不开 / 不想再授权时，也必须有路换一个文件夹
+    useAnotherFolder: '改用其他文件夹',
     createTitle: '在此创建新库？',
     createHint: '这个文件夹里还没有 vault.json。确认后会在其中初始化一个新的空数据库。',
     createConfirm: '创建数据库',
@@ -130,6 +132,8 @@ export const zh = {
     busy: '正在处理…',
     failed: '处理失败',
     resolved: '已处理，正在载入…',
+    switchFolder: '选择其他文件夹',
+    switchFolderHint: '换一个数据文件夹打开',
   },
 
   // T22 追加：甘特图未排期侧栏（只增不改，既有键一律不动）
@@ -456,6 +460,13 @@ export const zh = {
     aboutRevision: '修订号',
     aboutVersion: '版本',
     aboutCounts: '{tasks} 个任务 · {topics} 个话题 · {milestones} 个里程碑',
+    // 切换数据文件夹（已连接库时唯一的换库入口）
+    dataFolder: '数据文件夹',
+    currentFolder: '当前：{name}',
+    switchFolder: '切换文件夹…',
+    switchFolderHint: '切换前会先保存当前库；下次打开自动连接新文件夹。',
+    switchFolderBlocked: '当前库还有未保存的改动，请先重试保存，再切换文件夹。',
+    switchFolderFailed: '无法选择新的数据文件夹：{reason}',
   },
 
   // T39 尾部追加：甘特图左侧任务表的折叠竖轨（只增不改，既有键一律不动）
@@ -602,6 +613,7 @@ export const zh = {
     cmdNotebook: '打开笔记本',
     cmdSettings: '打开设置',
     cmdBackup: '打开备份',
+    cmdSwitchFolder: '切换数据文件夹',
   },
   // T73 · 文档属性行（话题 / 关联任务 / 标签）
   notebookProp: {
