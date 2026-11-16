@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OffEarly · 把事做完，早点下班</title>
-<meta name="description" content="看板、甘特图、思维导图装进一个 HTML 文件。不联网、不装东西、不交数据，数据全在你自己选的文件夹里。">
+<meta name="description" content="看板、甘特图、思维导图、知识库、白板装进一个 HTML 文件。不联网、不装东西、不交数据，数据全在你自己选的文件夹里。">
 <meta property="og:title" content="OffEarly · 把事做完，早点下班">
-<meta property="og:description" content="单文件、离线、数据自持的看板 + 甘特图 + 思维导图。">
+<meta property="og:description" content="单文件、离线、数据自持的五视图个人工作台：看板 / 甘特 / 思维导图 / 知识库 / 白板。">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://miraclewt.github.io/OffEarly/">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235E5CE6' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M17.34 14.96 A7 7 0 1 1 17.34 9.04'/><path d='M11 12 V7.5'/><path d='M11 12 L12.75 15.03'/><path d='M19 12 H22.5'/><path d='M20.6 10.1 L22.5 12 L20.6 13.9'/></svg>">
@@ -83,7 +83,7 @@ a { color: inherit }
 .nav-links a { text-decoration: none }
 .nav-links a:hover { color: var(--ink) }
 
-@media (max-width: 860px) { .nav-links { display: none } }
+@media (max-width: 940px) { .nav-links { display: none } }
 
 /* ---------- 按钮 ---------- */
 
@@ -424,8 +424,9 @@ footer {
   <nav class="nav-links">
     <a href="#gantt">甘特图</a>
     <a href="#mindmap">思维导图</a>
-    <a href="#detail">任务与笔记</a>
+    <a href="#views">五个视图</a>
     <a href="#safety">数据安全</a>
+    <a href="#scope">不做什么</a>
     <a href="#start">怎么开始</a>
   </nav>
   <a class="btn btn-primary btn-sm" href="./OffEarly.html">打开在线版</a>
@@ -437,12 +438,13 @@ footer {
   <div class="wrap">
     <p class="eyebrow">单文件 · 离线 · 数据自持</p>
     <h1>把事做完，<br>早点下班。</h1>
-    <p class="lede">看板、甘特图、思维导图装进一个 HTML 文件。不联网、不装东西、不交数据——点开就能用，资料全在你自己选的文件夹里。</p>
+    <p class="lede">看板、甘特图、思维导图、知识库、白板，五个视图装进一个 HTML 文件。不联网、不装东西、不交数据——点开就能用，资料全在你自己选的文件夹里。</p>
     <div class="cta-row">
       <a class="btn btn-primary" href="./OffEarly.html">打开在线版</a>
       <a class="btn btn-ghost" href="https://github.com/miraclewt/OffEarly">查看源码</a>
     </div>
-    <p class="fineprint"><span>约 1.1 MB</span><span>无需安装</span><span>无需账号</span><span>Chrome / Edge 113+</span></p>
+    <p class="fineprint"><span>约 6.3 MB</span><span>无需安装</span><span>无需账号</span><span>v0.9.0</span></p>
+    <p class="fineprint" style="color:var(--ink-2)"><strong>下载前确认：需桌面版 Chrome / Edge 113+</strong>（File System Access API）· Safari、Firefox 与手机浏览器不可用</p>
   </div>
 
   <figure class="shot">
@@ -467,6 +469,32 @@ footer {
       <div class="claim">
         <b>不交数据</b>
         <p>没有账号、没有云端、没有遥测。数据只写进你本机上选定的那个文件夹，拷走文件夹就是全部。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="views" class="soft">
+  <div class="wrap">
+    <p class="eyebrow">一个文件，五个视图</p>
+    <h2>写、画、排、找，<br>都在一个文件里。</h2>
+    <p class="lede">v0.9.0 已经不只是三张图：任务、文档、草图与外部资料都落在同一个 <code>vault.json</code> 里，用 <kbd>Ctrl</kbd>+<kbd>K</kbd> 一搜就到。</p>
+    <div class="grid-4">
+      <div class="card">
+        <h3>看板 · 甘特 · 思维导图</h3>
+        <p>四列状态流拖着走；依赖箭头、关键路径与工作日历算工期；xmind 式键盘建树把想法摊开。这三个视图共用同一份任务数据，甘特与看板共用筛选。</p>
+      </div>
+      <div class="card">
+        <h3>知识库</h3>
+        <p>文档树加笔记本切换器。Markdown 正文支持 <code>/</code> 斜杠命令、表格工具条、代码块着色、mermaid、图片与 <code>[[双向链接]]</code>；大纲、反向链接、按 H2 分页的展示模式、导出 <code>.md</code> / HTML。</p>
+      </div>
+      <div class="card">
+        <h3>白板</h3>
+        <p>八种图元加贴图、正交与直线连线、四套模板、自定义色与字号、对齐 / 等距分布 / 移到视野中心，导出 PNG / SVG。定位是画清一张架构草图，不替代专业绘图工具。</p>
+      </div>
+      <div class="card">
+        <h3>收进来，也找得回</h3>
+        <p>Outlook 导出的 <code>.ics</code> 生成带「决议 / 待办」结构的会议笔记；批量导入 <code>.md</code> / <code>.txt</code>，AI 生成的笔记直接入库。<kbd>Ctrl</kbd>+<kbd>K</kbd> 全局搜索、回收站、全局撤销与重做兜底。</p>
       </div>
     </div>
   </div>
@@ -565,6 +593,33 @@ footer {
   </div>
 </section>
 
+<section id="scope">
+  <div class="wrap">
+    <p class="eyebrow">先说清楚</p>
+    <h2>它不做什么，<br>和做什么一样重要。</h2>
+    <p class="lede">OffEarly 服务的是一台电脑上、一个人、对数据主权敏感的工作场景：内网、断网、涉密、项目归档。下面这些不是「还没做」，是主动不做。</p>
+    <div class="grid-4">
+      <div class="card">
+        <h3>不做协同与同步</h3>
+        <p>没有多人编辑、没有云同步、没有跨设备接续。冲突三选与 30 秒轮询只防两个窗口互相覆盖，不是同步功能。</p>
+      </div>
+      <div class="card">
+        <h3>不做移动端</h3>
+        <p>读写数据文件夹依赖桌面浏览器的 File System Access API，手机与平板浏览器不可用；界面按桌面分辨率离散缩放。</p>
+      </div>
+      <div class="card">
+        <h3>不做提醒推送</h3>
+        <p>离线单文件没有后台进程。到期与逾期在打开应用后标红、可筛选，但不会主动通知你——每天回来看看，得靠习惯。</p>
+      </div>
+      <div class="card">
+        <h3>不再扩张视图</h3>
+        <p>固定四列、甘特只读、导图独立成树；白板冻结在「画清一张草图」，不新增图元、图层、自动布局与多人光标，也不加第六个视图。</p>
+      </div>
+    </div>
+    <p class="note">一句话：如果你要的是团队空间、多端同步或 Notion 式协作，这个工具不适合你；如果你只想把资料牢牢留在自己手里，它正合适。</p>
+  </div>
+</section>
+
 <section id="start">
   <div class="wrap center">
     <p class="eyebrow">怎么开始</p>
@@ -597,7 +652,7 @@ footer {
       <a href="https://github.com/miraclewt/OffEarly/blob/main/docs/user-guide.md">用户手册</a>
       <a href="https://github.com/miraclewt/OffEarly/blob/main/README.md">项目说明</a>
     </nav>
-    <span class="req">需要 File System Access API：Chrome / Edge 113+ 支持，Safari 与 Firefox 暂不支持。无账号 · 无云端 · 无遥测。</span>
+    <span class="req">下载前确认：需桌面版 Chrome / Edge 113+（File System Access API），Safari、Firefox 与手机浏览器不支持。无账号 · 无云端 · 无遥测 · v0.9.0。</span>
   </div>
 </footer>
 
