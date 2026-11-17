@@ -3,10 +3,10 @@
 | 项 | 值 |
 |---|---|
 | 产品名 | OffEarly（中文：早下班） |
-| 文档版本 | v1.1 |
+| 文档版本 | v1.3 |
 | 日期 | 2026-10-15 |
-| 状态 | 待评审 |
-| 交付边界 | 仅架构设计文档（不含实现） |
+| 状态 | 设计已确认，按 `task.md` 分期实现中 |
+| 交付边界 | 架构设计文档 + 分期实现（任务拆分与状态同步见 `task.md`） |
 | 效果图 | `docs/design/01-board-layout.png` … `04-card-closeup-recommended.png` |
 
 ---
@@ -33,9 +33,9 @@ OffEarly（早下班）是一个**个人本地**的任务管理与项目进度�
 | # | 决策 | 选择 | 否决的替代 | 理由 |
 |---|---|---|---|---|
 | D1 | 运行形态 | 单 HTML 双击运行 | 便携 exe / 本地服务 | 企业管控最宽松，零依赖 |
-| D2 | 语言 | TypeScript 5（strict） | JavaScript / 其他 | 类型安全支撑 Schema 与迁移 |
-| D3 | UI 框架 | React 18 | Vue / Preact / vanilla | 生态与复杂交互（拖拽、富文本）成熟 |
-| D4 | 构建 | Vite 5 + `vite-plugin-singlefile`，`format:'iife'` | 零构建手写 / UMD 内联 | `file://` 下 ES module 被 CORS 拦截，必须单 IIFE bundle |
+| D2 | 语言 | TypeScript 7（strict） | JavaScript / 其他 | 类型安全支撑 Schema 与迁移 |
+| D3 | UI 框架 | React 19.3 | Vue / Preact / vanilla | 生态与复杂交互（拖拽、富文本）成熟 |
+| D4 | 构建 | Vite 8 + `vite-plugin-singlefile` 2.3.3，`format:'iife'` | 零构建手写 / UMD 内联 | `file://` 下 ES module 被 CORS 拦截，必须单 IIFE bundle |
 | D5 | 数据布局 | 数据文件夹：`vault.json` + `assets/` + `.backup/` | 纯单文件 base64 | 图片 base64 会使 JSON 膨胀至数十 MB，全量写盘与同步卡顿 |
 | D6 | 文件读写 | File System Access API（`showDirectoryPicker`） | 手动导入导出 | 自动落盘，体验接近本地应用 |
 | D7 | 甘特图 | 自研 SVG，只读投影 | gantt-task-react / vis-timeline / frappe-gantt | 现成 MIT 库在周/日刻度、里程碑、关键路径、基线、导出上均不达标；只读化后自研成本约 2 天 |
@@ -189,7 +189,23 @@ interface WorkCalendar {
   holidays: string[]       // 额外休息日
   extraWorkdays: string[]  // 补班日
 }
+
+type Status = 'todo' | 'doing' | 'review' | 'done'
+type Kind = 'feature' | 'bug' | 'chore' | 'research' | 'doc'
+type Priority = 'P0' | 'P1' | 'P2' | 'P3'
+
+// T03 落实：原以注释描述的 Settings 显式化为类型
+interface Settings {
+  boardColumns: Status[]            // 看板列定义：固定四状态的可见顺序，不允许新增状态
+  calendar: WorkCalendar            // 工作日历
+  ganttScale: 'day' | 'week'        // 甘特图默认刻度
+  theme: 'light'                    // 主题：当前仅浅色（深色不在本期）
+  locale: 'zh' | 'en' | 'auto'      // 语言，auto 读 navigator.language
+  lastFilter: Filter | null         // 上次筛选，结构见 6.2
+}
 ```
+
+`settings` 及其每个字段在 Schema 层都带默认值：用户手改 `vault.json` 时最常漏掉的就是设置项，缺失即补默认，不报错；其余字段一律必填，缺失或枚举越界直接拒绝加载。日期字段区分两类：`start/due/holidays` 必须是真实存在的 `YYYY-MM-DD`，`createdAt/updatedAt` 必须是 ISO8601 时间戳。
 
 ### 4.3 四个刻意的决定
 
@@ -296,7 +312,13 @@ interface Filter {
 
 ### 6.3 任务详情抽屉（TaskDrawer）
 
-- 右侧滑出约 400px，覆盖式，Esc 关闭
+> **2026-10-17 变更（T36）**：呈现由「右侧滑出 400px」改为**居中弹窗**（约 760px 宽、`--oe-scrim` 遮罩、
+> `role="dialog"` + `aria-modal`），依据是产品方明确要求「任务编辑用弹窗，不要从侧边弹出」。
+> 本节其余条款（分区、依赖编辑、保存指示、Ctrl+Z）一字不变。原设计稿 `docs/design/02-gantt-detail.png`
+> 画的仍是右侧抽屉，读图时以本条为准。
+
+- 右侧滑出约 400px，覆盖式，Esc 关闭（**已被上面的 T36 变更取代**：改为居中弹窗，
+  关闭出路为 Esc / 点遮罩空白 / 右上角关闭按钮三条）
 - 分区：标题（inline 编辑）/ 属性行（状态、类别、优先级、topic、负责人、标签）/ 日期与进度（开始、结束可填，工期只读展示、进度滑块）/ 依赖关系 / 笔记
 - 依赖添加：全库标题模糊搜索下拉（天然支持跨 topic），选中即建 FS 依赖；类型与 lag 可改；成环标红提示但允许保存
 - 顶部常驻保存指示：`已保存 / 未保存 / 保存失败(重试)`
@@ -308,7 +330,8 @@ interface Filter {
 - 工具栏一行线性 SVG 图标：粗体、斜体、删除线、行内码、代码块、H2/H3、无序/有序/任务列表、引用、链接、表格、图片、分隔线
 - Markdown 快捷语法：`# `、`- `、`1. `、`> `、`[] `、`` ` `` —— Obsidian 习惯
 - 双向链接最小落地：输入 `[[` 弹任务/里程碑标题搜索，插入 `[[任务标题]]`；渲染时解析为可点击跳转，同名多任务列候选
-- **图片三条插入路径**（粘贴剪贴板截图 / 拖入文件 / 工具栏选择）统一走：
+- **图片三条插入路径**（粘贴截图 / 拖入文件 / 工具栏选择）统一走：
+  <!-- 粘贴只用 paste 事件的 clipboardData（R4 已在企业 Edge 实测通过：取到 image/png 22821 字节）；不依赖 navigator.clipboard.read()——它额外要求文档持系统前台焦点与 clipboard-read 权限，本功能用不上 -->
 
 ```
 File → AssetStore.put(file) → 写 assets/<nanoid>.<ext>
@@ -329,6 +352,12 @@ File → AssetStore.put(file) → 写 assets/<nanoid>.<ext>
 ---
 
 ## 7. UI 视觉规范
+
+> **2026-10-17 变更（T38 全局重设计，产品方裁决）**：本节下列**字面色值 / 圆角 / 阴影档位已被 `src/styles/theme.css` 的 token 取代**——
+> 方向改为「macOS 通透」（振镜材质半透明侧栏与顶栏 + 发丝分隔线 + 三档圆角 8/12/14 + 三档阴影），强调色由 `#4F46E5` 换成系统靛 `#5E5CE6`，
+> 语义色改用 Apple 系统色（逾期 `#FF3B30` / 阻塞橙 / 完成绿 `#34C759`）。
+> **仍然成立的硬约束**：语义色仅三处、全项目禁 emoji、1.5px 描边 SVG sprite、系统字体栈、无渐变 / 无装饰插画 / 无头像、信息密度上限。
+> 逐条差异与理由见 `docs/visual-audit.md` 第 8 节；本节的效果图（`docs/design/01`–`04`）画的是变更前形态，读图以该节为准。
 
 - 浅色主题：背景 `#FAFAFA`，卡片 `#FFFFFF`，发丝边框 `#E5E7EB`，主强调色深靛 `#4F46E5`
 - 语义色克制：仅逾期红 `#DC2626`、阻塞琥珀、完成绿三处
@@ -412,10 +441,11 @@ save():
 
 ## 9. 构建与交付
 
-- Vite 5 + TypeScript 5（strict）+ `vite-plugin-singlefile` 内联全部 JS/CSS
+- Vite 8 + TypeScript 7（strict）+ `vite-plugin-singlefile` 2.3.3 内联全部 JS/CSS
 - 两个硬约束：
   1. `build.rollupOptions.output.format: 'iife'` + `inlineDynamicImports: true` —— `file://` 下 ES module 被 CORS 拦截，必须单 IIFE bundle、零 chunk
   2. 图标全部 inline SVG sprite；CI lint 禁止 emoji 码位进入源码
+- **实测坑（T02）**：`vite-plugin-singlefile` 只做内联，不改脚本标签 —— 产物仍是 `<script type="module" crossorigin>` 且位于 `<head>`。构建管线需追加 finalize 步骤：去掉 `type="module"`/`crossorigin` 并把脚本移到 `#root` 之后，否则 `file://` 下不执行或挂载时取不到 root。前提已验证：bundle 内无 `import.meta`、无 top-level `export`、无动态 `import()`，降级为经典脚本安全
 - 无 sourcemap 进产物（外挂保存）
 - 产物目标 < 1.6 MB；CI 校验产物中不含任何 `http(s)://` 资源引用（保证零网络依赖）
 - `APP_VERSION` 内嵌于 HTML（git tag）；`schemaVersion` 独立演进，向后兼容 N-1
@@ -441,11 +471,26 @@ save():
 | R1 | `showDirectoryPicker` 在 `file://` 可用 | spike 页 | 退回 `showOpenFilePicker` 单文件 + 图片 base64 内嵌（限 1MB） |
 | R2 | 目录句柄可持久化（IndexedDB 在 `file://`） | spike 页 | 每次启动重选文件夹（一次点击，可接受） |
 | R3 | SVG→Canvas 导出 PNG 在 `file://` 不 taint | spike 页 | 导出仅保留 SVG + CSV |
-| R4 | 剪贴板图片粘贴在 `file://` 可用 | spike 页 | 仅支持拖入 / 工具栏选文件 |
+| R4 | 剪贴板图片粘贴在 `file://` 可取到 File | spike 页粘贴框的 `paste` 事件（不用 `clipboard.read`，它要求前台焦点与权限） | 仅支持拖入 / 工具栏选文件 |
 | R5 | 大库（>5000 任务）全量序列化耗时 | 基准脚本 | 提示拆分库 / 分片写 |
 | R6 | OneDrive 同步延迟造成伪冲突 | 实测 | 冲突弹窗已含"导出副本"兜底 |
 
 spike 结果回填本文档第 11 节并据此裁剪降级路径，然后才进入实现。
+
+### 11.1 实测结果（T01，2026-10-15）
+
+`spike.html` 已在 Qoder 内置浏览器（Electron 43 / Chrome 150，`file://` 协议）跑通全部自动化项。环境探测：`protocol=file:`、`isSecureContext=true`、`showDirectoryPicker=true`、`showOpenFilePicker=true`、`createWritable=true`。
+
+| # | 结果 | 实测说明 |
+|---|---|---|
+| R1 | **PASS**（企业 Edge 实测） | 用户 2026-10-15 回报通过：`showDirectoryPicker` 在 `file://` 可调用、返回目录句柄并成功读写子文件；`assets/` 子目录创建与 IndexedDB 句柄往返（R2 联动）一并走通。数据文件夹方案成立，**T06（FsAccessAdapter）门槛解除** |
+| R2 | **PASS** | IndexedDB 在 `file://` 可读写；句柄结构化克隆往返由 R1 授权后自动复检 |
+| R3 | **PASS** | SVG→data URI→Canvas→PNG 成功（5981 字节），画布未被 taint |
+| R4 | **PASS**（企业 Edge 复测） | 粘贴框 `paste` 事件取到 File：`image/png`、22821 字节、名称 `image.png`、`hasFocus=true`；`clipboard.read` 探针在同一状态下也取到同一张图（权限状态 `prompt`）。首轮报的 `NotAllowedError: ... Document is not focused.` 是 spike 采集方式缺陷（改用需要前台焦点与权限的 API 去测一个并不依赖它的功能），非环境能力缺失。**结论：笔记图片三条插入路径全保留**，实现只依赖 `paste` 事件的 `clipboardData`，不使用 `clipboard.read()`（见 6.4） |
+| R5 | **PASS** | 5000 任务：stringify 18.1ms、parse 8.1ms、2691 KB，远低于 200ms 阈值 |
+| R6 | **PASS**（企业 Edge 实测） | 用户回报通过：用 R1 的目录句柄对约 200KB 的 `spike-io.json` 做写/读往返计时通过，未出现异常耗时。具体毫秒数未回传；OneDrive 同步延迟造成的伪冲突仍需在日常使用中观察，冲突弹窗保留「导出副本」兜底 |
+
+**结论**：**R1–R6 六项全部通过**（R2/R3/R5 由内置浏览器自动化实测，R1/R4/R6 由用户 2026-10-15 在企业 Edge 手动实测）。架构主路径——数据文件夹 + 目录句柄持久化 + PNG 导出 + 笔记图片粘贴 + 全量序列化——**一条降级都不必启用**，第 11 节风险表的降级方案自此作为已备不用的兜底保留。教训：内置浏览器与企业 Edge 的策略差异真实存在，任何 Web API 依赖都要在目标浏览器一键复验；且 spike 必须按目标功能实际使用的机制来测（R4 首轮就因改用需要前台焦点的 `clipboard.read()` 而误判）。
 
 ---
 
@@ -481,7 +526,9 @@ spike 结果回填本文档第 11 节并据此裁剪降级路径，然后才进�
 | workday | 工作日 | Workday |
 | workweek | 工作周 | Workweek |
 
-i18n 实现：自写约 60 行 `t()` + 插值；`type MsgKey = NestedKeyOf<typeof zh>`，`en.json` 用 `Record<MsgKey, string>` 约束，缺翻译编译期报错；`settings.locale: 'zh' | 'en' | 'auto'`，auto 读 `navigator.language.startsWith('zh')`；切换即时重渲染（locale 在 VaultStore，非模块级常量）；日期/星期/月份名走 dayjs locale（内联 zh-cn + en）。**边界规则：`t()` 只用于 UI 文案，绝不用于数据**（任务标题、topic 名、笔记内容原样显示）。
+> **锁定范围（v1.3 澄清，T07）**：附录 A 锁定的是这 12 条**术语译名**——一条不能少、译名不能改。消息表本身按视图需要持续增长（如 T07 新增的 `startup.*`、`board.emptyColumn` 等 UI 文案键）；T04 的「键集合与附录 A 完全相等」断言已相应放宽为超集断言（12 条术语逐字存在即可），`en.ts` 的 `Record<MsgKey, string>` 约束保证新增键在中英两表同时登记。
+
+i18n 实现：自写约 60 行 `t()` + 插值；`type MsgKey = NestedKeyOf<typeof zh>`，`en.ts` 用 `Record<MsgKey, string>` 约束，缺翻译编译期报错（T04 已以删键负例实测：`TS2741`）；`settings.locale: 'zh' | 'en' | 'auto'`，auto 读 `navigator.language.startsWith('zh')`；切换即时重渲染（locale 在 VaultStore，非模块级常量；只有**解析结果**变化才通知订阅者，避免库内其他改动白刷视图）；日期/星期/月份名走 dayjs locale（内联 zh-cn + en）。**边界规则：`t()` 只用于 UI 文案，绝不用于数据**（任务标题、topic 名、笔记内容原样显示）。
 
 ## 附录 B · 效果图清单
 

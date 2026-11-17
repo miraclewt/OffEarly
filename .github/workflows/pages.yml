@@ -1,0 +1,38 @@
+name: 发布落地页
+
+# Pages 经典模式只认仓库根目录和 /docs，站点放在 site/ 所以走 Actions 部署。
+# 只在 site/ 真的变了时才跑；手动触发可以选分支，不必先合 main。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

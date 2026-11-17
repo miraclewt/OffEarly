@@ -1,0 +1,919 @@
+// T20 · GanttCanvas：GanttModel 的 SVG 投影（spec 5.4）。
+//
+// 本层只**投影**：列 x / 条宽 / 进度宽 / 箭头 path / 今日线 x 全部取自 buildGanttModel 的模型，
+// 这里不做任何几何计算。渲染只覆盖「视口 ±10 行 + 可见列」，箭头同样按可视范围裁剪，
+// 所以 1000 任务的库铺到 DOM 里的节点数依然很小。
+//
+// T21 在本文件落地：箭头层 <GanttArrowsLayer> 补齐 SS/FF/SF 端点分流（T19 遗留，只补视图层
+// 这一侧，不动 ganttModel.ts）、环上依赖红虚线、关键路径描边/着色与开关、hover 前后一跳高亮。
+
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
+
+import {
+  clipArrows,
+  clipHeaderCells,
+  estimateGanttLabelWidth,
+  GANTT_HEADER_HEIGHT,
+  labelOverProgress,
+  truncateGanttLabel,
+} from '../controllers/ganttViewport'
+import type { GanttColumnWindow, GanttRowWindow } from '../controllers/ganttViewport'
+import type { DependencyArrow, GanttBar, GanttModel, GanttRow } from '../domain/ganttModel'
+import type { MsgKey, TranslateParams } from '../locales/i18n'
+import { currentUiScale, fs, px, sp } from '../styles/scale'
+
+/**
+ * 注意（T30）：本文件里这一组色值**必须保持字面量 hex，不能换成 CSS 变量**。
+ * 它们最终绑到 SVG 的呈现属性（`fill=` / `stroke=`），而呈现属性不解析 `var()`
+ * ——写成 `fill="var(--oe-x)"` 在浏览器里会直接渲染成黑色。下面的 `GRID_COLOR` /
+ * `TEXT` / `TEXT_MUTED` 走的是内联 `style`，所以用变量。
+ * 另外 GANTT_TODAY_COLOR / GANTT_BASELINE_FILL / GANTT_OFF_COLUMN_FILL 被测试
+ * 直接断言，改动等于改契约。
+ */
+
+/** 周末 / 节假日列浅灰底。 */
+export const GANTT_OFF_COLUMN_FILL = '#F5F5F7'
+/** 基线细灰条。 */
+export const GANTT_BASELINE_FILL = '#8E8E93'
+/** 今日线：1px 系统红。 */
+export const GANTT_TODAY_COLOR = '#FF3B30'
+/** 任务条浅底：用 topic 色本身 + 透明度，颜色语义与侧栏 swatch 一致。 */
+export const GANTT_BAR_OPACITY = 0.18
+/** 进度内条：topic 色压暗的比例（深色）。 */
+export const GANTT_PROGRESS_MIX = 0.35
+
+const GRID_COLOR = 'var(--oe-separator)'
+const TOPIC_ROW_FILL = '#FAFAFC'
+const LANE_FILL = '#F7F7FA'
+/** 普通依赖箭头：中性灰。 */
+export const GANTT_ARROW_COLOR = '#8E8E93'
+/** 关键路径高亮：系统靛深档。 */
+export const GANTT_CRITICAL_COLOR = '#4038C8'
+/** 成环依赖：系统红 + 虚线，提示先解环（spec 5.3 降级）。 */
+export const GANTT_CYCLE_COLOR = '#FF3B30'
+/** hover 时非直接依赖元素的透明度（T21 验收 4）。 */
+export const GANTT_HOVER_DIM_OPACITY = 0.25
+/** 关键路径任务条的描边宽度（「描边加粗」）。 */
+export const GANTT_CRITICAL_STROKE_WIDTH = 2
+/** 环上箭头的虚线样式。 */
+const CYCLE_DASH = '5 4'
+/** 折线拐点与条边缘的间距；必须与 domain/ganttModel.ts 的 ARROW_GAP 保持一致。 */
+const ARROW_GAP = 10
+const TEXT_MUTED = 'var(--oe-text-muted)'
+const TEXT = 'var(--oe-text-secondary)'
+const DEFAULT_TOPIC_COLOR = '#5E5CE6'
+export const MILESTONE_SIZE = 12
+export const GANTT_ARROW_MARKER_ID = 'oe-gantt-arrow-head'
+export const GANTT_ARROW_MARKER_CRITICAL_ID = 'oe-gantt-arrow-head-critical'
+export const GANTT_ARROW_MARKER_CYCLE_ID = 'oe-gantt-arrow-head-cycle'
+
+/** 把 #RRGGBB 与目标色按比例混合；输入非法时原样返回。 */
+export function mixColor(hex: string, ratio: number, target = '#000000'): string {
+  const from = parseHex(hex)
+  const to = parseHex(target)
+  if (from === null || to === null) return hex
+  const channel = (a: number, b: number): number => Math.round(a + (b - a) * ratio)
+  const r = channel(from[0], to[0])
+  const g = channel(from[1], to[1])
+  const b = channel(from[2], to[2])
+  return `#${[r, g, b].map((value) => value.toString(16).padStart(2, '0')).join('')}`
+}
+
+function parseHex(hex: string): [number, number, number] | null {
+  const match = /^#([0-9a-f]{6})$/i.exec(hex.trim())
+  if (match === null) return null
+  const value = match[1]!
+  return [
+    Number.parseInt(value.slice(0, 2), 16),
+    Number.parseInt(value.slice(2, 4), 16),
+    Number.parseInt(value.slice(4, 6), 16),
+  ]
+}
+
+/** 任务条底色：topic 色浅底。 */
+export function topicBarFill(color: string | null): string {
+  return color ?? DEFAULT_TOPIC_COLOR
+}
+
+/** 进度内条：topic 色压暗 35%。 */
+export function topicProgressFill(color: string | null): string {
+  return mixColor(topicBarFill(color), GANTT_PROGRESS_MIX)
+}
+
+/**
+ * T39 · 任务名标签。条内为主：进度深色盖掉标签一半以上时用纯白，否则用正文色；
+ * 条窄到连省略号都放不下时，整条标签挪到条右侧（与里程碑同一出路）。
+ *
+ * 两个色值同样是**字面 hex**（理由见文件头：SVG 呈现属性不解析 `var()`），
+ * 其中深色与 `--oe-text` 同值，改主题时两处一起改。
+ */
+export const GANTT_LABEL_FONT_SIZE = 11
+export const GANTT_LABEL_PAD_X = 6
+/** 条外标签与条右缘（或菱形右尖）的水平间距。 */
+export const GANTT_LABEL_OUTSIDE_GAP = 6
+export const GANTT_LABEL_FILL = '#1D1D1F'
+export const GANTT_LABEL_ON_PROGRESS_FILL = '#FFFFFF'
+
+export interface GanttLabelPlacement {
+  text: string
+  x: number
+  fill: string
+  placement: 'inside' | 'outside'
+}
+
+/**
+ * 输入坐标一律是已按 zoom 缩放后的画布像素。
+ *
+ * `viewportLeft` 是画布内容左缘在视口里的位置（= 滚动容器的 `scrollLeft`，因为内容 1:1 铺开）。
+ * T53：条左端滚出视口时，标签**钉在视口左缘**而不是跟着条一起被切掉——否则首屏滚到「今天」
+ * 之后，跨越今天的那几条只剩半个字（实测只剩「回归」）。截断预算同步收窄到条的可见段，
+ * 深浅判定也只看标签实际压住的那段进度，所以钉住后不会出现「白字压在浅底上」。
+ * 导出路径不滚动，传默认 0 即旧行为。
+ */
+export function resolveTaskLabel(
+  label: string,
+  barX: number,
+  barWidth: number,
+  progressWidth: number,
+  viewportLeft = 0,
+): GanttLabelPlacement {
+  // 标签的边距与字号都跟着界面尺度走；传入的 barWidth 已经是模型放大后的像素
+  const s = currentUiScale()
+  const padX = GANTT_LABEL_PAD_X * s
+  const barRight = barX + barWidth
+  // 条整体滚到视口左侧之外：名字跟着一起消失，不在边上凭空留一条看不见的条的名字
+  if (barRight <= viewportLeft) {
+    return { text: '', x: barRight + GANTT_LABEL_OUTSIDE_GAP * s, fill: GANTT_LABEL_FILL, placement: 'inside' }
+  }
+  const startX = Math.max(barX + padX, viewportLeft + padX)
+  const inner = barRight - padX - startX
+  const inside = inner > 0 ? truncateGanttLabel(label, inner, GANTT_LABEL_FONT_SIZE * s) : ''
+  if (inside !== '') {
+    const width = Math.min(estimateGanttLabelWidth(inside, GANTT_LABEL_FONT_SIZE * s), inner)
+    const covered = Math.max(0, Math.min(barX + progressWidth, startX + width) - startX)
+    return {
+      text: inside,
+      x: startX,
+      fill: labelOverProgress(covered, width) ? GANTT_LABEL_ON_PROGRESS_FILL : GANTT_LABEL_FILL,
+      placement: 'inside',
+    }
+  }
+  return {
+    text: label,
+    x: barRight + GANTT_LABEL_OUTSIDE_GAP * s,
+    fill: GANTT_LABEL_FILL,
+    placement: 'outside',
+  }
+}
+
+/** 菱形右侧的标签起点 x。 */
+export function milestoneLabelX(cx: number): number {
+  const s = currentUiScale()
+  return cx + (MILESTONE_SIZE / 2 + GANTT_LABEL_OUTSIDE_GAP) * s
+}
+
+/**
+ * T53 · 里程碑标签的可见性（名字画在菱形右侧，不截断）。
+ *
+ * 名字起点只在右尖之外 6px，所以它**永远不会被左缘截掉**：菱形右尖还在视口内，名字就整条可见。
+ * 真正要处理的是另一半——菱形整体滚出视口后，名字会变成屏幕左缘一个无主的悬空标签，
+ * 所以这里给一个 `visible`，菱形看不见就连名字一起收掉。
+ */
+export function resolveMilestoneLabel(cx: number, viewportLeft = 0): { x: number; visible: boolean } {
+  const s = currentUiScale()
+  return {
+    x: milestoneLabelX(cx),
+    visible: cx + (MILESTONE_SIZE / 2) * s > viewportLeft,
+  }
+}
+
+/** 折线拐点（模型坐标）。 */
+export interface ArrowAnchor {
+  x: number
+  y: number
+}
+
+/**
+ * T21 · SS/FF/SF 锚点分流（T19 遗留：领域层只算了 FS「前置右端 → 后置左端」，
+ * 且 ganttModel.ts 已合入主干、本任务不改它，端点补算只能落在视图层这一侧）。
+ *
+ * 语义（spec 4.2 / 依赖编辑）：FS 完成→开始、SS 开始→开始、FF 完成→完成、SF 开始→完成。
+ * 锚点：SS 左→左、FF 右→右、FS 右→左、SF 左→右；FS 的 path 领域层已算好、原样使用。
+ * 折线保持与领域层一致的「步进 + 横沟」风格，轴对齐且不穿过任一条的内部。
+ */
+export function routeAnchoredArrow(
+  start: ArrowAnchor,
+  end: ArrowAnchor,
+  exit: 'left' | 'right',
+  entry: 'left' | 'right',
+): ArrowAnchor[] {
+  const { x: sx, y: sy } = start
+  const { x: tx, y: ty } = end
+
+  if (exit === 'left' && entry === 'left') {
+    // SS：向左出，垂直沟贴在两条左缘的左侧，水平切入目标左端
+    const channelX = Math.min(sx, tx) - ARROW_GAP
+    return [start, { x: channelX, y: sy }, { x: channelX, y: ty }, end]
+  }
+  if (exit === 'right' && entry === 'right') {
+    // FF：向右出，垂直沟贴在两条右缘的右侧，水平切入目标右端
+    const channelX = Math.max(sx, tx) + ARROW_GAP
+    return [start, { x: channelX, y: sy }, { x: channelX, y: ty }, end]
+  }
+  // SF：向左出、从右侧切入目标右端
+  if (tx + ARROW_GAP < sx) {
+    // 目标整体在源左侧且留有空档：垂直沟直接贴在目标右端外侧
+    const channelX = tx + ARROW_GAP
+    return [start, { x: channelX, y: sy }, { x: channelX, y: ty }, end]
+  }
+  // 否则绕行：先向左出，走两行之间的横沟，再贴目标右外侧下切（与领域层 FS 绕行同风格）
+  const outX = sx - ARROW_GAP
+  const backX = tx + ARROW_GAP
+  const channelY = ty >= sy ? ty - ARROW_GAP : ty + ARROW_GAP
+  return [start, { x: outX, y: sy }, { x: outX, y: channelY }, { x: backX, y: channelY }, { x: backX, y: ty }, end]
+}
+
+/** 渲染用 path d：FS 用领域层算好的几何；SS/FF/SF 在视图层按 type 补算端点。 */
+export function dependencyArrowPath(arrow: DependencyArrow, bars: ReadonlyMap<string, GanttBar>): string {
+  const from = bars.get(arrow.from)
+  const to = bars.get(arrow.to)
+  if (from === undefined || to === undefined) return arrow.path
+  const mid = (bar: GanttBar): number => bar.y + bar.height / 2
+
+  let start: ArrowAnchor
+  let end: ArrowAnchor
+  let exit: 'left' | 'right'
+  let entry: 'left' | 'right'
+  switch (arrow.type) {
+    case 'SS':
+      start = { x: from.x, y: mid(from) }
+      end = { x: to.x, y: mid(to) }
+      exit = 'left'
+      entry = 'left'
+      break
+    case 'FF':
+      start = { x: from.x + from.width, y: mid(from) }
+      end = { x: to.x + to.width, y: mid(to) }
+      exit = 'right'
+      entry = 'right'
+      break
+    case 'SF':
+      start = { x: from.x, y: mid(from) }
+      end = { x: to.x + to.width, y: mid(to) }
+      exit = 'left'
+      entry = 'right'
+      break
+    default:
+      // FS：领域层几何（右→左）已算好，不重算
+      return arrow.path
+  }
+  const points = routeAnchoredArrow(start, end, exit, entry)
+  return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
+}
+
+export interface GanttArrowsLayerProps {
+  arrows: readonly DependencyArrow[]
+  /** x 轴投影倍率（列宽缩放），与任务条保持同一套投影 */
+  zoom: number
+  /** body 行整体下移量（顶部里程碑轨道占用的高度） */
+  offsetY: number
+  /** 内容区总高，T21 做关键路径分组 / hover 淡出时会用到 */
+  height: number
+  /** task id → 条几何（模型坐标）；SS/FF/SF 端点分流用（T19 遗留，见 dependencyArrowPath） */
+  bars: ReadonlyMap<string, GanttBar>
+  /** 环上依赖的箭头 id：红色虚线（spec 5.3 降级） */
+  cycleArrowIds: ReadonlySet<string>
+  /** 「关键路径」开关（默认开）：关闭时不加粗、不展示计算结果 */
+  criticalPathVisible: boolean
+  /** 当前 hover 的任务 id；非空时其直接依赖箭头高亮、其余淡出至 0.25 */
+  hoveredTaskId: string | null
+}
+
+/**
+ * 依赖箭头层（T21）。拐点来自领域层（FS）或按 type 补算（SS/FF/SF，见 dependencyArrowPath）；
+ * 视觉状态三选一：环上 → 红虚线；关键路径开关打开且箭头关键 → 深靛；其余 → 中性灰。
+ * hover 某条时，它的直接依赖箭头保持不透明，其余淡出。箭头不拦截指针事件（纯装饰）。
+ */
+export function GanttArrowsLayer(props: GanttArrowsLayerProps) {
+  const { arrows, zoom, offsetY, criticalPathVisible, cycleArrowIds, hoveredTaskId, bars } = props
+  return (
+    <g
+      data-gantt-layer="arrows"
+      transform={`translate(0 ${offsetY}) scale(${zoom} 1)`}
+      fill="none"
+      stroke={GANTT_ARROW_COLOR}
+      strokeWidth={1}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      pointerEvents="none"
+    >
+      {arrows.map((arrow) => {
+        const onCycle = cycleArrowIds.has(arrow.id)
+        const critical = criticalPathVisible && arrow.critical
+        const stroke = onCycle ? GANTT_CYCLE_COLOR : critical ? GANTT_CRITICAL_COLOR : GANTT_ARROW_COLOR
+        const markerId = onCycle
+          ? GANTT_ARROW_MARKER_CYCLE_ID
+          : critical
+            ? GANTT_ARROW_MARKER_CRITICAL_ID
+            : GANTT_ARROW_MARKER_ID
+        const dimmed = hoveredTaskId !== null && arrow.from !== hoveredTaskId && arrow.to !== hoveredTaskId
+        return (
+          <path
+            key={arrow.id}
+            data-gantt-arrow={arrow.id}
+            data-from={arrow.from}
+            data-to={arrow.to}
+            data-type={arrow.type}
+            data-critical={arrow.critical}
+            data-cycle={onCycle}
+            d={dependencyArrowPath(arrow, bars)}
+            markerEnd={`url(#${markerId})`}
+            stroke={stroke}
+            strokeDasharray={onCycle ? CYCLE_DASH : undefined}
+            opacity={dimmed ? GANTT_HOVER_DIM_OPACITY : undefined}
+            vectorEffect="non-scaling-stroke"
+          />
+        )
+      })}
+    </g>
+  )
+}
+
+/**
+ * T39 · 标签文本：`pointer-events="none"`，不吃掉条体的 hover 命中（T21 的前后一跳高亮靠
+ * 事件目标最近的 `[data-gantt-bar]` 祖先判定，标签插在中间会让高亮失灵）。
+ * 淡出透明度与所在条一致，hover 时整行一起退到背景。
+ */
+function GanttBarLabel(props: GanttLabelPlacement & { id: string; y: number; opacity?: number }) {
+  return (
+    <text
+      data-gantt-label={props.id}
+      data-placement={props.placement}
+      x={props.x}
+      y={props.y}
+      fontSize={GANTT_LABEL_FONT_SIZE * currentUiScale()}
+      fill={props.fill}
+      opacity={props.opacity}
+      pointerEvents="none"
+      dominantBaseline="central"
+    >
+      {props.text}
+    </text>
+  )
+}
+
+function MilestoneDiamond(props: { id: string; cx: number; cy: number; fill: string; title: string }) {
+  const size = MILESTONE_SIZE * currentUiScale()
+  const half = size / 2
+  return (
+    <g data-gantt-milestone={props.id} transform={`translate(${props.cx} ${props.cy}) rotate(45)`}>
+      <rect
+        x={-half}
+        y={-half}
+        width={size}
+        height={size}
+        rx={1}
+        fill={props.fill}
+        stroke="#FFFFFF"
+        strokeWidth={1}
+      />
+      <title>{props.title}</title>
+    </g>
+  )
+}
+
+export interface GanttCanvasProps {
+  model: GanttModel
+  /** 已按窗口切好的 body 行（不含顶部里程碑轨道） */
+  rows: readonly GanttRow[]
+  /** 跨 topic 里程碑：顶部独立轨道 */
+  lane: readonly GanttRow[]
+  window: GanttRowWindow
+  columnWindow: GanttColumnWindow
+  zoom: number
+  baselineVisible: boolean
+  /** 「关键路径」开关（T21）：开启时关键条描边加粗、关键箭头着色；关闭时不展示计算结果 */
+  criticalPathVisible: boolean
+  scrollLeft: number
+  t: (key: MsgKey, params?: TranslateParams) => string
+  onScroll(input: { scrollTop: number; scrollLeft: number }): void
+  onZoomWheel(event: WheelEvent): void
+  /**
+   * T52：「回到今天」的触发计数。每次 +1 就把今天那列滚到视野中间。
+   * 用计数而不是布尔量，连续点两次也能各自生效（布尔量第二次没有变化）。
+   */
+  jumpToTodayNonce?: number
+}
+
+export function GanttCanvas(props: GanttCanvasProps) {
+  const { model, zoom, columnWindow, t } = props
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const { onZoomWheel, onScroll } = props
+
+  // T21 · hover 某条：高亮其全部直接依赖（前后各一跳），其余透明度降至 0.25
+  const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null)
+
+  // Ctrl+滚轮必须拦掉浏览器自带的页面缩放，所以用非 passive 的原生监听（React 的 onWheel 是 passive 的）。
+  useEffect(() => {
+    const element = scrollRef.current
+    if (element === null) return
+    function handleWheel(event: WheelEvent): void {
+      if (!event.ctrlKey && !event.metaKey) return
+      event.preventDefault()
+      onZoomWheel(event)
+    }
+    element.addEventListener('wheel', handleWheel, { passive: false })
+    return () => {
+      element.removeEventListener('wheel', handleWheel)
+    }
+  }, [onZoomWheel])
+
+  const rowHeight = model.rowHeight
+  const laneHeight = props.lane.length > 0 ? rowHeight : 0
+  const bodyRowCount = Math.max(0, model.rows.length - props.lane.length)
+  const totalHeight = laneHeight + bodyRowCount * rowHeight
+  const contentWidth = model.width * zoom
+
+  const visibleColumns = model.columns.slice(columnWindow.startCol, columnWindow.endCol)
+  const headerTop = clipHeaderCells(model.headerRows[0] ?? [], columnWindow, zoom)
+  const headerBottom = clipHeaderCells(model.headerRows[1] ?? [], columnWindow, zoom)
+  const todayColumn = model.columns.find((column) => column.isToday)
+  const todayX = todayColumn === undefined ? null : (todayColumn.x + todayColumn.width / 2) * zoom
+
+  /**
+   * T52：首屏把「今天」带进视野。
+   *
+   * 画布的横向原点固定在时间范围起点，而范围是「最小 42 天、缺口 2/3 给未来」推导出来的，
+   * 起点常常比今天早一个多月——日刻度下画布 3300px、视口只有 650px，于是首屏是 9 月的空白格，
+   * 今天在屏外 565px，任务条也大半在屏外。用户第一眼会以为「图是空的」。
+   *
+   * 只在挂载后应用一次（`appliedRef`），之后滚动位置归用户；切刻度 / 缩放都不再抢。
+   */
+  const todayCenteredRef = useRef(false)
+  const centerToday = (): void => {
+    const element = scrollRef.current
+    if (element === null || todayX === null) return
+    element.scrollLeft = Math.max(0, todayX - element.clientWidth / 2)
+  }
+  useEffect(() => {
+    if (todayCenteredRef.current) return
+    // 首帧容器可能还没有布局（jsdom 恒为 0，真浏览器里通常已就绪），拿不到宽度就留给下一帧
+    if (scrollRef.current === null || scrollRef.current.clientWidth === 0) return
+    todayCenteredRef.current = true
+    centerToday()
+  }, [todayX])
+
+  // 「回到今天」按钮：靠单调计数触发，连点两次也各生效一次
+  const jumpNonce = props.jumpToTodayNonce ?? 0
+  useEffect(() => {
+    if (jumpNonce === 0) return
+    centerToday()
+  }, [jumpNonce])
+
+  /**
+   * 切刻度时保持「左边缘是哪一天」不变。
+   *
+   * 日 / 周的列宽差 7 倍（32px vs 14px），如果沿用一个 scrollLeft 像素值，
+   * 视野会一下子跳到半个月之外——用户为了「看更远」切到周刻度，结果丢了当前位置。
+   * 这里把旧视野的左缘折算成「第几天」，在新刻度里落回同一天。
+   */
+  const scaleAnchorRef = useRef<{ scale: string; cell: number; zoom: number } | null>(null)
+  useEffect(() => {
+    const element = scrollRef.current
+    const previous = scaleAnchorRef.current
+    const cell = model.columns[0]?.width ?? 0
+    scaleAnchorRef.current = { scale: model.scale, cell, zoom }
+    if (element === null || previous === null) return
+    if (previous.scale === model.scale) return
+    if (cell <= 0 || previous.cell <= 0) return
+    const anchorDay = Math.max(0, Math.floor(props.scrollLeft / (previous.cell * previous.zoom)))
+    element.scrollLeft = anchorDay * cell * zoom
+  }, [model, zoom, props.scrollLeft])
+
+  // 行显示 y 由视图按下标重新投影（跨 topic 里程碑被提到顶部轨道后，模型行号会有空洞）
+  const displayOffset = (row: GanttRow, index: number): number => (props.window.startRow + index) * rowHeight - row.y
+
+  const arrows = clipArrows(
+    model.arrows,
+    {
+      left: columnWindow.left,
+      right: columnWindow.right,
+      top: props.window.startRow * rowHeight,
+      bottom: props.window.endRow * rowHeight,
+    },
+    zoom,
+  )
+
+  const empty = model.rows.length === 0
+
+  // T21：SS/FF/SF 端点分流需要的条几何。取全量行而不是视口内的行——
+  // 被裁剪渲染的箭头，其端点任务可能落在视口外，锚点仍要能查到。
+  const bars = useMemo(() => {
+    const map = new Map<string, GanttBar>()
+    for (const row of model.rows) {
+      if (row.kind === 'task' && row.bar !== null) map.set(row.id, row.bar)
+    }
+    return map
+  }, [model.rows])
+
+  // T21：环上依赖 = 两端都落在同一个强连通分量里的箭头（红色虚线，spec 5.3 降级）
+  const cycleArrowIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const cycle of model.cycles) {
+      const members = new Set(cycle)
+      for (const arrow of model.arrows) {
+        if (members.has(arrow.from) && members.has(arrow.to)) ids.add(arrow.id)
+      }
+    }
+    return ids
+  }, [model.cycles, model.arrows])
+
+  // T21：hover 任务的前后各一跳邻居（含自身）；其余条与箭头淡出至 0.25
+  const hoverNeighbours = useMemo(() => {
+    if (hoveredTaskId === null) return null
+    const set = new Set<string>([hoveredTaskId])
+    for (const arrow of model.arrows) {
+      if (arrow.from === hoveredTaskId) set.add(arrow.to)
+      if (arrow.to === hoveredTaskId) set.add(arrow.from)
+    }
+    return set
+  }, [hoveredTaskId, model.arrows])
+
+  // hover 命中判定挂在 body <g> 上：事件目标最近的 [data-gantt-bar] 祖先即当前 hover 的任务；
+  // 指针移到没有任务条的位置（行带 / 空白）时置空，撤销高亮。
+  const handleBodyMouseOver = (event: ReactMouseEvent<SVGGElement>): void => {
+    const target = event.target
+    if (!(target instanceof Element)) return
+    const bar = target.closest('[data-gantt-bar]')
+    setHoveredTaskId(bar === null ? null : bar.getAttribute('data-gantt-bar'))
+  }
+
+  return (
+    <div
+      data-testid="gantt-canvas"
+      style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--oe-surface)' }}
+    >
+      <div
+        data-testid="gantt-header"
+        style={{
+          height: GANTT_HEADER_HEIGHT * currentUiScale(),
+          flex: `0 0 ${GANTT_HEADER_HEIGHT * currentUiScale()}px`,
+          position: 'relative',
+          overflow: 'hidden',
+          borderBottom: `1px solid ${GRID_COLOR}`,
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: contentWidth,
+            height: GANTT_HEADER_HEIGHT * currentUiScale(),
+            transform: `translateX(-${props.scrollLeft}px)`,
+          }}
+        >
+          {headerTop.map((cell) => (
+            <div
+              key={`h0-${cell.label}`}
+              data-gantt-header-cell={cell.label}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: cell.x * zoom,
+                width: cell.width * zoom,
+                height: sp(20),
+                boxSizing: 'border-box',
+                paddingLeft: sp(4),
+                borderLeft: `1px solid ${GRID_COLOR}`,
+                fontSize: fs(11),
+                lineHeight: px('20px'),
+                color: TEXT_MUTED,
+                overflow: 'hidden',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {cell.label}
+            </div>
+          ))}
+          {headerBottom.map((cell) => (
+            <div
+              key={`h1-${cell.label}-${cell.x}`}
+              style={{
+                position: 'absolute',
+                top: sp(20),
+                left: cell.x * zoom,
+                width: cell.width * zoom,
+                height: sp(20),
+                boxSizing: 'border-box',
+                paddingLeft: sp(4),
+                borderLeft: `1px solid ${GRID_COLOR}`,
+                fontSize: fs(11),
+                lineHeight: px('20px'),
+                color: TEXT,
+                overflow: 'hidden',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {cell.label}
+            </div>
+          ))}
+          {todayX === null ? null : (
+            <div
+              data-testid="gantt-today-label"
+              style={{
+                position: 'absolute',
+                top: sp(1),
+                left: todayX,
+                transform: 'translateX(-50%)',
+                padding: px('0 6px'),
+                height: sp(16),
+                lineHeight: px('16px'),
+                fontSize: fs(10),
+                fontWeight: 600,
+                color: GANTT_TODAY_COLOR,
+                background: 'rgba(255, 59, 48, 0.12)',
+                borderRadius: sp(999),
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {t('gantt.today')}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {empty ? (
+        <div
+          data-testid="gantt-empty"
+          style={{ flex: 1, display: 'grid', placeItems: 'center', fontSize: fs(12), color: TEXT_MUTED }}
+        >
+          {t('gantt.empty')}
+        </div>
+      ) : (
+        <div
+          ref={scrollRef}
+          data-testid="gantt-canvas-scroll"
+          onScroll={(event) => {
+            onScroll({ scrollTop: event.currentTarget.scrollTop, scrollLeft: event.currentTarget.scrollLeft })
+          }}
+          style={{ flex: 1, minHeight: 0, overflow: 'auto', position: 'relative' }}
+        >
+          <svg
+            data-testid="gantt-canvas-svg"
+            data-scale={model.scale}
+            data-zoom={zoom}
+            data-cell-width={model.columns[0]?.width ?? 0}
+            data-rows-visible={props.rows.length}
+            width={contentWidth}
+            height={totalHeight}
+            role="img"
+            aria-label={t('gantt.title')}
+            style={{ display: 'block', fontFamily: 'inherit' }}
+          >
+            <defs>
+              {/* 箭头头部三态：普通灰 / 关键路径深靛 / 成环红（与 path stroke 同色） */}
+              <marker
+                id={GANTT_ARROW_MARKER_ID}
+                viewBox="0 0 8 8"
+                refX="7"
+                refY="4"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto"
+              >
+                <path d="M0 0 L8 4 L0 8 Z" fill={GANTT_ARROW_COLOR} />
+              </marker>
+              <marker
+                id={GANTT_ARROW_MARKER_CRITICAL_ID}
+                viewBox="0 0 8 8"
+                refX="7"
+                refY="4"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto"
+              >
+                <path d="M0 0 L8 4 L0 8 Z" fill={GANTT_CRITICAL_COLOR} />
+              </marker>
+              <marker
+                id={GANTT_ARROW_MARKER_CYCLE_ID}
+                viewBox="0 0 8 8"
+                refX="7"
+                refY="4"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto"
+              >
+                <path d="M0 0 L8 4 L0 8 Z" fill={GANTT_CYCLE_COLOR} />
+              </marker>
+            </defs>
+
+            {/* 列底纹：周末 / 节假日 / 补班由模型的 isWorkday 综合判定 */}
+            {visibleColumns.map((column) => (
+              <rect
+                key={`col-${column.date}`}
+                data-gantt-col={column.date}
+                data-weekend={column.isWeekend}
+                data-holiday={column.isHoliday}
+                data-workday={column.isWorkday}
+                x={column.x * zoom}
+                y={0}
+                width={column.width * zoom}
+                height={totalHeight}
+                fill={column.isWorkday ? 'transparent' : GANTT_OFF_COLUMN_FILL}
+              />
+            ))}
+
+            {/* 顶部独立轨道：跨 topic 里程碑 */}
+            {laneHeight === 0 ? null : (
+              <g data-gantt-lane="true">
+                <rect
+                  data-gantt-lane-band="true"
+                  x={0}
+                  y={0}
+                  width={contentWidth}
+                  height={laneHeight}
+                  fill={LANE_FILL}
+                />
+                {props.lane.map((row) => {
+                  if (row.bar === null) return null
+                  const cx = (row.bar.x + row.bar.width / 2) * zoom
+                  const label = resolveMilestoneLabel(cx, props.scrollLeft)
+                  return (
+                    <g key={`lane-${row.id}`}>
+                      <MilestoneDiamond
+                        id={row.id}
+                        cx={cx}
+                        cy={laneHeight / 2}
+                        fill={topicBarFill(row.color)}
+                        title={row.label}
+                      />
+                      {label.visible ? (
+                        <GanttBarLabel
+                          id={row.id}
+                          text={row.label}
+                          x={label.x}
+                          y={laneHeight / 2}
+                          fill={GANTT_LABEL_FILL}
+                          placement="outside"
+                        />
+                      ) : null}
+                    </g>
+                  )
+                })}
+              </g>
+            )}
+
+            <g
+              data-gantt-body="true"
+              transform={`translate(0 ${laneHeight})`}
+              onMouseOver={handleBodyMouseOver}
+              onMouseLeave={() => setHoveredTaskId(null)}
+            >
+              {props.rows.map((row, index) => {
+                const offset = displayOffset(row, index)
+                // T21：hover 某条时，非前后一跳邻居的任务条整体淡出
+                const dimmed = hoverNeighbours !== null && !hoverNeighbours.has(row.id)
+                // T21：关键路径开关打开时，criticalIds 内的任务条描边加粗
+                const barCritical = props.criticalPathVisible && row.critical
+                const dimOpacity = dimmed ? GANTT_HOVER_DIM_OPACITY : undefined
+                // T53：条整体滚到视口左侧之外时 resolveTaskLabel 返回空文本——那种情况下
+                // 整条标签不渲染（而不是留一个空 <text>），DOM 里「有标签」就等于「看得见名字」。
+                const barLabel =
+                  row.bar === null || row.kind !== 'task'
+                    ? null
+                    : resolveTaskLabel(
+                        row.label,
+                        row.bar.x * zoom,
+                        row.bar.width * zoom,
+                        row.bar.progressWidth * zoom,
+                        props.scrollLeft,
+                      )
+                // 里程碑同理：菱形可见就钉住名字，菱形滚出视口就连名字一起收掉
+                const milestoneLabel =
+                  row.bar === null || row.kind !== 'milestone'
+                    ? null
+                    : resolveMilestoneLabel((row.bar.x + row.bar.width / 2) * zoom, props.scrollLeft)
+                return (
+                  <g key={`row-${row.id}`}>
+                    <rect
+                      data-gantt-row={row.id}
+                      data-row-kind={row.kind}
+                      data-row-height={row.height}
+                      x={0}
+                      y={props.window.startRow * rowHeight + index * rowHeight}
+                      width={contentWidth}
+                      height={row.height}
+                      fill={row.kind === 'topic' ? TOPIC_ROW_FILL : 'transparent'}
+                    />
+                    {row.bar !== null && row.kind === 'task' ? (
+                      <>
+                        <rect
+                          data-gantt-bar={row.id}
+                          data-topic-id={row.topicId ?? undefined}
+                          x={row.bar.x * zoom}
+                          y={row.bar.y + offset}
+                          width={row.bar.width * zoom}
+                          height={row.bar.height}
+                          rx={6}
+                          fill={topicBarFill(row.color)}
+                          fillOpacity={GANTT_BAR_OPACITY}
+                          stroke={barCritical ? GANTT_CRITICAL_COLOR : undefined}
+                          strokeWidth={barCritical ? GANTT_CRITICAL_STROKE_WIDTH : undefined}
+                          opacity={dimOpacity}
+                        >
+                          <title>{row.label}</title>
+                        </rect>
+                        {row.bar.progressWidth > 0 ? (
+                          <rect
+                            data-gantt-progress={row.id}
+                            x={row.bar.x * zoom}
+                            y={row.bar.y + offset}
+                            width={row.bar.progressWidth * zoom}
+                            height={row.bar.height}
+                            rx={6}
+                            fill={topicProgressFill(row.color)}
+                            opacity={dimOpacity}
+                            pointerEvents="none"
+                          />
+                        ) : null}
+                        {barLabel !== null && barLabel.text !== '' ? (
+                          <GanttBarLabel
+                            id={row.id}
+                            y={row.bar.y + offset + row.bar.height / 2}
+                            opacity={dimOpacity}
+                            {...barLabel}
+                          />
+                        ) : null}
+                        {props.baselineVisible && row.baseline !== null ? (
+                          <rect
+                            data-gantt-baseline={row.id}
+                            x={row.baseline.x * zoom}
+                            y={row.baseline.y + offset}
+                            width={row.baseline.width * zoom}
+                            height={row.baseline.height}
+                            rx={3}
+                            fill={GANTT_BASELINE_FILL}
+                            opacity={dimOpacity}
+                            pointerEvents="none"
+                          />
+                        ) : null}
+                      </>
+                    ) : null}
+                    {row.bar !== null && row.kind === 'milestone' ? (
+                      <>
+                        <MilestoneDiamond
+                          id={row.id}
+                          cx={(row.bar.x + row.bar.width / 2) * zoom}
+                          cy={row.bar.y + row.bar.height / 2 + offset}
+                          fill={topicBarFill(row.color)}
+                          title={row.label}
+                        />
+                        {milestoneLabel !== null && milestoneLabel.visible ? (
+                          <GanttBarLabel
+                            id={row.id}
+                            text={row.label}
+                            x={milestoneLabel.x}
+                            y={row.bar.y + row.bar.height / 2 + offset}
+                            fill={GANTT_LABEL_FILL}
+                            placement="outside"
+                          />
+                        ) : null}
+                      </>
+                    ) : null}
+                  </g>
+                )
+              })}
+            </g>
+
+            <GanttArrowsLayer
+              arrows={arrows}
+              zoom={zoom}
+              offsetY={laneHeight}
+              height={totalHeight}
+              bars={bars}
+              cycleArrowIds={cycleArrowIds}
+              criticalPathVisible={props.criticalPathVisible}
+              hoveredTaskId={hoveredTaskId}
+            />
+
+            {todayX === null ? null : (
+              <line
+                data-gantt-today="line"
+                x1={todayX}
+                y1={0}
+                x2={todayX}
+                y2={totalHeight}
+                stroke={GANTT_TODAY_COLOR}
+                strokeWidth={1}
+                vectorEffect="non-scaling-stroke"
+                pointerEvents="none"
+              />
+            )}
+          </svg>
+        </div>
+      )}
+    </div>
+  )
+}

@@ -1,0 +1,786 @@
+// T69 · WhiteboardModel：白板的纯几何层（锚点、走线、箭头、边界、文本分行）。
+//
+// 与 mindmapModel 的分工差别：导图的**位置是算出来的**（布局两趟），白板的**位置是用户摆的**——
+// 所以这里不做布局，只做「两个矩形之间那条线怎么画」。视图（WhiteboardCanvas）与导出器
+// （WhiteboardExporter）读同一份几何，因此屏幕上的线与导出的线**逐点一致**，不存在两套走线口径。
+//
+// 零 React / 零 DOM / 零 I/O：这里只用算术，jsdom 与 node 里都能直接断言。
+//
+// 三条口径：
+//   ① 锚点永远取**包围盒边中点**。菱形四顶点就是包围盒四边中点、椭圆的四边中点也在曲线上，
+//      所以这一个规则同时贴合 rect / round / ellipse / diamond——不需要按形状分支。
+//   ② `auto` 由两端中心的相对方位决定，横向差 ≥ 纵向差就走左右，否则走上下。宽扁的架构图
+//      因此自然走横线，竖排的流程图自然走竖线。
+//   ③ 正交走线用「出线短段 + 直角折线 + 圆角」，短段沿锚点法线方向 —— 线一定垂直离开矩形边，
+//      不会贴着框边擦过去（Miro/draw.io 的手感都来自这一句）。
+
+import type { WhiteboardAnchor, WhiteboardEdge, WhiteboardNode, WhiteboardNodePatch, WhiteboardShape } from './types'
+
+/** 节点标签字号：视图、导出、分行估算三处共用同一个数字，宽度才复算得回来。 */
+export const WHITEBOARD_FONT_SIZE = 13
+/** 便签字号略大（便签本来就要一眼读到）。 */
+export const WHITEBOARD_NOTE_FONT_SIZE = 14
+/** 框内边距：文本换行宽度 = 节点宽 - 两侧。 */
+export const WHITEBOARD_NODE_PADDING = 12
+/** 正交走线的出线短段长度。 */
+export const WHITEBOARD_STUB = 18
+/** 折角圆角半径。 */
+export const WHITEBOARD_CORNER_RADIUS = 8
+/** 箭头尺寸（长与半宽）。 */
+export const WHITEBOARD_ARROW_LENGTH = 10
+export const WHITEBOARD_ARROW_HALF_WIDTH = 5
+/** 吸附网格与最小尺寸：拖动按网格落位，缩到比这更小就没法点中了。 */
+export const WHITEBOARD_GRID = 8
+export const WHITEBOARD_MIN_WIDTH = 48
+export const WHITEBOARD_MIN_HEIGHT = 32
+/** 双击新建 / 拖拽画出的默认尺寸，按形状给。 */
+export const WHITEBOARD_DEFAULT_SIZE: Record<WhiteboardShape, { width: number; height: number }> = {
+  rect: { width: 168, height: 56 },
+  round: { width: 168, height: 56 },
+  ellipse: { width: 152, height: 72 },
+  diamond: { width: 168, height: 96 },
+  note: { width: 180, height: 120 },
+  text: { width: 168, height: 32 },
+  frame: { width: 360, height: 240 },
+  /** 图片：真实尺寸由视图量出来后按宽度自适应覆写，这里只是「量不到」时的兜底。 */
+  image: { width: 320, height: 200 },
+}
+
+export interface WhiteboardPoint {
+  x: number
+  y: number
+}
+// ---------------------------------------------------------------------------
+// 自定义色（T70）
+//
+// 语义色（tone）给的是「这一格是干什么的」，自定义色给的是「我就要这个颜色」。
+// 两者在数据上并存：`tone` 永远有值（模板与新建都用它），`fill` 是可选的覆盖。
+// 覆盖一旦存在，屏幕上与导出里都**只认 fill**——否则会出现「屏幕上是自定义色、
+// 导出里是语义色」的两套口径。
+//
+// 三条口径：
+//   ① 字色由底色**算**出来，不另存字段。存了就会出现「底改了、字没改」的脏组合，
+//      而这类组合用户没法自己发现（白底白字）。
+//   ② 描边由底色**推**出来（浅底压深、深底提亮）。用户只挑一个颜色，不是三个。
+//   ③ 自定义色一律**字面量 hex**，不走主题令牌：用户挑的是颜色本身，深浅主题下
+//      都该是那个颜色（语义色才需要跟着主题走）。
+// ---------------------------------------------------------------------------
+
+/**
+ * 自定义色板：浅底六格（便签/分组常用）+ 中间调五格 + 黑白两格，两行摆开。
+ * 一律小写——存进 vault 的就是这些字面量，大写会让「当前选中的是不是这一格」比较不上。
+ */
+export const WHITEBOARD_SWATCHES: readonly string[] = [
+  '#fdecec',
+  '#fef3c7',
+  '#e3f7e8',
+  '#dceefe',
+  '#ede9fe',
+  '#fce7f3',
+  '#f1f5f9',
+  '#f59e0b',
+  '#10b981',
+  '#3b82f6',
+  '#8b5cf6',
+  '#ef4444',
+  '#1d1d1f',
+  '#ffffff',
+]
+
+/** 深底用纯白（半透明白会让小字发灰），浅底用与 `--oe-text` 同族的近黑。 */
+const INK_DARK = '#1D1D1F'
+const INK_LIGHT = '#FFFFFF'
+
+/**
+ * 收一个用户输入的颜色：接受 `#aabbcc` / `aabbcc` / `#abc` / `abc`（大小写不论），
+ * 一律归成小写 `#aabbcc`。收不了就返回 null——**不猜、不兜底**，由调用方决定提示。
+ */
+export function normalizeHex(input: string): string | null {
+  const raw = input.trim().replace(/^#/, '').toLowerCase()
+  if (/^[0-9a-f]{3}$/.test(raw)) return `#${raw[0]}${raw[0]}${raw[1]}${raw[1]}${raw[2]}${raw[2]}`
+  if (/^[0-9a-f]{6}$/.test(raw)) return `#${raw}`
+  return null
+}
+
+function channels(hex: string): { r: number; g: number; b: number } {
+  const normalized = normalizeHex(hex) ?? '#000000'
+  return {
+    r: parseInt(normalized.slice(1, 3), 16),
+    g: parseInt(normalized.slice(3, 5), 16),
+    b: parseInt(normalized.slice(5, 7), 16),
+  }
+}
+
+function clampChannel(value: number): number {
+  return Math.max(0, Math.min(255, Math.round(value)))
+}
+
+/** 0..1，WCAG 相对亮度（sRGB 先线性化，再加权）。判断「浅底 / 深底」只用它。 */
+export function hexLuminance(hex: string): number {
+  const { r, g, b } = channels(hex)
+  const linear = (value: number): number => {
+    const c = value / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+}
+
+/** 底色上放什么字：浅底给近黑，深底给纯白。 */
+export function readableInk(hex: string): string {
+  return hexLuminance(hex) > 0.42 ? INK_DARK : INK_LIGHT
+}
+
+/** 把一个颜色往黑（amount < 0）或往白（amount > 0）推，amount ∈ [-1, 1]。 */
+export function shadeHex(hex: string, amount: number): string {
+  const { r, g, b } = channels(hex)
+  const target = amount < 0 ? 0 : 255
+  const t = Math.min(1, Math.abs(amount))
+  const to = (value: number): string => clampChannel(value + (target - value) * t).toString(16).padStart(2, '0')
+  return `#${to(r)}${to(g)}${to(b)}`
+}
+
+/** 两色按比例混（t = 0 取 a，t = 1 取 b）。分组框的淡底就是「底色混进背景色」。 */
+export function mixHex(a: string, b: string, t: number): string {
+  const ca = channels(a)
+  const cb = channels(b)
+  const ratio = Math.max(0, Math.min(1, t))
+  const to = (from: number, target: number): string =>
+    clampChannel(from + (target - from) * ratio)
+      .toString(16)
+      .padStart(2, '0')
+  return `#${to(ca.r, cb.r)}${to(ca.g, cb.g)}${to(ca.b, cb.b)}`
+}
+
+/** 画到 CSS 用的 `rgba()`；alpha = 1 时仍给 hex，读起来短一点。 */
+export function hexToCss(hex: string, alpha: number): string {
+  const normalized = normalizeHex(hex) ?? '#000000'
+  if (alpha >= 1) return normalized
+  const { r, g, b } = channels(normalized)
+  return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, alpha)).toFixed(3)})`
+}
+
+/** 一个图元最终怎么上色（屏幕与导出共用，杜绝「两套口径」）。 */
+export interface WhiteboardNodePaint {
+  fill: string
+  fillOpacity: number
+  stroke: string
+  strokeOpacity: number
+  /** 字色 */
+  ink: string
+  /** 描边是否虚线（分组框） */
+  dashed: boolean
+}
+
+/**
+ * 自定义色的投影。没有 `fill` 时返回 null —— 调用方回落到语义色（屏幕上还要吃主题令牌，
+ * 所以不能在这里把语义色也实体化）。
+ */
+export function resolveNodePaint(
+  node: Pick<WhiteboardNode, 'shape' | 'fill'>,
+): WhiteboardNodePaint | null {
+  const fill = node.fill
+  if (fill === undefined) return null
+  if (node.shape === 'text') {
+    // 文本图元没有底，「自定义色」就是字色本身——不做亮度换算，用户挑什么就是什么
+    return { fill: 'none', fillOpacity: 1, stroke: 'none', strokeOpacity: 1, ink: fill, dashed: false }
+  }
+  if (node.shape === 'frame') {
+    // 分组框面积大，实底会把里面的东西全糊掉：底色按低不透明度铺，字色按混出来的底算
+    return {
+      fill,
+      fillOpacity: 0.14,
+      stroke: fill,
+      strokeOpacity: 0.7,
+      ink: readableInk(mixHex(fill, '#FFFFFF', 0.86)),
+      dashed: true,
+    }
+  }
+  return {
+    fill,
+    fillOpacity: 1,
+    stroke: shadeHex(fill, hexLuminance(fill) > 0.42 ? -0.22 : 0.24),
+    strokeOpacity: 1,
+    ink: readableInk(fill),
+    dashed: false,
+  }
+}
+
+export interface WhiteboardRect {
+
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface WhiteboardBounds {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
+/** 一条边投影后的全部绘制信息（视图与导出器都只读这个）。 */
+export interface WhiteboardEdgeView {
+  id: string
+  fromId: string
+  toId: string
+  /** 折线 path（含圆角），直线走 `M … L …` */
+  path: string
+  /** 末端箭头三角的点串（`x,y x,y x,y`）；arrow 不含末端时为 null */
+  endArrow: string | null
+  /** 起点箭头三角（仅 arrow='both'） */
+  startArrow: string | null
+  /** 标签落点（路径中点）；label 为空时视图不画，但坐标恒给 */
+  labelX: number
+  labelY: number
+}
+
+export function rectCenter(rect: WhiteboardRect): WhiteboardPoint {
+  return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+}
+
+/** 锚点边中点。`auto` 按对方中心方位选边（口径 ②）。 */
+export function resolveAnchor(rect: WhiteboardRect, anchor: WhiteboardAnchor, other: WhiteboardRect): 'top' | 'right' | 'bottom' | 'left' {
+  if (anchor !== 'auto') return anchor
+  const a = rectCenter(rect)
+  const b = rectCenter(other)
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? 'right' : 'left'
+  return dy >= 0 ? 'bottom' : 'top'
+}
+
+/** 边中点坐标。 */
+export function anchorPoint(rect: WhiteboardRect, side: 'top' | 'right' | 'bottom' | 'left'): WhiteboardPoint {
+  switch (side) {
+    case 'top':
+      return { x: rect.x + rect.width / 2, y: rect.y }
+    case 'bottom':
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height }
+    case 'left':
+      return { x: rect.x, y: rect.y + rect.height / 2 }
+    case 'right':
+      return { x: rect.x + rect.width, y: rect.y + rect.height / 2 }
+  }
+}
+
+/** 锚点的外法线（正交走线的出线方向）。 */
+function normalOf(side: 'top' | 'right' | 'bottom' | 'left'): WhiteboardPoint {
+  switch (side) {
+    case 'top':
+      return { x: 0, y: -1 }
+    case 'bottom':
+      return { x: 0, y: 1 }
+    case 'left':
+      return { x: -1, y: 0 }
+    case 'right':
+      return { x: 1, y: 0 }
+  }
+}
+
+function round1(value: number): number {
+  return Math.round(value * 10) / 10
+}
+
+/** 折线 → 带圆角的 path（每个中间拐点切掉 r，再用二次贝塞尔补角）。 */
+function roundedPolyline(points: readonly WhiteboardPoint[], radius: number): string {
+  const pts = points.filter(
+    (point, index) => index === 0 || point.x !== points[index - 1]!.x || point.y !== points[index - 1]!.y,
+  )
+  if (pts.length < 2) return ''
+  const first = pts[0]!
+  let d = `M ${round1(first.x)} ${round1(first.y)}`
+  for (let i = 1; i < pts.length - 1; i += 1) {
+    const prev = pts[i - 1]!
+    const current = pts[i]!
+    const next = pts[i + 1]!
+    const inLen = Math.hypot(current.x - prev.x, current.y - prev.y)
+    const outLen = Math.hypot(next.x - current.x, next.y - current.y)
+    const r = Math.min(radius, inLen / 2, outLen / 2)
+    if (r < 0.5) {
+      d += ` L ${round1(current.x)} ${round1(current.y)}`
+      continue
+    }
+    const inUnit = { x: (current.x - prev.x) / inLen, y: (current.y - prev.y) / inLen }
+    const outUnit = { x: (next.x - current.x) / outLen, y: (next.y - current.y) / outLen }
+    const entry = { x: current.x - inUnit.x * r, y: current.y - inUnit.y * r }
+    const exit = { x: current.x + outUnit.x * r, y: current.y + outUnit.y * r }
+    d += ` L ${round1(entry.x)} ${round1(entry.y)} Q ${round1(current.x)} ${round1(current.y)} ${round1(exit.x)} ${round1(exit.y)}`
+  }
+  const last = pts[pts.length - 1]!
+  return `${d} L ${round1(last.x)} ${round1(last.y)}`
+}
+
+/**
+ * 正交折线：出线短段 → 直角折线 → 入线短段（口径 ③）。
+ * 两段短段的方向冲突时（例如目标在起点的反方向），中段取**外侧**中点，
+ * 让折线绕出去而不是从框上折回来。
+ */
+function orthoPoints(p1: WhiteboardPoint, n1: WhiteboardPoint, p2: WhiteboardPoint, n2: WhiteboardPoint): WhiteboardPoint[] {
+  const a = { x: p1.x + n1.x * WHITEBOARD_STUB, y: p1.y + n1.y * WHITEBOARD_STUB }
+  const b = { x: p2.x + n2.x * WHITEBOARD_STUB, y: p2.y + n2.y * WHITEBOARD_STUB }
+  const horizontal1 = n1.x !== 0
+  const horizontal2 = n2.x !== 0
+  const points: WhiteboardPoint[] = [p1, a]
+  if (horizontal1 && horizontal2) {
+    if (a.x < b.x) {
+      const midX = (a.x + b.x) / 2
+      points.push({ x: midX, y: a.y }, { x: midX, y: b.y })
+    } else {
+      // 反向：起点必须往目标的外侧绕。两框同高时中段长度为 0，直接折会叠成一条线
+      // （看起来像「线断了」），所以补一段绕行通道，走成 U 形。
+      const midX = Math.max(a.x, b.x) + WHITEBOARD_STUB
+      if (Math.abs(a.y - b.y) < 1) {
+        const lane = a.y + WHITEBOARD_STUB * 2
+        points.push({ x: midX, y: a.y }, { x: midX, y: lane }, { x: b.x, y: lane })
+      } else {
+        points.push({ x: midX, y: a.y }, { x: midX, y: b.y })
+      }
+    }
+  } else if (!horizontal1 && !horizontal2) {
+    if (a.y < b.y) {
+      const midY = (a.y + b.y) / 2
+      points.push({ x: a.x, y: midY }, { x: b.x, y: midY })
+    } else {
+      const midY = Math.max(a.y, b.y) + WHITEBOARD_STUB
+      if (Math.abs(a.x - b.x) < 1) {
+        const lane = a.x + WHITEBOARD_STUB * 2
+        points.push({ x: a.x, y: midY }, { x: lane, y: midY }, { x: lane, y: b.y })
+      } else {
+        points.push({ x: a.x, y: midY }, { x: b.x, y: midY })
+      }
+    }
+  } else if (horizontal1) {
+    points.push({ x: b.x, y: a.y })
+  } else {
+    points.push({ x: a.x, y: b.y })
+  }
+  points.push(b, p2)
+  return points
+}
+
+/** 箭头三角：tip 为尖端，angle 为**指向尖端**的方向（弧度）。 */
+export function arrowPoints(tip: WhiteboardPoint, angle: number, length = WHITEBOARD_ARROW_LENGTH, half = WHITEBOARD_ARROW_HALF_WIDTH): string {
+  const back = { x: tip.x - Math.cos(angle) * length, y: tip.y - Math.sin(angle) * length }
+  const nx = Math.sin(angle)
+  const ny = -Math.cos(angle)
+  const left = { x: back.x + nx * half, y: back.y + ny * half }
+  const right = { x: back.x - nx * half, y: back.y - ny * half }
+  return `${round1(tip.x)},${round1(tip.y)} ${round1(left.x)},${round1(left.y)} ${round1(right.x)},${round1(right.y)}`
+}
+
+/**
+ * 把一条边投影成可绘制形态。两端节点缺失时返回 null——视图跳过（数据里残留的悬空边
+ * 不会画出来，但也不会被悄悄删掉：删不删是数据层的决定，几何层只回答「画不了」）。
+ */
+export function buildEdgeView(
+  edge: WhiteboardEdge,
+  from: WhiteboardRect,
+  to: WhiteboardRect,
+): WhiteboardEdgeView {
+  const fromSide = resolveAnchor(from, edge.fromAnchor, to)
+  const toSide = resolveAnchor(to, edge.toAnchor, from)
+  const p1 = anchorPoint(from, fromSide)
+  const p2 = anchorPoint(to, toSide)
+  const n1 = normalOf(fromSide)
+  const n2 = normalOf(toSide)
+
+  let path: string
+  let endAngle = 0
+  let startAngle = 0
+  let labelX = (p1.x + p2.x) / 2
+  let labelY = (p1.y + p2.y) / 2
+  if (edge.route === 'straight') {
+    path = `M ${round1(p1.x)} ${round1(p1.y)} L ${round1(p2.x)} ${round1(p2.y)}`
+    // 指向尖端的方向 = 从起点指向终点
+    endAngle = Math.atan2(p2.y - p1.y, p2.x - p1.x)
+    startAngle = Math.atan2(p1.y - p2.y, p1.x - p2.x)
+  } else {
+    const points = orthoPoints(p1, n1, p2, n2)
+    path = roundedPolyline(points, WHITEBOARD_CORNER_RADIUS)
+    // 末段方向 = 入线短段的反向（从 b 指向 p2）
+    endAngle = Math.atan2(p2.y - (p2.y + n2.y * WHITEBOARD_STUB), p2.x - (p2.x + n2.x * WHITEBOARD_STUB))
+    startAngle = Math.atan2(p1.y - (p1.y + n1.y * WHITEBOARD_STUB), p1.x - (p1.x + n1.x * WHITEBOARD_STUB))
+    const mid = points[Math.floor(points.length / 2)]!
+    labelX = mid.x
+    labelY = mid.y
+  }
+
+  return {
+    id: edge.id,
+    fromId: edge.from,
+    toId: edge.to,
+    path,
+    endArrow: edge.arrow === 'end' || edge.arrow === 'both' ? arrowPoints(p2, endAngle) : null,
+    startArrow: edge.arrow === 'both' ? arrowPoints(p1, startAngle) : null,
+    labelX,
+    labelY,
+  }
+}
+
+/** 所有节点的包围盒（空画布给一个以原点为中心的默认框，避免 fit 时除零）。 */
+export function whiteboardBounds(nodes: readonly WhiteboardRect[]): WhiteboardBounds {
+  if (nodes.length === 0) return { minX: -200, minY: -120, maxX: 200, maxY: 120 }
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const node of nodes) {
+    minX = Math.min(minX, node.x)
+    minY = Math.min(minY, node.y)
+    maxX = Math.max(maxX, node.x + node.width)
+    maxY = Math.max(maxY, node.y + node.height)
+  }
+  return { minX, minY, maxX, maxY }
+}
+
+/**
+ * 渲染序：**frame 永远在最底层**，其余保持数组序（后加的盖在上面）。
+ * 用户把框当成「层」用：层框必须托住里面的节点，否则拖一下就被盖住、点不中。
+ * 这是稳定排序（同组内保持原序），导出器复用同一函数，产物与屏幕一致。
+ */
+export function whiteboardRenderOrder(nodes: readonly WhiteboardNode[]): WhiteboardNode[] {
+  const frames: WhiteboardNode[] = []
+  const rest: WhiteboardNode[] = []
+  for (const node of nodes) {
+    if (node.shape === 'frame') frames.push(node)
+    else rest.push(node)
+  }
+  return [...frames, ...rest]
+}
+
+/** 吸附网格：拖动落点按 8px 归整（缩放档很小的时候仍按内容坐标吸附，视觉上一致）。 */
+export function snapToGrid(value: number): number {
+  return Math.round(value / WHITEBOARD_GRID) * WHITEBOARD_GRID
+}
+
+/** 命中检测：内容坐标点是否落在矩形内（框选与连线落点共用）。 */
+export function rectContains(rect: WhiteboardRect, point: WhiteboardPoint): boolean {
+  return point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height
+}
+
+/** 两个矩形是否相交（框选）。 */
+export function rectsIntersect(a: WhiteboardRect, b: WhiteboardRect): boolean {
+  return a.x <= b.x + b.width && b.x <= a.x + a.width && a.y <= b.y + b.height && b.y <= a.y + a.height
+}
+
+/**
+ * T76/T77 · 新图元的落点：优先视口中心，**被别的图元压住时**按网格一格格挪开。
+ *
+ * 为什么需要：新建的图元现在会自动选中并进入编辑态，连着点两次「文本」时两个空文本
+ * 完全叠在一处——用户看到的是一个占位文字、一个输入框，会以为「只加了一个」。
+ * 完全重叠（交集超过较小面积的 60%）才挪，轻微压边是排布常态，不该被推开。
+ *
+ * 为什么是「网格」而不是「对角线」（T77）：沿对角逐格挪会让连点五次的图元排成一条 45° 斜线，
+ * 每两个之间只错开 24px、仍然大面积互压，看起来像「一个歪掉的堆」。现在按图元自身的
+ * 宽高 + 间距为一格，沿 8 个方向由近及远找位置——第二个落到右边，第三个落到下边，
+ * 第四个落到左边，第五个落到上边，正好是一圈。
+ *
+ * 分组框（frame）不参与避让：把新图元放进框里是最常见的用法，
+ * 按「重叠」把它推出去会让所有图元都落在框外面。
+ */
+export function placeNewNode(
+  nodes: readonly Pick<WhiteboardNode, 'shape' | 'x' | 'y' | 'width' | 'height'>[],
+  center: WhiteboardPoint,
+  size: { width: number; height: number },
+  gap = 24,
+  rings = 3,
+): { x: number; y: number } {
+  const base = { x: snapToGrid(center.x - size.width / 2), y: snapToGrid(center.y - size.height / 2) }
+  const occupied = nodes.filter((node) => node.shape !== 'frame')
+  const collides = (x: number, y: number): boolean => {
+    const rect = { x, y, width: size.width, height: size.height }
+    return occupied.some((node) => {
+      const other = { x: node.x, y: node.y, width: node.width, height: node.height }
+      const overlapWidth = Math.min(rect.x + rect.width, other.x + other.width) - Math.max(rect.x, other.x)
+      const overlapHeight = Math.min(rect.y + rect.height, other.y + other.height) - Math.max(rect.y, other.y)
+      if (overlapWidth <= 0 || overlapHeight <= 0) return false
+      const smaller = Math.min(rect.width * rect.height, other.width * other.height)
+      return smaller > 0 && (overlapWidth * overlapHeight) / smaller > 0.6
+    })
+  }
+  if (!collides(base.x, base.y)) return base
+
+  // 一格 = 自身尺寸 + 间距：相邻两格必然不重叠，连点出来的图元是一圈整齐的邻居而不是一堆斜线
+  const stepX = size.width + gap
+  const stepY = size.height + gap
+  for (let ring = 1; ring <= rings; ring += 1) {
+    const offsets: Array<[number, number]> = [
+      [ring, 0],
+      [0, ring],
+      [-ring, 0],
+      [0, -ring],
+      [ring, ring],
+      [-ring, ring],
+      [-ring, -ring],
+      [ring, -ring],
+    ]
+    for (const [dx, dy] of offsets) {
+      const x = snapToGrid(base.x + dx * stepX)
+      const y = snapToGrid(base.y + dy * stepY)
+      if (!collides(x, y)) return { x, y }
+    }
+  }
+  return base
+}
+
+/**
+ * 字符宽度估算：中文/全角 1em，其余 0.55em。与导出器的分行共用，
+ * 因此导出的换行位置与屏幕上（CSS 自动换行）**接近但不保证逐字相同**——
+ * 导出没有浏览器排版，这是 SVG 文本的固有上限（甘特导出同一处境）。
+ */
+export function estimateCharWidth(char: string): number {
+  const code = char.codePointAt(0) ?? 0
+  // 拉丁字母、数字、常见标点按半角；其余（CJK、全角标点、emoji）按整字
+  if (code < 0x2e80) return 0.55
+  return 1
+}
+
+export function measureText(text: string, fontSize: number): number {
+  let width = 0
+  for (const char of text) width += estimateCharWidth(char) * fontSize
+  return width
+}
+
+/** 按可用宽度硬换行（导出用）；`\n` 先断开，超宽再折。 */
+export function wrapText(text: string, maxWidth: number, fontSize: number): string[] {
+  const lines: string[] = []
+  for (const paragraph of text.split('\n')) {
+    if (paragraph === '') {
+      lines.push('')
+      continue
+    }
+    let current = ''
+    let currentWidth = 0
+    for (const char of paragraph) {
+      const width = estimateCharWidth(char) * fontSize
+      if (current !== '' && currentWidth + width > maxWidth) {
+        lines.push(current)
+        current = char
+        currentWidth = width
+      } else {
+        current += char
+        currentWidth += width
+      }
+    }
+    lines.push(current)
+  }
+  return lines
+}
+
+/** 节点的文本可用宽度（两侧内边距）。 */
+export function nodeTextWidth(node: Pick<WhiteboardNode, 'width'>): number {
+  return Math.max(12, node.width - WHITEBOARD_NODE_PADDING * 2)
+}
+
+/** 导出的行高：字号 × 1.5（与视图的 line-height 对齐）。 */
+export const WHITEBOARD_LINE_HEIGHT = 1.5
+
+// ---------------------------------------------------------------------------
+// T75 · 可调字号
+//
+// 档位而非滑杆：白板上的字号是「排版决定」，不是「连续参数」——13 与 13.7 肉眼分不出，
+// 但会让同一批图元的字号看起来「莫名不一致」，也让「两张图是不是同级」判断不了。
+// 档位从 10 到 80，在常用区（10–24）密、大标题区（32–80）疏，与 Word 的字号列表同一个节奏。
+//
+// 三条口径：
+//   ① **只存用户改过的**：没调过就不落 `fontSize` 键，口径回到形状默认（便签 14、其余 13）。
+//      老库因此逐字节不变，撤销也能干净地回到「默认」而不是「13 这个数字」。
+//   ② 渲染**忠实使用存下来的值**，不在读取时往档位上归。手工改过库的人写 17 就画 17；
+//      档位只在用户点 A− / A+ 时起作用（否则会出现「点一下从 17 跳到 18」的惊跳）。
+//   ③ 缩放与字号**互不牵连**：缩放是图元的包围盒，字号是里面的字。把框拉大不会把字拉大
+//      ——「框变大字变大」会让挪动一个框的手感完全失控。
+// ---------------------------------------------------------------------------
+
+/** 档位表（升序，唯一真值）。`WHITEBOARD_FONT_MIN/MAX` 由它两头取，不另写一份。 */
+export const WHITEBOARD_FONT_SIZES: readonly number[] = [10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 40, 48, 56, 64, 80]
+export const WHITEBOARD_FONT_MIN = WHITEBOARD_FONT_SIZES[0]!
+export const WHITEBOARD_FONT_MAX = WHITEBOARD_FONT_SIZES[WHITEBOARD_FONT_SIZES.length - 1]!
+/**
+ * T77 · 可输入字号的硬边界，与 `schema.ts` 的 8..96 逐字对齐。
+ *
+ * 为什么不复用上面的 MIN/MAX：那两个是**档位表**的两端（10..80），只用于「A± 最多走到哪」。
+ * 用户手动输入时能存下的范围是 schema 的范围——把 96 夹成 80 等于又一次「藏起一半能力」，
+ * 而这正是 T77 要解决的问题。
+ */
+export const WHITEBOARD_FONT_LIMIT_MIN = 8
+export const WHITEBOARD_FONT_LIMIT_MAX = 96
+
+/** 文本图元的内边距（左右各 4px，与画布 `padding: '0 4px'` 对齐）。 */
+export const WHITEBOARD_TEXT_PADDING = 4
+
+/**
+ * 一个图元实际用的字号（**唯一判断点**：视图、导出、自适应高度都走它）。
+ * 有 `fontSize` 就只认它，没有才按形状给默认值。
+ */
+export function resolveNodeFontSize(node: Pick<WhiteboardNode, 'shape' | 'fontSize'>): number {
+  if (node.fontSize !== undefined) return node.fontSize
+  return node.shape === 'note' ? WHITEBOARD_NOTE_FONT_SIZE : WHITEBOARD_FONT_SIZE
+}
+
+/**
+ * 在档位上走一格。当前值不在档位表里（手工改过库）时，往相邻方向取**最近的档**——
+ * 不能按「+1」算，否则 17 按一下变 18、再按一下才到 20，用户看到的是「有时跳一档有时跳两档」。
+ * 已经到头就停在头（不循环，也不返回越界值）。
+ */
+export function stepFontSize(current: number, direction: 1 | -1): number {
+  const sizes = WHITEBOARD_FONT_SIZES
+  if (direction > 0) {
+    for (const size of sizes) if (size > current + 0.5) return size
+    return sizes[sizes.length - 1]!
+  }
+  for (let index = sizes.length - 1; index >= 0; index -= 1) {
+    if (sizes[index]! < current - 0.5) return sizes[index]!
+  }
+  return sizes[0]!
+}
+
+/**
+ * 文本图元在「这个宽度 + 这个字号」下需要多高。
+ *
+ * 为什么必须算：文本图元没有框，高度就是文字的外廓。字号从 13 调到 32 而高度还停在 32，
+ * 文字会溢出到框外的选中环之外——看起来像「拖不动的一团字」，用户没法判断点哪儿。
+ *
+ * 宽度**不参与重算**：宽度是用户拉的换行宽度（拉宽 → 一行装更多字），字号变化只影响行数，
+ * 行数影响高度。这样「拉宽」与「调字号」是两件互不打架的事。
+ */
+export function fitTextHeight(text: string, fontSize: number, width: number): number {
+  const available = Math.max(12, width - WHITEBOARD_TEXT_PADDING * 2)
+  const lines = Math.max(1, wrapText(text, available, fontSize).length)
+  return Math.max(WHITEBOARD_MIN_HEIGHT, Math.ceil(lines * fontSize * WHITEBOARD_LINE_HEIGHT))
+}
+
+/** T74 · 贴图落进画布时的最大显示框（内容坐标）：超过就等比缩到这个框里。 */
+export const WHITEBOARD_IMAGE_MAX_WIDTH = 360
+export const WHITEBOARD_IMAGE_MAX_HEIGHT = 280
+
+/**
+ * 图片的显示尺寸：等比缩进 maxW × maxH，**不放大小图**（1×1 的像素图铺成 360 宽只会变糊），
+ * 结果按网格取整——与拖动吸附同一把尺子，贴进来的图不会跟别的图元错半格。
+ */
+export function fitImageSize(
+  natural: { width: number; height: number },
+  maxWidth: number = WHITEBOARD_IMAGE_MAX_WIDTH,
+  maxHeight: number = WHITEBOARD_IMAGE_MAX_HEIGHT,
+): { width: number; height: number } {
+  const width = natural.width > 0 ? natural.width : WHITEBOARD_DEFAULT_SIZE.image.width
+  const height = natural.height > 0 ? natural.height : WHITEBOARD_DEFAULT_SIZE.image.height
+  const scale = Math.min(1, maxWidth / width, maxHeight / height)
+  // 比最小尺寸还小的图（图标、1×1 像素）：等比抬到刚好可点中，而不是把宽高分别夹死
+  // ——分别夹会让 16×16 变成 48×32，图就变形了。
+  const liftScale = Math.max(WHITEBOARD_MIN_WIDTH / (width * scale), WHITEBOARD_MIN_HEIGHT / (height * scale), 1)
+  return {
+    width: Math.max(WHITEBOARD_MIN_WIDTH, snapToGrid(width * scale * liftScale)),
+    height: Math.max(WHITEBOARD_MIN_HEIGHT, snapToGrid(height * scale * liftScale)),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// T81 · 对齐 / 等距分布 / 移到视野中心
+//
+// 白板是「用户决定位置」，所以这一节只算「该挪到哪」，不落地、不排序、不碰 DOM。
+// 视图拿到 move 列表直接喂 `applyPatchNodes`——一次点击仍是**一条**撤销项。
+//
+// 四条口径：
+//   ① 对齐以**选区包围盒**为准（左 = 全贴 minX、右 = 右缘全贴 maxX…），不是「以先点中的那个为准」。
+//      后者在选区里混着大小图元时结果取决于点击顺序，用户没法预期。
+//   ② 分布按**空隙相等**（PPT / Figma 的 distribute spacing），不是「中心等距」：
+//      首尾两枚不动，中间按 `(跨度 - 各宽之和) / (n-1)` 重排。宽度不一时等中心距看起来是歪的。
+//   ③ 结果取整但**不吸附网格**：吸附会把不同宽度的图元算到不同的格上，刚对好的边反而破了。
+//   ④ 位置没变的图元**不写 patch**：否则「再点一次对齐」会攒出一条空撤销项。
+// ---------------------------------------------------------------------------
+
+export type WhiteboardAlignMode = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'
+/** 两个轴的名字只在「分布」与「视野居中」里用，语义相同：横 / 竖。 */
+export type WhiteboardAxis = 'horizontal' | 'vertical'
+
+/** 位移指令：`patch` 里只出现被改的那一个轴，绝不会出现「值为 undefined 的键」。 */
+export interface WhiteboardNodeMove {
+  id: string
+  patch: WhiteboardNodePatch
+}
+
+type Movable = Pick<WhiteboardNode, 'id' | 'x' | 'y' | 'width' | 'height'>
+
+/** 造一条 move；位置没变就返回 null（由调用方 filter 掉）。 */
+function moveTo(node: Movable, axis: 'x' | 'y', value: number): WhiteboardNodeMove | null {
+  const next = Math.round(value)
+  if (next === node[axis]) return null
+  return { id: node.id, patch: axis === 'x' ? { x: next } : { y: next } }
+}
+
+function compact(moves: readonly (WhiteboardNodeMove | null)[]): WhiteboardNodeMove[] {
+  return moves.filter((move): move is WhiteboardNodeMove => move !== null)
+}
+
+/**
+ * 对齐到选区包围盒。少于两枚没有「互相」可言，返回空数组（工具栏也不该给出按钮）。
+ */
+export function alignNodes(nodes: readonly Movable[], mode: WhiteboardAlignMode): WhiteboardNodeMove[] {
+  if (nodes.length < 2) return []
+  const { minX, minY, maxX, maxY } = whiteboardBounds(nodes)
+  return compact(
+    nodes.map((node) => {
+      switch (mode) {
+        case 'left':
+          return moveTo(node, 'x', minX)
+        case 'center':
+          return moveTo(node, 'x', (minX + maxX) / 2 - node.width / 2)
+        case 'right':
+          return moveTo(node, 'x', maxX - node.width)
+        case 'top':
+          return moveTo(node, 'y', minY)
+        case 'middle':
+          return moveTo(node, 'y', (minY + maxY) / 2 - node.height / 2)
+        default:
+          return moveTo(node, 'y', maxY - node.height)
+      }
+    }),
+  )
+}
+
+/**
+ * 等距分布：**首尾不动**，中间重排，让相邻图元之间的空隙相等。
+ *
+ * 少于三枚没有「中间」可排（两枚的空隙已经是它自己），返回空数组。
+ * 空隙算出来是负数（图元总宽已经超过跨度）时照原样排——那是用户自己摆成重叠的，
+ * 硬夹成 0 会把它们叠得更死。
+ */
+export function distributeNodes(nodes: readonly Movable[], axis: WhiteboardAxis): WhiteboardNodeMove[] {
+  if (nodes.length < 3) return []
+  const pos = axis === 'horizontal' ? 'x' : 'y'
+  const size = axis === 'horizontal' ? 'width' : 'height'
+  // 按起点排序；起点相同时按尺寸排，保证同样的输入永远排出同样的结果（撤销重放要能对上）
+  const sorted = [...nodes].sort((a, b) => a[pos] - b[pos] || a[size] - b[size])
+  const first = sorted[0]!
+  const last = sorted[sorted.length - 1]!
+  const span = last[pos] + last[size] - first[pos]
+  const used = sorted.reduce((sum, node) => sum + node[size], 0)
+  const gap = (span - used) / (sorted.length - 1)
+  const moves: (WhiteboardNodeMove | null)[] = []
+  let cursor = first[pos]
+  for (const node of sorted) {
+    moves.push(moveTo(node, pos, cursor))
+    cursor += node[size] + gap
+  }
+  return compact(moves)
+}
+
+/**
+ * 把选区包围盒的中心挪到给定点（视图传的是「当前视口中心」的内容坐标）。
+ *
+ * 单选也成立——「把这张便签摆到屏幕中间」是最常见的一种用法。
+ * 白板是无限画布，没有「页面」可对齐，所以这里的参照物只能是**视野**。
+ */
+export function centerNodesOn(
+  nodes: readonly Movable[],
+  axis: WhiteboardAxis,
+  center: WhiteboardPoint,
+): WhiteboardNodeMove[] {
+  if (nodes.length === 0) return []
+  const { minX, minY, maxX, maxY } = whiteboardBounds(nodes)
+  const delta = axis === 'horizontal' ? center.x - (minX + maxX) / 2 : center.y - (minY + maxY) / 2
+  return compact(nodes.map((node) => moveTo(node, axis === 'horizontal' ? 'x' : 'y', node[axis === 'horizontal' ? 'x' : 'y'] + delta)))
+}
+

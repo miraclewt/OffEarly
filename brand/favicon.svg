@@ -1,0 +1,14 @@
+<!--
+  T64 · OffEarly favicon：logo-mark.svg 的 16px 简化版。
+  标签页只有 16px，原图「开口圆环 + 右箭头」在那里会糊成一团（对照图见
+  docs/t64-favicon-final.png），所以这里闭合圆环、去掉箭头，用不透明品牌底色
+  保证深浅两种标签条下都看得清。改这里必须同步 index.html 的 base64。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <rect width="24" height="24" rx="5.4" fill="#4F46E5"/>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="7"/>
+    <path d="M12 12 V7.6"/>
+    <path d="M12 12 L15 14.2"/>
+  </g>
+</svg>

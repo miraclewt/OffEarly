@@ -1,0 +1,687 @@
+/*
+ * T38 · 视觉规范的唯一事实源（macOS 通透方向，2026-10-17 重设计）
+ *
+ * 为什么要有一个中央 token 文件：此前每个视图各自写死 hex，同一个「边框灰」在
+ * 6 个文件里出现，改一次要动 6 处，且没人能回答「项目一共用了几种颜色」。
+ * 现在所有内联样式一律引用这里的变量，色值只在此处定义。
+ *
+ * 重设计后的四条硬约束（越界即视为规范破坏）：
+ *   1. 圆角三档：8px（控件）/ 12px（卡片）/ 14px（浮层与弹窗）；
+ *   2. 阴影三档：卡片静态双层柔影 / hover 抬升影 / 浮层深影，另有分段控件滑块影；
+ *   3. 材质：侧栏与顶栏为半透明振镜（backdrop-filter），结构分隔一律发丝线；
+ *   4. 语义色仅三处且取 Apple 系统色——逾期红 / 阻塞橙 / 完成绿；
+ *      其余彩色一律是话题分类色（TOPIC_PALETTE 12 色，属于用户数据，不在此文件管理）。
+ *
+ * 注意：SVG 呈现属性（fill= / stroke= 这类 attribute，不是 style）**不解析 var()**，
+ * 所以 GanttCanvas 的 GANTT_*_FILL / GANTT_TODAY_COLOR 与 TOPIC_PALETTE 必须保持
+ * 字面量 hex——它们被测试直接断言，也是写进 vault.json 的用户数据。
+ */
+
+:root {
+  /* ── 表面 ───────────────────────────────────────────── */
+  /* 应用底色：冷灰画布，让白卡片与半透明材质自然浮起 */
+  --oe-bg: #f4f5f8;
+  --oe-surface: #ffffff;
+  /* 控件 / 输入框描边 */
+  --oe-border: rgba(0, 0, 0, 0.12);
+  /* 结构发丝线：侧栏右缘、顶栏底、面板头底 */
+  --oe-separator: rgba(0, 0, 0, 0.07);
+  /* 卡片发丝边：比结构线更弱，只给白卡片一圈"纸边" */
+  --oe-card-border: rgba(0, 0, 0, 0.05);
+  /* 周末 / 节假日列底色 */
+  --oe-off-column: #f5f5f7;
+  /* 次级填充：chip、分段控件槽、空态块 */
+  --oe-fill: rgba(120, 120, 128, 0.1);
+  /* 更弱一档：列容器、hover 行 */
+  --oe-fill-subtle: rgba(120, 120, 128, 0.06);
+  /* 甘特表泳道底 */
+  --oe-lane-fill: #fafafc;
+
+  /* ── 振镜材质（半透明 + backdrop-filter） ─────────────── */
+  --oe-material-sidebar: rgba(248, 248, 251, 0.72);
+  --oe-material-bar: rgba(255, 255, 255, 0.62);
+  --oe-material-overlay: rgba(246, 246, 248, 0.86);
+
+  /* 侧栏选中行：强调色浅底圆角行；hover 行更弱一档 */
+  --oe-row-selected: rgba(94, 92, 230, 0.13);
+  --oe-row-hover: rgba(0, 0, 0, 0.045);
+
+  /* ── 文字（Apple 灰阶，四级足够） ────────────────────── */
+  --oe-text: #1d1d1f;
+  --oe-text-secondary: #3a3a3c;
+  --oe-text-muted: #6e6e73;
+  --oe-text-faint: #98989d;
+
+  /* ── 强调：系统靛 ────────────────────────────────────── */
+  --oe-accent: #5e5ce6;
+  /* 强调浅底上的可读文字（着色按钮、选中行） */
+  --oe-accent-deep: #4038c8;
+  --oe-accent-tint: rgba(94, 92, 230, 0.13);
+  /* 强调底上的文字（实心按钮） */
+  --oe-on-accent: #ffffff;
+
+  /* ── 语义色：仅此三处，取 Apple 系统色 ────────────────── */
+  /* 逾期（红）：日期已过仍未完成 */
+  --oe-overdue: #ff3b30;
+  /* 被阻塞（橙）：前置未完成。三件套一起用 */
+  --oe-blocked: #9a4d00;
+  --oe-blocked-border: #ff9500;
+  --oe-blocked-bg: rgba(255, 149, 0, 0.14);
+  /* 完成（绿）：仅用于「已完成」的确认态，不用于话题分类 */
+  --oe-done: #34c759;
+
+  /* ── T69 白板图元底色：语义色的浅底，与上面的描边色成对使用 ──
+     卡片底色必须够淡才能压住正文；直接拿 --oe-done / --oe-overdue 当底会把黑字吃掉。 */
+  --oe-whiteboard-ok-bg: rgba(52, 199, 89, 0.13);
+  --oe-whiteboard-warn-bg: rgba(255, 149, 0, 0.15);
+  --oe-whiteboard-danger-bg: rgba(255, 59, 48, 0.12);
+
+  /* ── 圆角：三档 ───────────────────────────────────────── */
+  --oe-radius-control: 8px;
+  --oe-radius-card: 12px;
+  --oe-radius-overlay: 14px;
+
+  /* ── 阴影：三档 + 分段滑块 ────────────────────────────── */
+  --oe-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 16px rgba(0, 0, 0, 0.06);
+  --oe-shadow-hover: 0 2px 4px rgba(0, 0, 0, 0.06), 0 10px 24px rgba(0, 0, 0, 0.1);
+  --oe-shadow-pop: 0 24px 64px rgba(0, 0, 0, 0.22);
+  --oe-shadow-seg: 0 1px 3px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  /* 输入焦点环 */
+  --oe-focus-ring: 0 0 0 3.5px rgba(94, 92, 230, 0.28);
+
+  /* 模态遮罩：对话框背后压暗，不是装饰色，属于可访问性所需的层次 */
+  --oe-scrim: rgba(20, 20, 28, 0.34);
+
+  /* ── 排版 ───────────────────────────────────────────── */
+  /* 界面尺度：字号 / 间距 / 关键尺寸都乘这个旋钮（T40）。
+     默认 1 表示"设计稿原尺寸"；实际值由 styles/scale.ts 的 installUiScale()
+     按视口宽度判定后写到 <html> 的行内样式上，这里的 1 只是兜底。 */
+  --oe-ui-scale: 1;
+  --oe-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* 应用级基线：与 App.tsx 里 root 容器同源，避免两处各写一份 */
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--oe-bg);
+  color: var(--oe-text);
+  font-family: var(--oe-font);
+  /* 基准字号也走尺度：按钮/输入框/下拉都是 font-size: inherit，吃这一处即可 */
+  font-size: calc(13px * var(--oe-ui-scale, 1));
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 焦点可见性：键盘可达性不做妥协——Apple 式焦点环（光晕而非描边） */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--oe-focus-ring);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  box-shadow: var(--oe-focus-ring);
+  border-color: var(--oe-accent) !important;
+}
+
+/* 按钮与输入框继承字体，避免浏览器默认字体割裂 */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* ── 原生控件收敛为系统样式 ─────────────────────────────── */
+/* 下拉：去掉原生箭头，换发丝 chevron，避免各视图各画一份 */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%2386868b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right calc(8px * var(--oe-ui-scale, 1)) center;
+  padding-right: calc(26px * var(--oe-ui-scale, 1)) !important;
+}
+
+/* 滑杆：4px 圆槽 + 白圆钮柔影 */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: calc(4px * var(--oe-ui-scale, 1));
+  border-radius: 999px;
+  background: rgba(120, 120, 128, 0.22);
+  border: none !important;
+  padding: 0 !important;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: calc(15px * var(--oe-ui-scale, 1));
+  height: calc(15px * var(--oe-ui-scale, 1));
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 2px 5px rgba(0, 0, 0, 0.2);
+  cursor: default;
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border: none;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+/* 勾选框：跟随强调色 */
+input[type='checkbox'] {
+  accent-color: var(--oe-accent);
+}
+
+/* ── 滚动条：细圆角，不用原生粗条 ───────────────────────── */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(120, 120, 128, 0.35);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 120, 128, 0.55);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* ── 分段控件：灰槽 + 白滑块（macOS segmented control） ─── */
+.oe-seg {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(120, 120, 128, 0.14);
+  border-radius: var(--oe-radius-control);
+}
+
+.oe-seg button {
+  border: none;
+  background: transparent;
+  color: var(--oe-text-secondary);
+  border-radius: 6px;
+  padding: calc(3px * var(--oe-ui-scale, 1)) calc(14px * var(--oe-ui-scale, 1));
+  font-size: calc(12px * var(--oe-ui-scale, 1));
+  line-height: calc(18px * var(--oe-ui-scale, 1));
+  cursor: pointer;
+}
+
+.oe-seg button[aria-pressed='true'] {
+  background: var(--oe-surface);
+  color: var(--oe-text);
+  font-weight: 600;
+  box-shadow: var(--oe-shadow-seg);
+}
+
+/* ── 卡片 hover 抬升：阴影换档，不做位移（位移会与 dnd-kit 的 transform 打架） ── */
+.oe-card {
+  transition: box-shadow 0.18s ease;
+}
+
+.oe-card:hover {
+  box-shadow: var(--oe-shadow-hover);
+}
+
+/* ── 入场：新建的任务卡 / 里程碑行淡入（里程碑行再多抬 3px） ──
+   只在挂载时跑一次，用来「确认新建生效」——此前创建成功与没创建长得一模一样。
+   卡片的 transform 归 dnd-kit 所有（拖拽位移写在内联样式上），**动画里绝不碰 transform**：
+   CSS 动画的优先级高于内联样式，一旦在关键帧里写 transform，拖拽会整段失灵。
+   也不加 fill-mode —— 动画结束后不能留下任何覆盖内联样式的声明。
+   尊重系统的「减弱动态效果」。 */
+@keyframes oe-enter-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes oe-enter-lift {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.oe-card {
+  animation: oe-enter-fade 140ms ease-out;
+}
+
+.oe-row {
+  animation: oe-enter-lift 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oe-card,
+  .oe-row {
+    animation: none;
+  }
+}
+
+/* ── T49 · 笔记正文排版（任务笔记 + 知识库文档共用）───────────────────────
+   此前编辑器没有任何正文样式：列表缩进、代码块底色、表格边框全走浏览器默认，
+   同一篇笔记在任务弹窗与知识库里的观感不一致，标题也比正文大得离谱。
+   这里以 .oe-prose 为唯一入口，字号/间距一律跟界面尺度走（T40 口径）。 */
+.oe-prose {
+  color: var(--oe-text);
+  /* T50：正文字号可由用户调节（12–20px）。没有显式设置时退回 T40 的界面尺度基准 13px——
+     两个旋钮各管一件事：--oe-ui-scale 管"高分屏上整体放大"，这里管"正文我想看多大"。 */
+  font-size: var(--oe-note-font-size, calc(13px * var(--oe-ui-scale, 1)));
+  line-height: 1.75;
+  overflow-wrap: break-word;
+}
+
+.oe-prose .ProseMirror {
+  min-height: 100%;
+  padding: calc(12px * var(--oe-ui-scale, 1)) calc(16px * var(--oe-ui-scale, 1));
+  outline: none;
+  caret-color: var(--oe-accent);
+}
+
+.oe-prose .ProseMirror > * + * {
+  margin-top: 0.62em;
+}
+
+.oe-prose p {
+  margin: 0;
+}
+
+.oe-prose h1,
+.oe-prose h2,
+.oe-prose h3,
+.oe-prose h4,
+.oe-prose h5,
+.oe-prose h6 {
+  margin: 0;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--oe-text);
+}
+
+.oe-prose h1 {
+  font-size: 1.5em;
+  letter-spacing: -0.01em;
+}
+
+.oe-prose h2 {
+  font-size: 1.24em;
+}
+
+.oe-prose h3 {
+  font-size: 1.08em;
+}
+
+.oe-prose h4,
+.oe-prose h5,
+.oe-prose h6 {
+  font-size: 1em;
+  color: var(--oe-text-secondary);
+}
+
+.oe-prose ul,
+.oe-prose ol {
+  margin: 0;
+  padding-left: 1.45em;
+}
+
+.oe-prose li {
+  margin: 0.18em 0;
+}
+
+.oe-prose li::marker {
+  color: var(--oe-text-faint);
+}
+
+.oe-prose li > p {
+  margin: 0;
+}
+
+/* 任务列表：TipTap 3.32 的结构是 <ul data-type="taskList"><li data-checked><label/><div/></li>，
+   li 上没有 data-type（旧写法会落空，复选框与正文被迫换行）。勾选框与首行文字对齐，
+   缩进比普通列表紧一档。 */
+.oe-prose ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0.15em;
+}
+
+.oe-prose ul[data-type='taskList'] > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45em;
+}
+
+.oe-prose ul[data-type='taskList'] > li > label {
+  flex: 0 0 auto;
+  padding-top: 0.28em;
+}
+
+.oe-prose ul[data-type='taskList'] > li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.oe-prose ul[data-type='taskList'] > li > div > p {
+  margin: 0;
+}
+
+.oe-prose blockquote {
+  margin: 0;
+  padding: 0.1em 0 0.1em 0.85em;
+  border-left: 3px solid var(--oe-border);
+  color: var(--oe-text-secondary);
+}
+
+.oe-prose code {
+  padding: 0.1em 0.35em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  color: var(--oe-text);
+  background: var(--oe-fill);
+  border-radius: 4px;
+}
+
+.oe-prose pre {
+  padding: calc(10px * var(--oe-ui-scale, 1)) calc(12px * var(--oe-ui-scale, 1));
+  overflow-x: auto;
+  background: var(--oe-fill-subtle);
+  border: 1px solid var(--oe-separator);
+  border-radius: var(--oe-radius-control);
+  line-height: 1.6;
+}
+
+.oe-prose pre code {
+  padding: 0;
+  font-size: 0.92em;
+  background: none;
+  border-radius: 0;
+}
+
+.oe-prose hr {
+  margin: 1.1em 0;
+  border: none;
+  border-top: 1px solid var(--oe-separator);
+}
+
+.oe-prose a {
+  color: var(--oe-accent-deep);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.oe-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--oe-radius-control);
+}
+
+.oe-prose table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.96em;
+}
+
+.oe-prose th,
+.oe-prose td {
+  padding: calc(4px * var(--oe-ui-scale, 1)) calc(8px * var(--oe-ui-scale, 1));
+  border: 1px solid var(--oe-separator);
+  vertical-align: top;
+  text-align: left;
+  /*
+   * 多选单元格的底色是 `.selectedCell::after`（position: absolute; inset: 0）。
+   * 单元格本身没有定位，那个绝对定位就会一路往上找到最近的有定位祖先——
+   * 结果是选中两个格子、整页盖上一层紫。T63 修：让单元格成为它自己的包含块。
+   */
+  position: relative;
+}
+
+.oe-prose th {
+  font-weight: 600;
+  background: var(--oe-fill-subtle);
+}
+
+.oe-prose .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--oe-accent-tint);
+  pointer-events: none;
+}
+
+/*
+ * T63 · 表格行列工具条。
+ * 位置（top/left）由 NoteEditor 实测后内联给出，这里只管外观——
+ * 尺寸一律乘 --oe-ui-scale，与正文别的控件同一个尺度旋钮。
+ */
+.oe-table-bar {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: calc(1px * var(--oe-ui-scale, 1));
+  padding: calc(2px * var(--oe-ui-scale, 1));
+  background: var(--oe-surface);
+  border: 1px solid var(--oe-separator);
+  border-radius: var(--oe-radius-control);
+  /* 比卡片深一档：它压着正文文字，影子太浅会和下面的段落糊成一片（截图里读起来像「文字被截断了」）。 */
+  box-shadow: var(--oe-shadow-hover);
+}
+
+.oe-table-bar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(24px * var(--oe-ui-scale, 1));
+  height: calc(24px * var(--oe-ui-scale, 1));
+  padding: 0;
+  color: var(--oe-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: calc(6px * var(--oe-ui-scale, 1));
+  cursor: pointer;
+}
+
+.oe-table-bar button[data-danger='true'] {
+  color: var(--oe-overdue);
+}
+
+.oe-table-bar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.oe-table-bar-sep {
+  width: 1px;
+  height: calc(14px * var(--oe-ui-scale, 1));
+  margin: 0 calc(2px * var(--oe-ui-scale, 1));
+  background: var(--oe-separator);
+}
+
+/* 空文档占位：装饰节点挂 class 与 data-placeholder（见 NotePlaceholder） */
+.oe-prose .ProseMirror p.oe-note-empty::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--oe-text-faint);
+  pointer-events: none;
+}
+
+/* 图片缩放把手：静止隐藏，悬停 / 键盘聚焦才出现（不抢图片本身的点击） */
+[data-note-image-wrap] [data-note-image-handle] {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+[data-note-image-wrap]:hover [data-note-image-handle],
+[data-note-image-handle]:focus-visible {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-note-image-wrap] [data-note-image-handle] {
+    transition: none;
+  }
+}
+
+/* ── T50 · Mermaid 预览（代码块下方的只读图） ─────────────────────────────
+   装饰节点本身不进文档、也不参与 markdown 往返；它只是"这段代码画出来是什么样"的反光镜。
+   宽度跟随正文，横向溢出交给浏览器滚动——图比正文宽是常态，压扁字体反而看不清。 */
+.oe-mermaid-preview {
+  margin: calc(6px * var(--oe-ui-scale, 1)) 0 calc(2px * var(--oe-ui-scale, 1));
+  padding: calc(8px * var(--oe-ui-scale, 1)) calc(10px * var(--oe-ui-scale, 1));
+  border: 1px solid var(--oe-card-border);
+  border-radius: var(--oe-radius-card);
+  background: var(--oe-surface);
+  overflow-x: auto;
+  user-select: none;
+}
+
+.oe-mermaid-preview-body {
+  color: var(--oe-text-muted);
+  font-size: calc(11px * var(--oe-ui-scale, 1));
+  line-height: 1.7;
+}
+
+/* mermaid 的 SVG 自带 width/height 与 max-width；这里只兜两层底：
+   1) 容器更窄时等比收（height:auto 是"不收变形"的关键）；
+   2) 图比容器宽时保持原宽、由外层滚（useMaxWidth 已让 mermaid 只写 max-width）。 */
+.oe-mermaid-preview-body > svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.oe-mermaid-preview[data-mermaid-state='error'] {
+  border-color: var(--oe-overdue);
+  background: var(--oe-fill-subtle);
+}
+
+.oe-mermaid-preview[data-mermaid-state='error'] .oe-mermaid-preview-body {
+  color: var(--oe-overdue);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-word;
+}
+
+/* ── T63 · 代码着色 + mermaid 源码收放 ─────────────────────────────────────
+   着色只加颜色，不动字号与行高：一行代码的宽度一变，编辑器和导出就会各自折行，
+   而「编辑时对的、导出后错位」这种问题只有文件发出去才会被发现。
+   类名 oe-hl-* 由 domain/codeHighlight.ts 统一给出，导出文件的 EXPORT_CSS 里有一份同值定义。 */
+.oe-prose .oe-hl-kw {
+  color: var(--oe-accent-deep);
+  font-weight: 600;
+}
+
+.oe-prose .oe-hl-str {
+  color: #1a7f4b;
+}
+
+.oe-prose .oe-hl-num {
+  color: #a85400;
+}
+
+.oe-prose .oe-hl-prop {
+  color: #0a6ea8;
+}
+
+.oe-prose .oe-hl-com {
+  color: var(--oe-text-faint);
+  font-style: italic;
+}
+
+/* 源码收起：节点级装饰挂这个类。display:none 而不是 max-height:0——
+   半掩的代码块会留下一条可点击的空条，用户点进去触发「光标进入即展开」，
+   于是收起永远失败（这条是被这个循环坑过才有的）。 */
+.oe-prose pre.oe-mermaid-src-collapsed {
+  display: none;
+}
+
+.oe-mermaid-preview-head {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--oe-ui-scale, 1));
+  margin-bottom: calc(4px * var(--oe-ui-scale, 1));
+  font-size: calc(10px * var(--oe-ui-scale, 1));
+  color: var(--oe-text-faint);
+}
+
+.oe-mermaid-preview-title {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.oe-mermaid-preview-toggle {
+  margin-left: auto;
+  padding: 0 calc(5px * var(--oe-ui-scale, 1));
+  font-size: calc(10px * var(--oe-ui-scale, 1));
+  line-height: 1.8;
+  color: var(--oe-text-muted);
+  background: transparent;
+  border: 1px solid var(--oe-border);
+  border-radius: var(--oe-radius-control);
+  cursor: pointer;
+}
+
+.oe-mermaid-preview-toggle:hover {
+  color: var(--oe-accent);
+  border-color: var(--oe-accent);
+}
+
+/* ── T52 · 看板卡片 meta 行：窄卡片下的取舍 ───────────────────────────────
+   卡片的宽度由「列宽」决定，与视口宽没有线性关系（1440 视口下一列约 244px，
+   1024 视口下只剩 172px），所以这里用容器查询而不是媒体查询。
+   规则只有一条：卡太窄时先舍类别 chip，把宽度让给话题名与到期日——
+   这两条才是看板上真正要读的信息；chip 的语义在任务弹窗里仍然完整。
+   阈值 188px 的来历：chip（约 30px）+ 右侧固定组（约 90px）+ 色点与间距
+   （约 20px）之后，话题名不足 3 个字就不再值得保留了。 */
+.oe-card {
+  container-type: inline-size;
+}
+
+@container (max-width: 188px) {
+  .oe-card-kind {
+    display: none;
+  }
+}
+
+/* T61 · 再窄一档（1024 视口下卡片约 172px）：话题名与负责人/更新时间整行让位。
+   话题的位置由色点继续承担（点在上面那行的最左，不随文字消失），
+   负责人与更新时间的全文仍在卡片 title 与任务弹窗里。 */
+@container (max-width: 176px) {
+  .oe-card-topic-name {
+    display: none;
+  }
+  .oe-card-foot {
+    display: none;
+  }
+}

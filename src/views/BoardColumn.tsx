@@ -1,0 +1,309 @@
+// T15 · BoardColumn：看板的固定一列（todo/doing/review/done）。
+//
+// 列头三项（spec 6.1）：列名 + 计数 + 该列完成比。完成比口径取「该列任务的
+// 平均完成度」——按 status 定义的列里「已完成数/本列数」对 todo/doing/review
+// 三列恒为 0，只有平均进度能给出随列变化的真实完成比；done 列因 CommandBus
+// 把 status=done 的进度强压到 100，该列恒显示 100%，读数自洽。
+//
+// 列体是 dnd-kit 放置区（useDroppable）：拖到列内空白处即落到列尾。
+// 列内卡片由 SortableContext 管理同列换序。归档任务不渲染、筛选结果驱动列内容
+// 都由 BoardView 在上游保证（QueryEngine 默认排除归档）。
+
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
+import { useDroppable } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
+
+import type { Status, Task, Topic } from '../domain/types'
+import type { MsgKey, TranslateParams } from '../locales/i18n'
+import { Icon } from './IconSprite'
+import { TaskCard } from './TaskCard'
+import { fs, px, sp } from '../styles/scale'
+
+const TEXT = 'var(--oe-text)'
+const MUTED = 'var(--oe-text-muted)'
+const INDIGO = 'var(--oe-accent)'
+
+/** 列 droppable 的 id 前缀；与任务 id 空间隔离，避免误判成卡片。 */
+export const COLUMN_DROPPABLE_PREFIX = 'column:'
+
+export interface BoardColumnProps {
+  status: Status
+  /** 列名（已本地化，通常取 t(`status.${status}`)）。 */
+  title: string
+  /** 本列任务，已按 order 升序（BoardView 用 boardDnd.sortByOrder 排好）。 */
+  tasks: readonly Task[]
+  topicsById: ReadonlyMap<string, Topic>
+  /** 被未完成前置阻塞的任务 id 集合（仅 doing/review 列会非空）。 */
+  blockedIds: ReadonlySet<string>
+  /** 任务 id → 直接前置数量。 */
+  dependencyCountById: ReadonlyMap<string, number>
+  /** 判定逾期的今天（YYYY-MM-DD）。 */
+  today: string
+  t: (key: MsgKey, params?: TranslateParams) => string
+  onOpenTask?: (taskId: string) => void
+  /**
+   * 列内新建任务：回车提交标题，提交后输入框**保持展开**（连续录入，Trello 手法），
+   * Esc / 失焦收起。省略即视为「当前不可创建」，此时只渲染 createHint 灰行。
+   */
+  onCreateTask?: (title: string) => void
+  /** 不可创建时的说明（如库里一个可用话题都没有）。 */
+  createHint?: string
+}
+
+/**
+ * 新建任务行（三态）：可创建且未展开 → 「+ 新建任务」按钮；展开 → 标题输入框；
+ * 不可创建 → 灰行说明。状态是纯 UI 态，命令构造全部交给 BoardView（见 controllers/taskCreate.ts）。
+ */
+function AddTaskRow(props: {
+  status: Status
+  t: (key: MsgKey, params?: TranslateParams) => string
+  onCreateTask?: ((title: string) => void) | undefined
+  createHint?: string | undefined
+}) {
+  const { status, t, onCreateTask, createHint } = props
+  const [adding, setAdding] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  if (onCreateTask === undefined) {
+    return createHint === undefined ? null : (
+      <div
+        data-testid={`board-add-task-blocked-${status}`}
+        title={createHint}
+        style={{ padding: `${sp(6)} ${sp(4)}`, fontSize: fs(11), color: MUTED, textAlign: 'center' }}
+      >
+        {createHint}
+      </div>
+    )
+  }
+
+  if (!adding) {
+    return (
+      <button
+        type="button"
+        data-testid={`board-add-task-${status}`}
+        aria-label={t('newTask.label')}
+        onClick={() => {
+          setAdding(true)
+        }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: sp(4),
+          padding: `${sp(6)} ${sp(4)}`,
+          fontSize: fs(12),
+          color: MUTED,
+          background: 'transparent',
+          border: 'none',
+          borderRadius: 'var(--oe-radius-control)',
+          cursor: 'pointer',
+        }}
+      >
+        <Icon name="plus" size={13} />
+        <span>{t('newTask.label')}</span>
+      </button>
+    )
+  }
+
+  return (
+    <div>
+      <input
+        data-testid={`board-new-task-input-${status}`}
+        aria-label={t('newTask.placeholder')}
+        placeholder={t('newTask.placeholder')}
+        value={draft}
+        autoFocus
+        onChange={(event) => {
+          setDraft(event.currentTarget.value)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            const title = draft.trim()
+            if (title === '') return
+            onCreateTask(title)
+            setDraft('')
+          }
+          if (event.key === 'Escape') {
+            setDraft('')
+            setAdding(false)
+          }
+        }}
+        onBlur={() => {
+          setDraft('')
+          setAdding(false)
+        }}
+        style={{
+          width: '100%',
+          padding: `${sp(5)} ${sp(7)}`,
+          fontSize: fs(12),
+          color: TEXT,
+          background: 'var(--oe-surface)',
+          border: `1px solid ${INDIGO}`,
+          borderRadius: 'var(--oe-radius-control)',
+          outline: 'none',
+          boxSizing: 'border-box',
+        }}
+      />
+      <div style={{ padding: px('3px 2px 0'), fontSize: fs(11), color: MUTED }}>{t('newTask.hint')}</div>
+    </div>
+  )
+}
+
+/** 该列平均完成度（0-100 整数）；空列返回 null（列头显示 —）。 */
+export function columnProgressRatio(tasks: readonly Task[]): number | null {
+  if (tasks.length === 0) return null
+  let sum = 0
+  for (const task of tasks) {
+    const progress = Number.isFinite(task.progress) ? Math.min(100, Math.max(0, task.progress)) : 0
+    sum += progress
+  }
+  return Math.round(sum / tasks.length)
+}
+
+export function BoardColumn(props: BoardColumnProps) {
+  const { status, title, tasks, topicsById, blockedIds, dependencyCountById, today, t } = props
+
+  const { setNodeRef, isOver } = useDroppable({
+    id: `${COLUMN_DROPPABLE_PREFIX}${status}`,
+    data: { type: 'column', status },
+  })
+
+  /**
+   * 列体既是 droppable 又是滚动容器：新建的卡片插在「（已聚焦的）新建输入框」上方，
+   * 列体滚到底时这一插会把输入框顶出可视区，新卡片正好落在视野之外——
+   * 用户按完回车看起来「什么都没发生」（线上反馈的现象）。
+   * 所以提交时打个标记，卡片数量真的变多后把列体滚到底，新卡片与输入框一起露出。
+   */
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const revealOnAddRef = useRef(false)
+  const prevCountRef = useRef(tasks.length)
+  const attachScroller = useCallback(
+    (node: HTMLDivElement | null) => {
+      scrollerRef.current = node
+      setNodeRef(node)
+    },
+    [setNodeRef],
+  )
+  useEffect(() => {
+    const grew = tasks.length > prevCountRef.current
+    prevCountRef.current = tasks.length
+    if (!revealOnAddRef.current) return
+    revealOnAddRef.current = false
+    const scroller = scrollerRef.current
+    if (!grew || scroller === null) return
+    scroller.scrollTop = scroller.scrollHeight
+  }, [tasks.length])
+  const handleCreate = useCallback(
+    (taskTitle: string) => {
+      revealOnAddRef.current = true
+      props.onCreateTask?.(taskTitle)
+    },
+    [props.onCreateTask],
+  )
+
+  const ratio = columnProgressRatio(tasks)
+  const ratioText = ratio === null ? '—' : `${ratio}%`
+
+  const headerCountStyle: CSSProperties = {
+    padding: `0 ${sp(7)}`,
+    fontSize: fs(11),
+    lineHeight: sp(18),
+    color: 'var(--oe-text-muted)',
+    background: 'var(--oe-fill)',
+    borderRadius: sp(999),
+  }
+
+  return (
+    <section
+      data-testid={`board-column-${status}`}
+      data-status={status}
+      style={{
+        flex: 1,
+        minWidth: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'var(--oe-fill-subtle)',
+        borderRadius: 'var(--oe-radius-card)',
+      }}
+    >
+      <header
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: sp(8),
+          padding: `${sp(10)} ${sp(12)} ${sp(6)}`,
+        }}
+      >
+        <span style={{ fontSize: fs(13), fontWeight: 650, color: TEXT }}>{title}</span>
+        <span data-testid={`board-column-count-${status}`} style={headerCountStyle}>
+          {tasks.length}
+        </span>
+        <span style={{ flex: 1 }} />
+        {/* T61：这个数字原来只有一个笼统的 title（悬停才有、读屏读不到），
+            而「该列平均完成度」恰恰是看板上最容易被误读的读数（有人会以为是完成率）。
+            改成一句自述：鼠标悬停看得到，读屏也念得出，空列不再显示一个无解释的「—」。 */}
+        <span
+          data-testid={`board-column-ratio-${status}`}
+          role="img"
+          aria-label={ratio === null ? t('board.columnRatioEmpty') : t('board.columnRatio', { n: ratio })}
+          title={ratio === null ? t('board.columnRatioEmpty') : t('board.columnRatio', { n: ratio })}
+          style={{ fontSize: fs(11), color: 'var(--oe-text-faint)' }}
+        >
+          {ratioText}
+        </span>
+      </header>
+
+      <div
+        ref={attachScroller}
+        data-testid={`board-dropzone-${status}`}
+        data-dragover={isOver ? 'true' : 'false'}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          padding: sp(8),
+          display: 'flex',
+          flexDirection: 'column',
+          gap: sp(8),
+          background: isOver ? 'var(--oe-fill)' : 'transparent',
+          borderRadius: 'var(--oe-radius-card)',
+        }}
+      >
+        <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
+          {tasks.map((task) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              topic={topicsById.get(task.topicId)}
+              dependencyCount={dependencyCountById.get(task.id) ?? 0}
+              blocked={blockedIds.has(task.id)}
+              today={today}
+              t={t}
+              onOpenTask={props.onOpenTask}
+            />
+          ))}
+        </SortableContext>
+
+        {tasks.length === 0 ? (
+          <div
+            data-testid={`board-column-empty-${status}`}
+            style={{ padding: `${sp(24)} 0`, textAlign: 'center', fontSize: fs(12), color: MUTED }}
+          >
+            {t('board.emptyColumn')}
+          </div>
+        ) : null}
+
+        {/* 列底新建入口：贴在看板列体内，不占列头的三项信息位（spec 7「列头 3 项」） */}
+        <AddTaskRow
+          status={status}
+          t={t}
+          onCreateTask={props.onCreateTask === undefined ? undefined : handleCreate}
+          createHint={props.createHint}
+        />
+      </div>
+    </section>
+  )
+}
+
+export default BoardColumn

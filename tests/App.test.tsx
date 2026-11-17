@@ -1,0 +1,683 @@
+// @vitest-environment jsdom
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { App } from '../src/App'
+import type { Session, StartupPorts } from '../src/App'
+import { patchTaskCommand } from '../src/domain/commandBus'
+import { createNewVault, createVaultRepository } from '../src/persistence/vaultRepository'
+import { asDirHandle, makeDir, makeFile } from './persistence/mockFs'
+import type { MockDirHandle } from './persistence/mockFs'
+import type { VaultDirHandle } from '../src/persistence/handleStore'
+import type { Vault } from '../src/domain/types'
+
+function vaultJson(): string {
+  return JSON.stringify(createNewVault())
+}
+
+function dirWith(entries: { vault?: string; files?: string[] }): MockDirHandle {
+  const files = entries.vault === undefined ? [] : [makeFile('vault.json', { text: entries.vault })]
+  const dir = makeDir('vault', { files })
+  for (const name of entries.files ?? []) {
+    dir.dirs.set(name, makeDir(name))
+  }
+  return dir
+}
+
+/**
+ * 只替掉「目录从哪来」，load/save/校验/写盘全走真实 VaultRepository 与 mock 文件系统，
+ * 这样「不写盘」这类断言仍然落在字节上，而不是落在 spy 调用次数上。
+ */
+function ports(options: {
+  stored?: VaultDirHandle | null
+  dir?: MockDirHandle
+  hasPermission?: boolean
+  requestResult?: boolean
+  /** 传进来就能让落盘按需失败，用来构造「保存失败 → 重试」链路。 */
+  saveGate?: { failing: boolean }
+}): StartupPorts {
+  const dir = asDirHandle(options.dir ?? dirWith({}))
+  return {
+    loadStoredDir: vi.fn(async () => (options.stored === undefined ? dir : options.stored)),
+    storeDir: vi.fn(async () => true),
+    hasWritePermission: vi.fn(async () => options.hasPermission ?? true),
+    requestWritePermission: vi.fn(async () => options.requestResult ?? true),
+    pickDir: vi.fn(async () => dir),
+    openRepository: vi.fn((handle: VaultDirHandle) => {
+      const repository = createVaultRepository(handle)
+      const gate = options.saveGate
+      if (gate === undefined) return repository
+      return {
+        ...repository,
+        save: async (vault: Vault) => {
+          if (gate.failing) throw new Error('disk full')
+          await repository.save(vault)
+        },
+      }
+    }),
+  }
+}
+
+async function renderApp(p: StartupPorts, onSession?: (session: Session) => void) {
+  render(<App ports={p} onSession={onSession} />)
+  return p
+}
+
+// 库打开前 locale 走 navigator.language；锁定为中文以断言启动屏中文案
+beforeEach(() => {
+  Object.defineProperty(window.navigator, 'language', { value: 'zh-CN', configurable: true })
+})
+
+afterEach(() => {
+  cleanup()
+})
+
+describe('启动流程：连接数据文件夹', () => {
+  it('没有已保存的目录句柄时，首屏要求连接数据文件夹', async () => {
+    await renderApp(ports({ stored: null }))
+
+    expect(await screen.findByText('连接数据文件夹')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '选择文件夹' })).toBeTruthy()
+  })
+
+  it('选中空目录时先问「在此创建新库？」，确认前不写盘', async () => {
+    await renderApp(ports({ stored: null }))
+    fireEvent.click(await screen.findByRole('button', { name: '选择文件夹' }))
+
+    expect(await screen.findByText('在此创建新库？')).toBeTruthy()
+    expect(screen.queryByText('待办')).toBeNull()
+  })
+
+  it('确认后初始化 vault.json 并进入应用', async () => {
+    const dir = dirWith({ files: ['assets', '.backup'] })
+    await renderApp(ports({ stored: null, dir }))
+    fireEvent.click(await screen.findByRole('button', { name: '选择文件夹' }))
+    fireEvent.click(await screen.findByRole('button', { name: '创建数据库' }))
+
+    await waitFor(() => expect(screen.getByText('待办')).toBeTruthy())
+    const written = dir.files.get('vault.json')
+    expect(written && new TextDecoder().decode(written.bytes())).toContain('"vaultId"')
+  })
+
+  it('用户取消目录选择（AbortError）时留在连接屏，不显示错误', async () => {
+    const abort = new Error('canceled')
+    abort.name = 'AbortError'
+    const p = ports({ stored: null })
+    ;(p.pickDir as ReturnType<typeof vi.fn>).mockRejectedValue(abort)
+    await renderApp(p)
+
+    fireEvent.click(await screen.findByRole('button', { name: '选择文件夹' }))
+
+    await waitFor(() => expect(p.pickDir).toHaveBeenCalled())
+    expect(await screen.findByText('连接数据文件夹')).toBeTruthy()
+    expect(screen.queryByText('无法打开数据文件夹')).toBeNull()
+  })
+})
+
+describe('启动流程：已记住的目录句柄', () => {
+  it('有权限时不再要求选择文件夹，含 vault.json 的目录直接进入空看板', async () => {
+    const dir = dirWith({ vault: vaultJson() })
+    await renderApp(ports({ dir }))
+
+    await waitFor(() => expect(screen.getByText('待办')).toBeTruthy())
+    expect(screen.queryByText('连接数据文件夹')).toBeNull()
+    expect(screen.getAllByText('0')).toHaveLength(4)
+  })
+
+  it('已存在但无写权限时，一次点击授权后进入', async () => {
+    const dir = dirWith({ vault: vaultJson() })
+    await renderApp(ports({ stored: asDirHandle(dir), hasPermission: false }))
+
+    fireEvent.click(await screen.findByRole('button', { name: '授权并继续' }))
+
+    await waitFor(() => expect(screen.getByText('待办')).toBeTruthy())
+  })
+
+  it('授权被拒时停在授权屏，不进入应用', async () => {
+    const dir = dirWith({ vault: vaultJson() })
+    await renderApp(ports({ stored: asDirHandle(dir), hasPermission: false, requestResult: false }))
+
+    fireEvent.click(await screen.findByRole('button', { name: '授权并继续' }))
+
+    await waitFor(() => expect(screen.queryByText('待办')).toBeNull())
+    expect(screen.getByRole('button', { name: '授权并继续' })).toBeTruthy()
+  })
+})
+
+/** 切换文件夹用例：两个名字与 vaultId 都不同的库，方便断言「现在到底开着哪一个」。 */
+function namedDir(name: string, vaultId: string): MockDirHandle {
+  const raw = JSON.parse(vaultJson()) as Vault
+  raw.vaultId = vaultId
+  return makeDir(name, {
+    files: [makeFile('vault.json', { text: JSON.stringify(raw) })],
+    dirs: [makeDir('assets'), makeDir('.backup')],
+  })
+}
+
+async function openSettings(): Promise<void> {
+  fireEvent.click(await screen.findByTestId('sidebar-open-settings'))
+  await screen.findByTestId('settings-panel')
+}
+
+describe('切换数据文件夹：选过一次之后仍然能再选一个', () => {
+  it('设置面板显示当前文件夹；换库后新句柄被记住、新库真正生效', async () => {
+    const first = namedDir('first-vault', 'vault-first')
+    const second = namedDir('second-vault', 'vault-second')
+    const p = ports({ dir: first })
+    p.pickDir = vi.fn(async () => asDirHandle(second))
+    await renderApp(p)
+    await screen.findByTestId('board')
+
+    await openSettings()
+    expect(screen.getByTestId('settings-folder-name').textContent).toContain('first-vault')
+    fireEvent.click(screen.getByTestId('settings-folder-switch'))
+
+    // 启动记一次 first、换库记一次 second；没有回到 need-dir
+    await waitFor(() => expect(p.storeDir).toHaveBeenCalledTimes(2))
+    expect(p.storeDir).toHaveBeenLastCalledWith(asDirHandle(second))
+    expect(screen.queryByText('连接数据文件夹')).toBeNull()
+
+    await openSettings()
+    expect(screen.getByTestId('settings-about').textContent).toContain('vault-second')
+    expect(screen.getByTestId('settings-folder-name').textContent).toContain('second-vault')
+  })
+
+  it('取消目录选择时原地保持当前库，绝不退回连接屏', async () => {
+    const abort = new Error('canceled')
+    abort.name = 'AbortError'
+    const first = namedDir('first-vault', 'vault-first')
+    const p = ports({ dir: first })
+    ;(p.pickDir as ReturnType<typeof vi.fn>).mockRejectedValue(abort)
+    await renderApp(p)
+    await screen.findByTestId('board')
+    await openSettings()
+
+    fireEvent.click(screen.getByTestId('settings-folder-switch'))
+
+    await waitFor(() => expect(p.pickDir).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId('board')).toBeTruthy()
+    expect(screen.getByTestId('settings-panel')).toBeTruthy()
+    expect(screen.queryByText('连接数据文件夹')).toBeNull()
+    expect(p.storeDir).toHaveBeenCalledTimes(1)
+  })
+
+  it('切换前先 flush 未落盘的改动，最后一次编辑不丢', async () => {
+    const first = namedDir('first-vault', 'vault-first')
+    const second = namedDir('second-vault', 'vault-second')
+    const p = ports({ dir: first })
+    p.pickDir = vi.fn(async () => asDirHandle(second))
+    const captured: Session[] = []
+    await renderApp(p, (session) => captured.push(session))
+    await screen.findByTestId('board')
+
+    act(() => {
+      captured[0]?.store.update((v) => ({ ...v, appVersion: 'flushed-before-switch' }))
+    })
+    await waitFor(() => expect(screen.getByTestId('save-indicator').textContent).toContain('未保存'))
+
+    await openSettings()
+    fireEvent.click(screen.getByTestId('settings-folder-switch'))
+
+    await waitFor(() => expect(p.storeDir).toHaveBeenCalledTimes(2))
+    expect(new TextDecoder().decode(first.files.get('vault.json')?.bytes())).toContain('flushed-before-switch')
+  })
+
+  it('当前库保存失败时拒绝切换并给出提示，不把未落盘数据留在旧库里不管', async () => {
+    const first = namedDir('first-vault', 'vault-first')
+    const second = namedDir('second-vault', 'vault-second')
+    const gate = { failing: true }
+    const p = ports({ dir: first, saveGate: gate })
+    p.pickDir = vi.fn(async () => asDirHandle(second))
+    const captured: Session[] = []
+    await renderApp(p, (session) => captured.push(session))
+    await screen.findByTestId('board')
+
+    act(() => {
+      captured[0]?.store.update((v) => ({ ...v }))
+    })
+    await openSettings()
+    fireEvent.click(screen.getByTestId('settings-folder-switch'))
+
+    await waitFor(() => expect(screen.getByTestId('shell-notice').textContent).toContain('未保存的改动'))
+    expect(screen.getByTestId('board')).toBeTruthy()
+    expect(p.storeDir).toHaveBeenCalledTimes(1)
+  })
+
+  it('记住的目录要重新授权时，「改用其他文件夹」能直接换库', async () => {
+    const first = namedDir('first-vault', 'vault-first')
+    const second = namedDir('second-vault', 'vault-second')
+    const p = ports({ stored: asDirHandle(first), hasPermission: false })
+    p.pickDir = vi.fn(async () => asDirHandle(second))
+    await renderApp(p)
+
+    fireEvent.click(await screen.findByRole('button', { name: '改用其他文件夹' }))
+
+    await waitFor(() => expect(screen.getByTestId('board')).toBeTruthy())
+    expect(p.storeDir).toHaveBeenCalledWith(asDirHandle(second))
+  })
+
+  it('只读安全模式也有「选择其他文件夹」出口', async () => {
+    const broken = makeDir('broken-vault', {
+      files: [makeFile('vault.json', { text: '{"schemaVersion":1,"vaultId":"abc"' })],
+    })
+    const second = namedDir('second-vault', 'vault-second')
+    const p = ports({ dir: broken })
+    p.pickDir = vi.fn(async () => asDirHandle(second))
+    await renderApp(p)
+
+    expect(await screen.findByText('只读安全模式')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('safe-mode-switch-folder'))
+
+    await waitFor(() => expect(screen.getByTestId('board')).toBeTruthy())
+    expect(p.storeDir).toHaveBeenCalledWith(asDirHandle(second))
+  })
+})
+
+describe('启动流程：损坏的库进入只读安全模式', () => {
+  it('vault.json 语法坏时给出安全模式占位，且不写盘', async () => {
+    const original = '{"schemaVersion":1,"vaultId":"abc"'
+    const dir = dirWith({ vault: original })
+    await renderApp(ports({ dir }))
+
+    expect(await screen.findByText('只读安全模式')).toBeTruthy()
+    expect(screen.queryByText('待办')).toBeNull()
+    const file = dir.files.get('vault.json')
+    expect(file && new TextDecoder().decode(file.bytes())).toBe(original)
+  })
+
+  it('vault.json 结构非法时同样只读，不覆盖原文件', async () => {
+    const original = JSON.stringify({ schemaVersion: 1, vaultId: 'abc' })
+    const dir = dirWith({ vault: original })
+    await renderApp(ports({ dir }))
+
+    expect(await screen.findByText('只读安全模式')).toBeTruthy()
+    const file = dir.files.get('vault.json')
+    expect(file && new TextDecoder().decode(file.bytes())).toBe(original)
+  })
+
+  it('schemaVersion 高于本版本时提示升级 OffEarly', async () => {
+    const dir = dirWith({ vault: JSON.stringify({ ...JSON.parse(vaultJson()), schemaVersion: 2 }) })
+    await renderApp(ports({ dir }))
+
+    expect(await screen.findByText(/请升级 OffEarly/)).toBeTruthy()
+  })
+})
+
+describe('T28 收尾：安全模式「选择其他备份」经备份面板挑快照恢复', () => {
+  it('safe-mode 无会话时也能列 .backup/、恢复后重走启动流程回到可写', async () => {
+    const snapshotText = vaultJson()
+    const dir = dirWith({ vault: '{"schemaVersion":1,"vaultId":"abc"' })
+    dir.dirs.set(
+      '.backup',
+      makeDir('.backup', {
+        files: [makeFile('vault-20261015-093012.json', { text: snapshotText })],
+      }),
+    )
+    await renderApp(ports({ dir }))
+
+    expect(await screen.findByText('只读安全模式')).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId('safe-mode-choose-other'))
+    await screen.findByTestId('backup-panel')
+    await waitFor(() =>
+      expect(screen.getByTestId('backup-snapshot-item-vault-20261015-093012.json')).toBeTruthy(),
+    )
+
+    fireEvent.click(screen.getByTestId('backup-snapshot-restore-vault-20261015-093012.json'))
+    fireEvent.click(await screen.findByTestId('backup-snapshot-restore-confirm'))
+
+    // 磁盘被快照覆盖 → 重新 openDir → 健康库 → 回到看板
+    await waitFor(() => expect(screen.getByText('待办')).toBeTruthy())
+    const file = dir.files.get('vault.json')
+    expect(file && new TextDecoder().decode(file.bytes())).toBe(snapshotText)
+  })
+})
+
+function decodeVault(dir: MockDirHandle): Vault {
+  const file = dir.files.get('vault.json')
+  if (file === undefined) throw new Error('vault.json 不存在')
+  return JSON.parse(new TextDecoder().decode(file.bytes())) as Vault
+}
+
+/** 顶栏保存指示 / Ctrl+S / locale 源 —— T04、T07、T08 的接线在此收口（T10）。 */
+describe('应用外壳：保存指示、Ctrl+S 与 locale 源', () => {
+  async function openReady(options: { saveGate?: { failing: boolean }; locale?: 'en' } = {}) {
+    const raw = JSON.parse(vaultJson()) as Vault
+    if (options.locale !== undefined) raw.settings.locale = options.locale
+    const dir = dirWith({ vault: JSON.stringify(raw) })
+    const captured: Session[] = []
+    await renderApp(ports({ dir, ...options }), (session) => captured.push(session))
+    await waitFor(() => expect(screen.getByTestId('board')).toBeTruthy())
+    const session = captured[0]
+    if (session === undefined) throw new Error('会话未建立')
+    return { dir, session }
+  }
+
+  it('库打开后顶栏出现保存指示，初始为已保存', async () => {
+    await openReady()
+
+    const indicator = screen.getByTestId('save-indicator')
+    expect(indicator.getAttribute('data-state')).toBe('saved')
+    expect(screen.getByText('已保存')).toBeTruthy()
+    // 顶栏确实在页面里，而不只是渲染到了游离节点
+    expect(screen.getByTestId('topbar').contains(indicator)).toBe(true)
+  })
+
+  it('Ctrl+S 立即落盘：提示转已保存，磁盘 revision 递增', async () => {
+    const { dir, session } = await openReady()
+    expect(decodeVault(dir).revision).toBe(0)
+
+    act(() => {
+      session.store.update((vault) => ({ ...vault }))
+    })
+    expect(screen.getByText('未保存')).toBeTruthy()
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+    expect(decodeVault(dir).revision).toBe(1)
+  })
+
+  it('没有未保存变更时 Ctrl+S 不写盘', async () => {
+    const { dir } = await openReady()
+    const before = new TextDecoder().decode(dir.files.get('vault.json')?.bytes())
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+
+    expect(new TextDecoder().decode(dir.files.get('vault.json')?.bytes())).toBe(before)
+  })
+
+  it('保存失败时顶栏给出保存失败与重试，修好后点重试恢复已保存', async () => {
+    const gate = { failing: true }
+    const { dir, session } = await openReady({ saveGate: gate })
+
+    act(() => {
+      session.store.update((vault) => ({ ...vault }))
+    })
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+
+    await waitFor(() => expect(screen.getByText('保存失败')).toBeTruthy())
+    expect(decodeVault(dir).revision).toBe(0)
+
+    gate.failing = false
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+    expect(decodeVault(dir).revision).toBe(1)
+  })
+
+  it('locale 源是 VaultStore：库里是 en 就直接按英文渲染', async () => {
+    await openReady({ locale: 'en' })
+
+    expect(screen.getByText('To Do')).toBeTruthy()
+    expect(screen.queryByText('待办')).toBeNull()
+  })
+
+  it('改 settings.locale 后整棵树跟着换语言（T04 接线收口）', async () => {
+    const { session } = await openReady()
+    expect(screen.getByText('待办')).toBeTruthy()
+
+    act(() => {
+      session.store.update((vault) => ({
+        ...vault,
+        settings: { ...vault.settings, locale: 'en' },
+      }))
+    })
+
+    await waitFor(() => expect(screen.getByText('To Do')).toBeTruthy())
+    expect(screen.queryByText('待办')).toBeNull()
+  })
+})
+
+/**
+ * T34/T35：新建任务入口与设置面板在**真实会话**里的接线。
+ * 用真 VaultStore + 真 VaultRepository + mock 文件系统，因此「能不能创建」「设置改没改」
+ * 一路验到磁盘字节上（而不是验某个回调被调了几次）。
+ */
+describe('应用外壳：新建任务与设置面板', () => {
+  async function openBoard() {
+    const dir = dirWith({ vault: vaultJson() })
+    const captured: Session[] = []
+    await renderApp(ports({ dir }), (session) => captured.push(session))
+    await waitFor(() => expect(screen.getByTestId('board')).toBeTruthy())
+    const session = captured[0]
+    if (session === undefined) throw new Error('会话未建立')
+    return { dir, session }
+  }
+
+  it('无话题时列底给提示；建话题后可在列内新建任务，并随 Ctrl+S 落盘', async () => {
+    const { dir } = await openBoard()
+
+    // 新库没有话题：topicId 是必填字段，列底不给入口；改为看板顶部的引导条（T52）。
+    // 四列不再各重复一行灰字——同一句话出现在四个地方既吵又没有出路。
+    expect(screen.getByTestId('board-guide')).toBeTruthy()
+    expect(screen.queryByTestId('board-add-task-blocked-todo')).toBeNull()
+    expect(screen.queryByTestId('board-add-task-todo')).toBeNull()
+
+    // 侧栏建一个话题
+    fireEvent.click(screen.getByTestId('topic-add-root'))
+    const nameInput = screen.getByTestId('topic-name-input')
+    fireEvent.change(nameInput, { target: { value: '支付重构' } })
+    fireEvent.keyDown(nameInput, { key: 'Enter' })
+
+    // 入口出现 → 列内新建
+    fireEvent.click(await screen.findByTestId('board-add-task-doing'))
+    const input = screen.getByTestId('board-new-task-input-doing')
+    fireEvent.change(input, { target: { value: '接入支付回调' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    // 立刻出现在看板：卡片 + 列计数
+    await waitFor(() => expect(screen.getByText('接入支付回调')).toBeTruthy())
+    expect(screen.getByTestId('board-column-count-doing').textContent).toBe('1')
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+
+    const saved = decodeVault(dir)
+    expect(saved.tasks.map((task) => task.title)).toEqual(['接入支付回调'])
+    expect(saved.tasks[0]?.status).toBe('doing')
+    expect(saved.tasks[0]?.topicId).toBe(saved.topics[0]?.id)
+  })
+
+  it('侧栏「设置」打开真面板（不再是「面板尚未实现」占位），改语言即时生效并落盘', async () => {
+    const { dir } = await openBoard()
+
+    fireEvent.click(screen.getByTestId('sidebar-open-settings'))
+    expect(await screen.findByTestId('settings-panel')).toBeTruthy()
+    // 占位提示不再出现
+    expect(screen.queryByTestId('shell-notice')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('settings-locale-en'))
+    await waitFor(() => expect(screen.getByText('To Do')).toBeTruthy())
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(screen.getByText('Saved')).toBeTruthy())
+    expect(decodeVault(dir).settings.locale).toBe('en')
+  })
+
+  it('设置面板改工作日历：工作日与假期都写进 vault.json', async () => {
+    const { dir } = await openBoard()
+
+    fireEvent.click(screen.getByTestId('sidebar-open-settings'))
+    await screen.findByTestId('settings-panel')
+
+    fireEvent.click(screen.getByTestId('settings-workday-6'))
+    fireEvent.change(screen.getByTestId('settings-holidays-input'), { target: { value: '2026-10-01' } })
+    fireEvent.click(screen.getByTestId('settings-holidays-add'))
+    expect(screen.getByTestId('settings-holidays-item-2026-10-01')).toBeTruthy()
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+
+    const saved = decodeVault(dir)
+    expect(saved.settings.calendar.workdays).toEqual([1, 2, 3, 4, 5, 6])
+    expect(saved.settings.calendar.holidays).toEqual(['2026-10-01'])
+  })
+})
+
+/**
+ * T52（QA 巡检后的修复）：空库引导 + 撤销入口。
+ *
+ * 两条都是「功能其实都在、只差一个入口」：看板在无话题时只重复灰字，
+ * CommandBus 一直有完整的 undo/redo 栈却只有任务弹窗绑了快捷键。
+ */
+describe('T52：空库引导与顶栏撤销', () => {
+  async function openBoard() {
+    const dir = dirWith({ vault: vaultJson() })
+    const captured: Session[] = []
+    await renderApp(ports({ dir }), (session) => captured.push(session))
+    await waitFor(() => expect(screen.getByTestId('board')).toBeTruthy())
+    const session = captured[0]
+    if (session === undefined) throw new Error('会话未建立')
+    return { dir, session }
+  }
+
+  it('空库引导条的「新建话题」能建出话题，随后列内新建入口出现', async () => {
+    const { dir } = await openBoard()
+
+    expect(screen.getByTestId('board-guide')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('board-create-topic'))
+
+    await waitFor(() => expect(screen.queryByTestId('board-guide')).toBeNull())
+    expect(screen.getByTestId('board-add-task-todo')).toBeTruthy()
+    expect(screen.getByTestId('topic-tree').textContent).toContain('未命名话题')
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+    expect(decodeVault(dir).topics.map((topic) => topic.name)).toEqual(['未命名话题'])
+  })
+
+  it('顶栏撤销 / 重做按钮与 Ctrl+Z 都能退回刚建的任务', async () => {
+    await openBoard()
+
+    fireEvent.click(screen.getByTestId('topic-add-root'))
+    const nameInput = screen.getByTestId('topic-name-input')
+    fireEvent.change(nameInput, { target: { value: '支付重构' } })
+    fireEvent.keyDown(nameInput, { key: 'Enter' })
+
+    fireEvent.click(await screen.findByTestId('board-add-task-doing'))
+    const input = screen.getByTestId('board-new-task-input-doing')
+    fireEvent.change(input, { target: { value: '接入支付回调' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(screen.getByTestId('board-column-count-doing').textContent).toBe('1'))
+
+    // 初始态：撤销栈刚被 push，重做栈是空的
+    const undo = screen.getByTestId('undo-button') as HTMLButtonElement
+    const redo = screen.getByTestId('redo-button') as HTMLButtonElement
+    expect(undo.disabled).toBe(false)
+    expect(redo.disabled).toBe(true)
+
+    fireEvent.click(undo)
+    await waitFor(() => expect(screen.getByTestId('board-column-count-doing').textContent).toBe('0'))
+    expect((screen.getByTestId('redo-button') as HTMLButtonElement).disabled).toBe(false)
+
+    fireEvent.click(screen.getByTestId('redo-button'))
+    await waitFor(() => expect(screen.getByTestId('board-column-count-doing').textContent).toBe('1'))
+
+    // 键盘路径：焦点不在输入框时 Ctrl+Z 生效
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+    await waitFor(() => expect(screen.getByTestId('board-column-count-doing').textContent).toBe('0'))
+  })
+})
+
+describe('远程重载：不覆盖本地编辑，也不保留失效撤销栈', () => {
+  function vaultWithTask(title: string): Vault {
+    const vault = createNewVault()
+    return {
+      ...vault,
+      topics: [{ id: 'topic-1', name: '话题', color: '#6366f1', parentId: null, order: 'U', archived: false }],
+      tasks: [{
+        id: 'task-1',
+        topicId: 'topic-1',
+        title,
+        status: 'todo',
+        kind: 'feature',
+        priority: 'P1',
+        progress: 0,
+        tags: [],
+        note: '',
+        order: 'U',
+        createdAt: '2026-10-22T09:00:00.000Z',
+        updatedAt: '2026-10-22T09:00:00.000Z',
+        archived: false,
+      }],
+    }
+  }
+
+  it('异步重载等待期间的本地编辑保留为未保存，而不是被磁盘版本覆盖', async () => {
+    const initial = vaultWithTask('初始标题')
+    const dir = dirWith({ vault: JSON.stringify(initial) })
+    const p = ports({ dir })
+    let hold = false
+    let started = false
+    const loadGate: { release: ((vault: Vault | null) => void) | null } = { release: null }
+    const openRepository = p.openRepository
+    p.openRepository = (handle) => {
+      const repository = openRepository(handle)
+      return {
+        ...repository,
+        load: () => {
+          if (!hold) return repository.load()
+          started = true
+          return new Promise<Vault | null>((resolve) => { loadGate.release = resolve })
+        },
+      }
+    }
+    const captured: Session[] = []
+    await renderApp(p, (session) => captured.push(session))
+    await waitFor(() => expect(screen.getByTestId('board')).toBeTruthy())
+    const session = captured[0]
+    if (session === undefined) throw new Error('会话未建立')
+
+    const remote: Vault = {
+      ...initial,
+      revision: 1,
+      tasks: initial.tasks.map((task) => ({ ...task, title: '远程标题' })),
+    }
+    dir.files.set('vault.json', makeFile('vault.json', { text: JSON.stringify(remote) }))
+    hold = true
+    const checking = session.watcher.check()
+    await waitFor(() => expect(started).toBe(true))
+
+    act(() => {
+      session.bus.apply(patchTaskCommand(session.store.getVault(), 'task-1', { title: '本地未保存' }))
+    })
+    expect(session.autosave.isDirty()).toBe(true)
+
+    loadGate.release?.(remote)
+    await checking
+    expect(session.store.getVault().tasks[0]?.title).toBe('本地未保存')
+    expect(session.autosave.isDirty()).toBe(true)
+    session.watcher.stop()
+    session.autosave.stop()
+  })
+
+  it('接受远程版本后清空撤销/重做栈，避免对已删除对象执行旧逆命令', async () => {
+    const initial = vaultWithTask('初始标题')
+    const dir = dirWith({ vault: JSON.stringify(initial) })
+    const captured: Session[] = []
+    await renderApp(ports({ dir }), (session) => captured.push(session))
+    await waitFor(() => expect(screen.getByTestId('board')).toBeTruthy())
+    const session = captured[0]
+    if (session === undefined) throw new Error('会话未建立')
+
+    act(() => {
+      session.bus.apply(patchTaskCommand(session.store.getVault(), 'task-1', { title: '本地已保存' }))
+    })
+    await session.autosave.saveNow()
+    expect(session.bus.undoDepth()).toBe(1)
+
+    const remote: Vault = { ...initial, revision: 2, tasks: [] }
+    dir.files.set('vault.json', makeFile('vault.json', { text: JSON.stringify(remote) }))
+    await session.watcher.check()
+
+    expect(session.store.getVault().tasks).toHaveLength(0)
+    expect(session.bus.undoDepth()).toBe(0)
+    expect(session.bus.redoDepth()).toBe(0)
+    expect(session.bus.undo()).toBe(false)
+    expect((screen.getByTestId('undo-button') as HTMLButtonElement).disabled).toBe(true)
+    session.watcher.stop()
+    session.autosave.stop()
+  })
+})
